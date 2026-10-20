@@ -1,0 +1,12 @@
+/* Shared, prominent navigation between the calculator and the teaching demo. */
+.page-switch{display:flex;align-items:center;gap:16px;min-height:80px;min-width:280px;padding:14px 20px;border:2px solid #fff7c2;border-radius:14px;background:linear-gradient(120deg,#ffe69c,#ffc24f);color:#12232d;text-decoration:none;box-shadow:0 5px 18px #0005;font-family:inherit;line-height:1.35;flex-shrink:0}
+.page-switch.to-demo{background:linear-gradient(120deg,#9af4ee,#50c9f2);border-color:#cafffb}
+.page-switch small{display:block;font-size:12px;font-weight:600;letter-spacing:1px;margin-bottom:3px}
+.page-switch strong{display:block;font-size:21px;font-weight:800}
+.page-switch-icon{display:grid;place-items:center;width:42px;height:42px;flex:0 0 42px;border-radius:10px;background:#12232d12;font-size:25px}
+.page-switch-arrow{margin-left:auto;font-size:28px;font-weight:700}
+.page-switch:hover{filter:brightness(1.08);border-color:#fff;box-shadow:0 5px 22px #0008}
+.page-switch:focus-visible{outline:3px solid #fff;outline-offset:4px}
+.page-switch-wrap>p{margin-top:8px;font-size:12px;text-align:right}
+.app-header>div:first-child{min-width:0}
+@media(max-width:800px){.app-header{display:flex;flex-direction:column;align-items:stretch;gap:16px}.page-switch,.page-switch-wrap{width:100%;min-width:0}.page-switch{min-height:76px;padding:14px 18px}.page-switch-wrap>p{text-align:left}}

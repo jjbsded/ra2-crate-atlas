@@ -1,0 +1,18 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.c text eol=lf
+# The precompiled scanner is bound to a byte-exact source checksum.
+realmap-search.c -text
+*.cs text eol=lf
+*.cmd text eol=crlf
+*.exe binary
+*.dll binary
+*.mix binary
+*.map binary
+*.yrm binary

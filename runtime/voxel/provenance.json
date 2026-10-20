@@ -1,0 +1,21 @@
+{
+  "components": {
+    "CncVxlRenderText.dll": {
+      "size": 48640,
+      "sha256": "11973b8948052c76b25822d224b90ae0677d2a3bad14985c25bfca0772c8dd9e"
+    },
+    "msvcp140.dll": {
+      "size": 618944,
+      "sha256": "f0cda2a0cf1fe6fbbf579b9098462329d3aaa7513a207af2e0f33b01456e388a"
+    },
+    "vcruntime140.dll": {
+      "size": 123328,
+      "sha256": "2fa6efc053203460a23d3a25158f227d895d2dadc63acc1a372da97c3a4281c3"
+    }
+  },
+  "sources": {
+    "CncVxlRenderText.dll": "Existing local FA2SPHE HE_1.5.3 background editor component",
+    "msvcp140.dll": "Installed Microsoft Visual C++ x86 runtime",
+    "vcruntime140.dll": "Installed Microsoft Visual C++ x86 runtime"
+  }
+}
