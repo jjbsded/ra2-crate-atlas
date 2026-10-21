@@ -2,6 +2,7 @@
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -12,12 +13,23 @@ import uuid
 import webbrowser
 from urllib.parse import urlsplit, parse_qs
 import original_resources as resource_store
+from map_jobs import MapJobs, BusyError
 
 ROOT = Path(__file__).resolve().parent
+# A newly extracted release must never silently reopen an older installation.
+def instance_id():
+    digest = hashlib.sha256(str(ROOT.resolve()).casefold().encode('utf8'))
+    for source in sorted(ROOT.iterdir()):
+        if source.is_file() and source.suffix in ('.py', '.js', '.html', '.css', '.cjs'):
+            digest.update(source.name.encode('utf8')); digest.update(source.read_bytes())
+    return digest.hexdigest()
+
+
+INSTANCE_ID = instance_id()
 JOBS = {}
 LOCK = threading.Lock()
-MAP_JOBS = {}
-MAP_LOCK = threading.Lock()
+MAPS = MapJobs()
+PICKER_LOCK = threading.Lock()
 
 
 class LocalServer(ThreadingHTTPServer):
@@ -25,18 +37,6 @@ class LocalServer(ThreadingHTTPServer):
     # can then keep reaching an older process after restarting the application.
     allow_reuse_address = os.name != 'nt'
 
-
-def analyze_map_job(job, data, version, filename, mix_paths):
-    try:
-        from realmap import analyze
-        folder = ROOT / 'output' / ('map-' + job)
-        def progress(message, percent):
-            MAP_JOBS[job].update(message=message, progress=percent)
-        result = analyze(data, folder, version, filename, progress, mix_paths)
-        MAP_JOBS[job].update(done=True, progress=100, message='外观预览完成' if version == 'directory' else '精确计算完成',
-                             url=f'/output/map-{job}/result.json', cells=result['metadata']['cellCount'])
-    except Exception as error:
-        MAP_JOBS[job].update(error=str(error), message='计算未完成，未输出近似概率')
 
 def clean_timing(value):
     if type(value) is not dict or type(value.get('phases', {})) is not dict:
@@ -78,12 +78,15 @@ class Handler(SimpleHTTPRequestHandler):
 
     def json(self, value, code=200):
         data = json.dumps(value, ensure_ascii=False).encode('utf-8')
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('Content-Length', str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass  # A local viewer may close or change its 3D patch while loading.
 
     def do_GET(self):
         route = urlsplit(self.path)
@@ -100,13 +103,27 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({**resource_store.status(), 'mod': mod_status()})
             except ValueError as error:
                 return self.json({'error': str(error)}, 400)
+        if route.path == '/api/maps/terrain3d':
+            try:
+                from realmap_3d import patch
+                query = parse_qs(route.query)
+                return self.json(patch(query.get('result', [''])[0], int(query.get('x', [''])[0]),
+                                       int(query.get('y', [''])[0]), int(query.get('radius', ['10'])[0])))
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                return self.json({'error': str(error)}, 400)
+        if route.path == '/api/maps/catalog':
+            try:
+                from official_maps import catalog
+                return self.json(catalog())
+            except (ValueError, OSError) as error:
+                return self.json({'error': str(error)}, 400)
         local = Path(self.translate_path(self.path)).resolve()
-        if local.is_relative_to(ROOT/'assets/original') or any(local.is_relative_to(ROOT/name) for name in ('data','runtime','vendor')):
+        if local.is_relative_to(ROOT/'assets/original') or any(local.is_relative_to(ROOT/name) for name in ('data','runtime','vendor','official-maps')):
             return self.send_error(404)
         if self.path == '/api/maps/health':
-            return self.json({'feature': 'real-maps-v1', 'versions': ['yr', 'ra2']})
+            return self.json({'feature': 'real-maps-v1', 'versions': ['yr', 'ra2'], 'instance': INSTANCE_ID})
         if self.path.startswith('/api/maps/job/'):
-            job = MAP_JOBS.get(self.path.rsplit('/', 1)[-1])
+            job = MAPS.status(self.path.rsplit('/', 1)[-1])
             return self.json(job if job else {'error': '任务不存在'}, 200 if job else 404)
         if self.path.startswith('/api/job/'):
             job = JOBS.get(self.path.rsplit('/', 1)[-1])
@@ -134,6 +151,42 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path)
+        if route.path == '/api/maps/minerals':
+            expected = f'http://{self.headers.get("Host", "")}'
+            if self.headers.get('Origin', expected) != expected:
+                return self.json({'error': '不接受其他网页的分析请求'}, 403)
+            try:
+                size = int(self.headers.get('Content-Length', 0))
+                if not 0 < size <= 4096:
+                    raise ValueError('无效请求长度')
+                response = MAPS.minerals(json.loads(self.rfile.read(size)))
+                return self.json(response, 202 if 'id' in response else 200)
+            except BusyError as error:
+                return self.json({'error': str(error)}, 409)
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                return self.json({'error': str(error)}, 400)
+        if route.path == '/api/resources/directory':
+            expected = f'http://{self.headers.get("Host", "")}'
+            if self.headers.get('Origin', expected) != expected:
+                return self.json({'error': '不接受其他网页的目录选择请求'}, 403)
+            try:
+                size = int(self.headers.get('Content-Length', 0))
+                if not 0 < size <= 16384:
+                    raise ValueError('无效请求长度')
+                payload = json.loads(self.rfile.read(size))
+                initial = payload.get('initial', '') if isinstance(payload, dict) else None
+                if not isinstance(initial, str) or '\0' in initial or len(initial) > 32767:
+                    raise ValueError('目录应为有效路径文本')
+                if not PICKER_LOCK.acquire(blocking=False):
+                    return self.json({'error': '目录选择框已经打开，请先完成或取消选择'}, 409)
+                try:
+                    from directory_picker import choose_directory
+                    selected = choose_directory(initial)
+                    return self.json({'cancelled': selected is None, 'path': selected})
+                finally:
+                    PICKER_LOCK.release()
+            except (ValueError, OSError) as error:
+                return self.json({'error': str(error)}, 400)
         if route.path == '/api/resources/mod':
             expected = f'http://{self.headers.get("Host", "")}'
             if self.headers.get('Origin', expected) != expected:
@@ -146,21 +199,36 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(configure(json.loads(self.rfile.read(size))['root']))
             except (ValueError, OSError, KeyError, TypeError) as error:
                 return self.json({'error': str(error)}, 400)
-        if route.path in ['/api/maps/analyze', '/api/maps/heck']:
+        if route.path in ['/api/maps/analyze', '/api/maps/heck', '/api/maps/official']:
             expected = f'http://{self.headers.get("Host", "")}'
             if self.headers.get('Origin', expected) != expected:
                 return self.json({'error': '不接受其他网页的分析请求'}, 403)
             try:
                 query = parse_qs(route.query)
                 version = query.get('version', ['yr'])[0]
-                if version not in ['yr', 'ra2', 'directory']:
+                if version not in ['yr', 'ra2', 'directory', 'shikong']:
                     raise ValueError('未知游戏版本')
+                minerals = query.get('minerals', ['1'])[0]
+                if minerals not in ('0', '1'):
+                    raise ValueError('矿石状态必须是 0 或 1')
+                resource_root = None
+                if version in ('directory', 'shikong'):
+                    from realmap_mod import selected_root, discover
+                    resource_root = selected_root()
+                    if not resource_root:
+                        raise ValueError('请先选择并保存游戏目录')
+                    discover(resource_root)
+                    version = 'directory'
                 mix_paths = None if version == 'directory' else resource_store.resolve(version)
                 size = int(self.headers.get('Content-Length', 0))
                 if not 0 <= size <= 16*1024*1024:
                     raise ValueError('地图不能超过 16 MB')
                 filename = query.get('filename', ['map.yrm'])[0]
-                if route.path == '/api/maps/heck':
+                official = None
+                if route.path == '/api/maps/official':
+                    from official_maps import select
+                    data,filename,official = select(query.get('id',[''])[0],version)
+                elif route.path == '/api/maps/heck':
                     filename = 'mp32s8.map' if version == 'ra2' else 'xmp32s8.map'
                     data = (ROOT / 'examples' / filename).read_bytes()
                 else:
@@ -171,13 +239,10 @@ class Handler(SimpleHTTPRequestHandler):
                     data = self.rfile.read(size)
                     if len(data) != size:
                         raise ValueError('地图上传不完整')
-                with MAP_LOCK:
-                    if any(not v.get('done') and not v.get('error') for v in MAP_JOBS.values()):
-                        return self.json({'error': '已有地图正在计算，请稍候'}, 409)
-                    job = uuid.uuid4().hex[:12]
-                    MAP_JOBS[job] = dict(done=False, progress=0, message='准备读取地图')
-                threading.Thread(target=analyze_map_job, args=(job, data, version, filename, mix_paths), daemon=True).start()
-                return self.json({'id': job}, 202)
+                response = MAPS.submit(data, version, filename, mix_paths, official, minerals == '1', resource_root=resource_root)
+                return self.json(response, 202)
+            except BusyError as error:
+                return self.json({'error': str(error)}, 409)
             except (ValueError, OSError) as error:
                 return self.json({'error': str(error)}, 400)
         if self.path != '/api/export':
@@ -237,8 +302,11 @@ def main():
         from urllib.request import urlopen
         try:
             with urlopen(url+'/api/maps/health', timeout=2) as response:
-                if json.load(response).get('feature') != 'real-maps-v1':
+                existing = json.load(response)
+                if existing.get('feature') != 'real-maps-v1':
                     raise RuntimeError('该端口已被其他程序占用，请用 --port 选择其他端口。')
+                if existing.get('instance') != INSTANCE_ID:
+                    raise RuntimeError('该端口运行的是另一个目录或旧版本的工具。请关闭旧启动窗口，或用 --port 8777 启动此版本。')
             if args.open:
                 webbrowser.open(url+('/maps.html' if args.page == 'maps' else '/index.html'))
             print(f'Existing crate demo: {url}', flush=True)

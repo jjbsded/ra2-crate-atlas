@@ -1,0 +1,15 @@
+.cliff-page{max-width:1400px}
+.cliff-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:16px 0 10px}
+.cliff-controls select{max-width:100%}
+.cliff-examples{display:flex;gap:8px;flex-wrap:wrap}
+#cliffSceneNote{margin-bottom:18px}
+#cliffLoadError{color:#ffb6b6}
+#cliffLoadError:empty{display:none}
+#terrain3dDialog.cliff-inline{position:relative;inset:auto;display:block;width:100%;height:auto;max-height:none;margin:0;box-shadow:none;overflow:visible}
+.cliff-inline .terrain3d-shell{height:auto}
+.cliff-inline #terrain3dStage{flex:none;height:clamp(300px,52vh,620px)}
+.cliff-inline .terrain3d-footer{flex:none;max-height:none;overflow:visible}
+.cliff-inline .terrain3d-header{padding:16px 22px 12px;margin:0}
+.cliff-inline .terrain3d-gesture{max-width:calc(100% - 32px)}
+[data-scene=single] .cliff-map-only{display:none!important}
+@media(max-width:600px){.cliff-controls>label{display:flex;flex-wrap:wrap;white-space:normal}.cliff-inline .terrain3d-controls,.cliff-inline .terrain3d-footer,.cliff-inline .terrain3d-header{padding-left:12px;padding-right:12px}.cliff-inline #terrain3dStage{height:380px}.cliff-inline .terrain3d-gesture{font-size:11px;left:6px;max-width:calc(100% - 12px)}}

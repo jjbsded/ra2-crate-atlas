@@ -26,5 +26,13 @@ for(const minimized of [false,true])for(const position of [{x:-1000,y:-1000},{x:
  const edge=M.layout(r,area,{position,minimized});
  assert.ok(edge.x>=area.x&&edge.y>=area.y&&edge.x+edge.w<=area.x+area.w&&edge.y+edge.h<=area.y+area.h);
  for(const b of Object.values(edge.buttons))assert.ok(b.x>=edge.x&&b.y>=edge.y&&b.x+b.w<=edge.x+edge.w&&b.y+b.h<=edge.y+edge.h);
+ for(const {box:b}of edge.navigation||[])assert.ok(b.x>=edge.x&&b.y>=edge.y&&b.x+b.w<=edge.x+edge.w&&b.y+b.h<=edge.y+edge.h);
 }
+const origin={x:50,y:50},neighbors=new Map();for(let x=49;x<=51;x++)for(let y=49;y<=51;y++)neighbors.set(`${x},${y}`,{x,y});
+assert.equal(new Set(M.directions.map(d=>{const c=M.neighbor(neighbors,origin,d);return`${c.x},${c.y}`;})).size,8);
+for(const d of M.directions){const c=M.neighbor(neighbors,origin,d),sx=c.x-c.y,sy=c.x+c.y-100;
+ assert.equal(Math.sign(sx),Math.sign(d.col-1));assert.equal(Math.sign(sy),Math.sign(d.row-1));}
+assert.equal(M.neighbor(neighbors,null,M.directions[0]),null);
+assert.equal(M.neighbor(neighbors,{x:49,y:49},M.directions.find(d=>d.id==='N')),null);
 console.log('PASS: two significant digits, small nonzero probabilities, minimap pan/viewport alignment at four zoom scales, bounds and off-map view');
+console.log('PASS: eight isometric neighbors, navigation controls inside panel and boundary/no-selection disabling.');

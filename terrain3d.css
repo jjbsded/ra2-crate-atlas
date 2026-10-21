@@ -1,0 +1,25 @@
+#terrain3dOpen{color:#c5f5eb;background:#17483f;border-color:#438f7d;font-weight:600}
+#terrain3dOpen:disabled{cursor:not-allowed}
+body.terrain3d-open{overflow:hidden}
+.terrain3d-scope{font-size:12px;color:#9aafbf}
+#terrain3dDialog{width:min(1180px,96vw);max-width:none;height:min(900px,94dvh);max-height:none;margin:auto;padding:0;border:1px solid #416170;border-radius:16px;color:#e2eef5;background:#111e28;box-shadow:0 24px 100px #0009;overflow:hidden}
+#terrain3dDialog::backdrop{background:#030b14bd;backdrop-filter:blur(3px)}
+.terrain3d-shell{height:100%;display:flex;flex-direction:column;min-height:0}
+.terrain3d-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 22px 12px;flex-shrink:0}
+.terrain3d-header h2{margin:0;font-size:20px}.terrain3d-header .eyebrow{display:block;color:#81cbb7;font-size:11px;margin-bottom:5px}
+.terrain3d-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:0 22px 14px;flex-shrink:0}
+.terrain3d-controls label{font-size:13px}.terrain3d-controls button,.terrain3d-controls select{padding:7px 10px}
+#terrain3dCrate[aria-pressed=true]{border-color:#eeae72;background:#503c2b;color:#ffe0ae}
+#terrain3dProbability[aria-pressed=true]{border-color:#e1bd67;background:#51452a;color:#ffe5a0}
+#terrain3dStage{position:relative;flex:1;min-height:210px;overflow:hidden;background:radial-gradient(ellipse at 50% 65%,#233c47 0%,#142530 55%,#101c27 100%)}
+#terrain3dCanvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}#terrain3dCanvas.dragging{cursor:grabbing}#terrain3dCanvas:focus-visible{outline:2px solid #8bd9c6;outline-offset:-3px}
+#terrain3dStage.is-loading canvas{opacity:.25}
+#terrain3dLabels{position:absolute;inset:0;pointer-events:none;overflow:hidden}.terrain3d-label{position:absolute;transform:translate(-50%,-100%);background:#0d202aeb;color:#c5eadb;border:1px solid #6dbea17d;border-radius:5px;padding:4px 7px;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;box-shadow:0 2px 8px #0004}.terrain3d-label.selected{color:#b5ffc9;border-color:#61e18e}
+.terrain3d-gesture{position:absolute;left:16px;bottom:8px;font-size:12px;color:#afc6d3;pointer-events:none;background:#10212bcc;padding:5px 9px;border-radius:5px}
+#terrain3dLoading{position:absolute;inset:40% 12px auto;text-align:center;color:#b4d5d1;font-size:15px}
+/* Selection details may wrap or gain buttons; keep the terrain viewport stable. */
+.terrain3d-footer{padding:12px 22px 16px;flex:0 0 230px;min-height:0;max-height:34%;overflow:auto;scrollbar-gutter:stable;border-top:1px solid #2b404c}
+#terrain3dLegend{display:flex;gap:8px 16px;flex-wrap:wrap;margin-bottom:9px;font-size:12px;color:#bed1dc}#terrain3dLegend span{display:inline-flex;align-items:center;gap:6px}#terrain3dLegend [hidden]{display:none}#terrain3dLegend i{width:13px;height:11px;flex-shrink:0;border-radius:2px;background:#60b7f0}#terrain3dLegend b{font-size:11px;font-weight:500;color:#e1edf4;background:#ffffff12;border-radius:4px;padding:1px 5px;font-variant-numeric:tabular-nums}#terrain3dLegend .risk-current{background:#ff77c6}#terrain3dLegend .risk-potential{background:repeating-linear-gradient(135deg,#ed9dca 0 2px,#ed9dca33 2px 5px)}#terrain3dLegend .risk-zero,#terrain3dLegend .risk-other{color:#f0ad69;border:1px dashed currentColor;background:radial-gradient(circle,currentColor 0 1px,transparent 1.2px) 0 0/5px 5px;background-color:#f0ad691c}#terrain3dLegend .risk-other{color:#b6bdc7;background-color:#b6bdc71c}#terrain3dLegend .higher{background:#79e0b7}
+.terrain3d-label.selected{max-width:calc(100% - 20px);width:max-content;white-space:normal;text-align:center}
+#terrain3dDetail{color:#e0edf5;font-size:14px;font-variant-numeric:tabular-nums}#terrain3dRelations{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0;color:#9cbdcd;font-size:12px}#terrain3dRelations button{padding:3px 8px;font-size:12px}#terrain3dSource{font-size:12px;color:#8ea9b8}#terrain3dError{color:#ffb5a8;white-space:pre-wrap}#terrain3dError:empty{display:none}#terrain3dWarnings{margin:6px 0 0;padding:6px 0;font-size:12px}#terrain3dWarningsText{white-space:pre-wrap}
+@media(max-width:650px){#terrain3dDialog{width:100vw;height:100dvh;border-radius:0;border:0}.terrain3d-header{padding:12px 14px 10px}.terrain3d-controls{padding:0 14px 10px;gap:8px}.terrain3d-controls button,.terrain3d-controls select{min-height:38px}.terrain3d-header h2{font-size:18px}.terrain3d-footer{padding:10px 14px;max-height:33%}.terrain3d-gesture{font-size:11px;left:8px;right:8px;bottom:5px}.terrain3d-controls label{font-size:12px}#terrain3dStage{min-height:180px}}

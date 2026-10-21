@@ -4,29 +4,58 @@ Frame conventions are checked against FA2SPHE HE_1.5.3 LoadObjects /
 RendererTypes. No map scripts or gameplay simulation are executed here.
 """
 import colorsys
+import math
 import re
 import struct
 from collections import Counter
 
 from PIL import Image
+from realmap_parser import object_records as records  # Legacy import compatibility.
 
 
-def records(m):
-    from realmap import ini_integer
-    result = []
-    for section in ('STRUCTURES', 'INFANTRY', 'UNITS', 'AIRCRAFT'):
-        for key, value in m.get(section, {}).items():
-            f = [v.strip() for v in value.split(',')]
-            if len(f) < 5:
-                continue
-            facing_index = 7 if section == 'INFANTRY' else 5
-            result.append(dict(id=section+'/'+key, category=section, type=f[1].upper(), house=f[0].upper(),
-                health=ini_integer(f[2]), x=ini_integer(f[3]), y=ini_integer(f[4]),
-                facing=ini_integer(f[facing_index] if len(f)>facing_index else '0') % 256,
-                subcell=ini_integer(f[5]) if section == 'INFANTRY' and len(f)>5 else 0,
-                mission=f[6] if section != 'STRUCTURES' and len(f)>6 else '',
-                upgrades=f[12:15] if section == 'STRUCTURES' else []))
-    return result
+def visual_foundation(art):
+    """Art footprint for painter sorting only; never infer crate occupation.
+
+    Ares custom foundations enumerate cells separately from their bounding box.
+    Keep holes (and negative offsets) when sorting roofs and nearby aircraft.
+    """
+    from realmap_format import ini_integer
+    name = art.get('FOUNDATION', '1x1')
+    match = re.fullmatch(r'(\d+)x(\d+)', name, re.I)
+    if match:
+        w, h = (max(1, min(32, int(n))) for n in match.groups())
+        return [(x, y) for x in range(w) for y in range(h)]
+    if name.upper() == 'CUSTOM':
+        w, h = (max(1, min(32, ini_integer(art.get('FOUNDATION.'+axis, '1')))) for axis in ('X', 'Y'))
+        points = []
+        for i in range(w*h):
+            value = art.get('FOUNDATION.'+str(i))
+            if value is None:
+                break
+            point = re.fullmatch(r'\s*(-?\d+)\s*,\s*(-?\d+)\s*', value)
+            if point and all(abs(int(n)) <= 32 for n in point.groups()):
+                points.append(tuple(map(int, point.groups())))
+        return points or [(x, y) for x in range(w) for y in range(h)]
+    return [(0, 0)]
+
+
+def shp_vehicle_facing(raw_facing, facings):
+    # FA2SPHE LoadObjects rotates the SHP frame list left by Facings/8.
+    # Infantry sequences and VXL orientation use different conventions.
+    return (raw_facing*facings//256 + facings//8) % facings
+
+
+def turret_offset(art, raw_facing, facings):
+    """Project TurretOffset's forward/left/height leptons at the body facing."""
+    values = [float(v.strip()) for v in art.get('TURRETOFFSET', '0,0,0').split(',')]
+    forward, left, height = (values+[0, 0, 0])[:3]
+    angle = (raw_facing*facings//256 / facings + .25)*math.tau
+    scale = 30*math.sqrt(2)/256
+    x, y = -forward*scale, left*scale
+    x, y = x*math.cos(angle)-y*math.sin(angle), x*math.sin(angle)+y*math.cos(angle)
+    # Stabilize exact pixel boundaries before integer truncation (e.g. 15-eps).
+    return (int(round((x-y)/math.sqrt(2), 8)),
+            int(round((x+y)/(2*math.sqrt(2))-height*scale*math.sqrt(3)/2, 8)))
 
 
 class ObjectPainter:
@@ -56,8 +85,8 @@ class ObjectPainter:
         return cfg, image, self.art.get(image, {})
 
     def colors(self, art, house, default='unit', remap=True):
-        from realmap import yes, ini_integer
-        from realmap_render import palette
+        from realmap_format import yes, ini_integer
+        from realmap_sprites import palette
         name = art.get('PALETTE', default).lower().replace('~~~', self.theater['ext'])
         if yes(art.get('TERRAINPALETTE', 'no')):
             name, remap = 'iso', False
@@ -81,7 +110,7 @@ class ObjectPainter:
         return self.palettes[key], name
 
     def shape(self, image, art, building=False):
-        from realmap import yes
+        from realmap_format import yes
         name = art.get('IMAGE', image).lower()
         letter = dict(TEMPERATE='t', SNOW='a', URBAN='u', NEWURBAN='n', DESERT='d', LUNAR='l')[self.theater['name']]
         names = []
@@ -109,8 +138,9 @@ class ObjectPainter:
         raise ValueError('缺少贴图 '+ '/'.join(names))
 
     def shp(self, image, art, cfg, house, frame=0, building=False, dx=0, dy=0, remap=True):
-        from realmap import shp_frame, yes
-        from realmap_render import shadow_frame
+        from realmap_sprites import shp_frame
+        from realmap_format import yes
+        from realmap_sprites import shadow_frame
         raw, filename = self.shape(image, art, building)
         count = struct.unpack_from('<4H', raw)[3]
         if not 0 <= frame < count:
@@ -124,11 +154,11 @@ class ObjectPainter:
         opacity = max(0, min(255, round(255*(1-float(art.get('TRANSLUCENCY', '0'))/100))))
         if opacity < 255:
             im.putalpha(im.getchannel('A').point(lambda a: a*opacity//255))
-        return dict(image=im, shadow=shadow, x=-im.width//2+dx, y=-im.height//2+dy,
+        return dict(image=im, shadow=shadow, x=-(im.width//2)+dx, y=-(im.height//2)+dy,
                     file=filename, frame=frame, palette=palname)
 
     def parts(self, obj):
-        from realmap import yes, ini_integer
+        from realmap_format import yes, ini_integer
         cfg, image, art = self.art_for(obj['type'])
         if image in ('NONE', '<NONE>'):
             return []
@@ -195,17 +225,40 @@ class ObjectPainter:
             parts = self.voxel_parts(obj, cfg, image, art)
         else:
             facings = max(1, ini_integer(art.get('FACINGS', '8')))
-            facing = (obj['facing']*facings//256) % facings
+            facing = shp_vehicle_facing(obj['facing'], facings)
             standing = 'STANDINGFRAMES' in art
             frame = ini_integer(art.get('STARTSTANDFRAME' if standing else 'STARTWALKFRAME', '0'))
             frame += facing*max(1, ini_integer(art.get('STANDINGFRAMES' if standing else 'WALKFRAMES', '1')))
             parts.append(self.shp(image, art, cfg, house, frame))
+            if yes(cfg.get('TURRET', 'no')):
+                # SHP turrets have 32 directions: a separate <image>tur.shp,
+                # or frames immediately after Facings*WalkFrames in the body.
+                # StartWalkFrame is deliberately NOT part of the turret base.
+                turret = art.get('IMAGE', image)+'tur'
+                turret_art = {**art, 'IMAGE': turret}
+                turret_frame = shp_vehicle_facing(obj['facing'], 32)
+                try:
+                    raw, _ = self.shape(turret, turret_art)
+                except ValueError:
+                    turret, turret_art = image, art
+                    raw, _ = self.shape(image, art)
+                    turret_frame += facings*max(1, ini_integer(art.get('WALKFRAMES', '1')))
+                try:
+                    if turret_frame >= struct.unpack_from('<4H', raw)[3]:
+                        raise ValueError('SHP 炮塔帧越界：'+turret)
+                    dx, dy = turret_offset(art, obj['facing'], facings)
+                    part = self.shp(turret, turret_art, cfg, house, turret_frame, dx=dx, dy=dy)
+                    if not yes(art.get('USETURRETSHADOW', 'no')):
+                        part['shadow'] = None
+                    parts.append(part)
+                except (ValueError, struct.error) as error:
+                    self.warnings.add(obj['type']+' 炮塔：'+str(error))
         self.cache[key] = parts
         return parts
 
     def voxel_parts(self, obj, cfg, image, art, turret=None):
         from realmap_voxel import VoxelRenderer
-        from realmap import yes, ini_integer
+        from realmap_format import yes, ini_integer
         if self.voxel_error:
             raise ValueError(self.voxel_error)
         if self.voxels is None:
@@ -246,21 +299,25 @@ class ObjectPainter:
         return parts
 
     def prepare(self, cells, origin):
+        from realmap_bridges import elevated
         events, counts = [], Counter()
         hidden = []
         roofs = {}
+        empty_foundations = set(self.theater.get('emptyFoundationObjectIds', []))
         for obj in self.theater.get('mapObjects', []):
-            if obj['category'] != 'STRUCTURES':
+            if obj['category'] != 'STRUCTURES' or obj['id'] in empty_foundations:
                 continue
             _, _, art = self.art_for(obj['type'])
-            f = re.fullmatch(r'(\d+)x(\d+)', art.get('FOUNDATION', '1x1'), re.I)
-            if f:
-                w,h = map(int, f.groups())
-                for dx in range(min(w,32)):
-                    for dy in range(min(h,32)):
-                        p = obj['x']+dx, obj['y']+dy
-                        roofs[p] = max(roofs.get(p,0), obj['x']+obj['y']+w+h-2+.7)
+            footprint = visual_foundation(art)
+            front = max(dx+dy for dx, dy in footprint)
+            for dx, dy in footprint:
+                p = obj['x']+dx, obj['y']+dy
+                roofs[p] = max(roofs.get(p,0), obj['x']+obj['y']+front+.7)
         for obj in self.theater.get('mapObjects', []):
+            if obj['id'] in empty_foundations:
+                hidden.append(dict(id=obj['id'], type=obj['type'], reason='registered-empty-foundation'))
+                self.audit.append({**obj, 'parts': [], 'loadState': 'registered-empty-foundation'})
+                continue
             c = cells.get((obj['x'], obj['y']))
             if c is None:
                 continue
@@ -272,6 +329,11 @@ class ObjectPainter:
                 cfg, aid, art = self.art_for(obj['type'])
                 x = 30*(obj['x']-obj['y'])+origin[0]
                 y = 15*(obj['x']+obj['y']-c['level'])+origin[1]
+                # OnBridge is a request in the map record, not an absolute Z.
+                # Imported maps commonly leave it set (including -1) on land.
+                on_deck = bool(obj.get('aboveGround') and elevated(c))
+                if on_deck:
+                    y -= 60
                 depth = obj['x']+obj['y']+.6
                 if obj['category'] == 'AIRCRAFT':
                     depth = max(depth, roofs.get((obj['x'],obj['y']), 0)+.1)
@@ -279,12 +341,12 @@ class ObjectPainter:
                     dx, dy = {2:(15,0), 3:(-15,0), 4:(0,7)}.get(obj['subcell'], (0,0))
                     x += dx; y += dy; depth += dy/15
                 if obj['category'] == 'STRUCTURES':
-                    f = re.fullmatch(r'(\d+)x(\d+)', art.get('FOUNDATION', '1x1'), re.I)
-                    if f:
-                        depth += int(f[1])+int(f[2])-2
+                    depth += max(dx+dy for dx, dy in visual_foundation(art))
                 for part in parts:
-                    events.append((depth, obj['x'], x, y, c['level'], part))
-                self.audit.append({**obj, 'parts': [{k:v for k,v in part.items() if k not in ('image','shadow')} for part in parts]})
+                    events.append((depth, obj['x'], x, y, c['level']+(4 if on_deck else 0), part))
+                self.audit.append({**obj, 'renderAnchor': [x, y], 'renderDepth': depth,
+                    'onBridgeDeck': on_deck,
+                    'parts': [{k:v for k,v in part.items() if k not in ('image','shadow')} for part in parts]})
                 counts[obj['category']] += 1
             except (ValueError, OSError, IndexError, struct.error) as error:
                 self.missing.append(dict(id=obj['id'], type=obj['type'], reason=str(error)))

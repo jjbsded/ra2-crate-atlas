@@ -40,6 +40,7 @@ function heatmapOptions(){return H.settings({enabled:$('heatmapEnabled').checked
 function syncTransparency(preserveInput=false){
  $('heatmapTransparencyRange').value=transparency;if(!preserveInput)$('heatmapTransparency').value=transparency.toFixed(1);
  $('heatmapTransparencyRange').disabled=$('heatmapTransparency').disabled=!$('heatmapEnabled').checked;
+ $('opacityInfo').textContent=`0% 不透明 · 100% 全透明；1× 基准格自动淡化，当前透明度 ${(Math.sqrt(transparency/100)*100).toFixed(1)}%。`;
 }
 function changeTransparency(input){
  if(input.value.trim()===''||!Number.isFinite(input.valueAsNumber))return;
@@ -54,7 +55,7 @@ function changeThreshold(input){
  if(input.value.trim()===''||!Number.isFinite(input.valueAsNumber))return;
  minMultiplier=Math.round(Math.max(0,Math.min(H.MAX_MULTIPLIER,input.valueAsNumber))*10)/10;syncThreshold(input.id==='heatmapMin');draw();
 }
-function build(){try{trace=T.apply(H.decorate(M.buildTrace(options())),activeTiming);syncThreshold();time=0;playing=false;forceComplete=true;lastRecord=-1;$('seek').max=trace.duration;$('error').textContent='';const d=trace.probability;$('densityInfo').textContent=`随机逻辑帧 · 精确平均 ${d.frameDistribution.period} 个等权帧余数 × ${d.sampleCount} 个起点 · 1× = 仅直接抽中、无邻格转入 · 含最多 1000 轮重抽 · 单轮成功起点均值 ${d.successCount.toFixed(1)}/169 · 最高 ${D.demo(d).maxMultiplier.toFixed(1)}×`;$('densityCell').textContent='鼠标移到格子上查看坐标、最终概率与单轮统计。';draw();}catch(e){$('error').textContent=e.message;}}
+function build(){try{trace=T.apply(H.decorate(M.buildTrace(options())),activeTiming);syncThreshold();time=0;playing=false;forceComplete=true;lastRecord=-1;$('seek').max=trace.duration;$('error').textContent='';const d=trace.probability;$('baselineInfo').textContent=`本场景 1× 基准概率：${D.percent(D.demo(d).baselineProbability)}；2× 表示该基准的 2 倍。基准对应只从自身起点落箱、无邻格转入；不是全图平均概率。`;$('densityInfo').textContent=`随机逻辑帧 · 精确平均 ${d.frameDistribution.period} 个等权帧余数 × ${d.sampleCount} 个起点 · 含最多 1000 轮尝试 · 单轮成功起点均值 ${d.successCount.toFixed(1)}/169 · 最高 ${D.demo(d).maxMultiplier.toFixed(1)}×`;$('densityCell').textContent='鼠标移到格子上查看坐标、最终概率与单轮统计。';draw();}catch(e){$('error').textContent=e.message;}}
 function draw(){
  const state=M.atTime(trace,time);S.render(ctx,trace,state.step,forceComplete?1:state.progress,{coords:$('coords').checked,animateScan:!forceComplete,heatmap:heatmapOptions(),heatmapValues:$('heatmapValues').checked});
  if(!preview.hidden)previewCtx.drawImage(canvas,0,0);

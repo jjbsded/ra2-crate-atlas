@@ -32,10 +32,21 @@ def relative_name(name):
     return '/'.join(parts)
 
 
-def local_path(root, name):
+def local_path(root, name, *, entries=None):
     path = root
     for part in relative_name(name).split('/'):
-        matches = [p for p in path.iterdir() if fold(p.name) == fold(part)] if path.is_dir() else []
+        if entries is None:
+            children = list(path.iterdir()) if path.is_dir() else []
+        else:
+            # A caller may share a directory listing within ONE validation pass.
+            # Never keep this snapshot across separate requests.
+            if path not in entries:
+                index = defaultdict(list)
+                for child in path.iterdir() if path.is_dir() else []:
+                    index[fold(child.name)].append(child)
+                entries[path] = index
+        matches = ([p for p in children if fold(p.name) == fold(part)] if entries is None
+                   else entries[path].get(fold(part), []))
         if len(matches) > 1:
             raise ValueError(f"Case-ambiguous path: {name}")
         path = matches[0] if matches else path / part

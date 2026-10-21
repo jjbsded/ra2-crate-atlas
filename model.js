@@ -4,14 +4,14 @@
   const MAP = { w: 8, h: 6, local: [1, 1, 6, 3] };
   const PRESETS = [
     { id: 'outside', name: '01 · 地图外', start: [2, 3], subtitle: '越界起点仍进入附近搜索' },
-    { id: 'margin', name: '02 · 地图内，可视边界外', start: [1, 8], subtitle: '从地图边缘向可用区搜索' },
+    { id: 'margin', name: '02 · 地图内，模型可用边界外', start: [1, 8], subtitle: '从地图边缘向可用区搜索' },
     { id: 'building', name: '03 · 建筑占格', start: [7, 7], subtitle: '占用格被排除，检查下一圈' },
     { id: 'terrain', name: '04 · 不可通行地形', start: [6, 8], subtitle: '通行检查拒绝该格' },
     { id: 'unit', name: '05 · 地面单位占格', start: [8, 6], subtitle: '不挤走单位，寻找附近空格' },
     { id: 'crate', name: '06 · 已有工具箱', start: [9, 6], subtitle: '附近搜索可选中，最终放置失败后重抽' },
     { id: 'empty', name: '07 · 普通空地', start: [6, 7], subtitle: '半径 0 即可找到原格' },
     { id: 'ore', name: '08 · 矿石覆盖物', start: [9, 7], subtitle: '可通行的矿石仍会阻止最终放置' },
-    { id: 'water_margin', name: '09 · 可视边界外抽到海水', start: [1, 8], world: 'coast', subtitle: '真实水格 → Float → 向内寻找水域' },
+    { id: 'water_margin', name: '09 · 模型可用边界外抽到海水', start: [1, 8], world: 'coast', subtitle: '真实水格 → Float → 向内寻找水域' },
     { id: 'outside_water', name: '10 · 地图外起点附近只有海水', start: [2, 3], world: 'ocean', subtitle: '默认 Clear → Track 失败 → 重抽水格' },
     { id: 'outside_island', name: '11 · 地图外起点，中央小岛', start: [2, 3], world: 'island', subtitle: 'Track 逐圈排除海水，找到中央陆地' }
   ];
@@ -40,7 +40,7 @@
   function classify(c,world=WORLDS.land,speed='Track') {
     const land=landType(c,world);
     if (!inside(c)) return { ok:false, land, reason:'实际地图外：候选无效' };
-    if (!usable(c)) return { ok:false, land, reason:'可视／可用边界外' };
+    if (!usable(c)) return { ok:false, land, reason:'模型可用边界外' };
     const o=world.objects[key(c)];
     if (['building','unit','terrain'].includes(o)) return { ok:false, land, reason: o==='terrain'?'地形不可通行':o==='unit'?'地面单位占用':'建筑基础占用' };
     if(speed==='Track'&&land==='Water')return {ok:false,land,reason:'海水不允许 Track（通行倍率 0%）'};

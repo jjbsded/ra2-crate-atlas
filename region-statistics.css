@@ -1,0 +1,61 @@
+#regionToggle{border-color:#51c9b1;color:#96ead8;background:#15352f;font-weight:600}
+#regionToggle[aria-pressed=true]{background:#65d6bd;color:#09271f}
+#probabilityToggle{min-width:92px;border-color:#627b94;color:#c9dbea}
+#probabilityToggle[aria-pressed=true]{border-color:#e0b66c;background:#473c27;color:#ffe3a4}
+#probabilityToggle[aria-pressed=mixed]{border-color:#ab99d5;background:#332e49;color:#e0d2ff}
+#mineralToggle{min-width:84px;border-color:#627b94;color:#c9dbea}
+#mineralToggle[aria-pressed=true]{border-color:#d0b658;background:#3c3823;color:#f5dc83}
+#mineralStatus{color:#f5dc83}
+.probability-mineral-tools{display:inline-flex;gap:14px;align-items:center}
+.region-transparency input{width:100px;accent-color:#69d9bd}.region-transparency output{min-width:40px;font-variant-numeric:tabular-nums}
+#regionUndo span,#regionRedo span{font-size:21px;vertical-align:-1px;line-height:12px}
+#regionEyedropper{white-space:nowrap}
+#regionEyedropper[aria-pressed=true]{background:#51452b;border-color:#f5ce80;color:#ffe5a8}
+#regionEyedropper span{font-size:18px;vertical-align:-1px}
+#regionModifierStatus{color:#ffe1a4;font-size:13px}#regionModifierStatus:empty{display:none}
+.region-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 16px;background:#122d2b;border:1px solid #376b61;border-radius:10px;margin:12px 0}
+.region-toolbar label{display:flex;align-items:center;gap:7px}.region-toolbar input[type=number]{width:65px}
+#regionSizes{display:flex;gap:12px}.region-toolbar .hint{flex-basis:100%;margin:0;color:#b4d6cc}
+#regionEditor{border-top:3px solid var(--region-color);padding-top:13px}
+.region-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-weight:600;font-size:16px}
+#regionEditor label{display:block;color:#b6cbd5;margin:12px 0 6px;font-size:13px}
+#regionEditor select,#regionName{width:100%}.region-name-row{display:flex;gap:8px}.region-name-row #regionName{min-width:0;flex:1}
+.region-picker{position:relative}
+#regionActive{display:flex;align-items:center;gap:9px;width:100%;text-align:left;min-height:38px}
+#regionActiveText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.region-swatch{display:inline-block;width:13px;height:13px;flex:0 0 13px;border-radius:3px;box-shadow:inset 0 0 0 1px #ffffff40,0 0 0 1px #061019}
+.region-picker-arrow{color:#9cb5c4}
+.region-options{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 5px);max-height:310px;overflow-y:auto;overscroll-behavior:contain;padding:5px;background:#142531;border:1px solid #547183;border-radius:8px;box-shadow:0 10px 28px #0008}
+.region-option{display:flex;align-items:center;gap:9px;width:100%;padding:9px 8px;border:1px solid transparent;background:transparent;border-radius:5px;text-align:left}
+.region-option-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.region-option small{color:#99b1bf;white-space:nowrap;font-size:12px}
+.region-option[aria-selected=true]{background:#2c4350;border-color:#7698a8}
+.region-option:hover,.region-option:focus-visible{background:#233e4b;border-color:#f5ce80;outline:none}
+#regionColor{width:43px;height:38px;padding:4px;flex-shrink:0;cursor:pointer}
+#regionEditor .region-overlap{display:flex;align-items:center;gap:6px;color:#daece6}
+.region-editor-actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.region-editor-actions button{padding:7px 10px}
+#regionLive{color:#a3e9d6;font-variant-numeric:tabular-nums}
+#regionSave{font-size:12px;color:#9ecbb9}#regionSave.error{color:#ffad9f}
+#regionActionStatus{font-size:12px;min-height:20px}.region-backup{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.region-backup button,.region-backup .region-file{font-size:12px;padding:6px 9px;border:1px solid #385163;border-radius:6px;background:#1b2b38;color:#c2d5df;margin:0;cursor:pointer}
+.region-file input{position:absolute;opacity:0;width:1px;height:1px}.region-file:focus-within{outline:2px solid #f5ce80}
+#regionSummary{background:#101f29;border:1px solid #315449;border-radius:12px;padding:18px;margin-top:18px}
+.region-summary-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.region-summary-header h2{margin:0;font-size:19px}.region-summary-header label{display:inline-flex;align-items:center;gap:6px}
+#regionCount{font-weight:400;font-size:12px;color:#99b5a9;margin-left:12px}
+.region-table-scroll{overflow-x:auto;margin-top:14px}
+.region-table{border-collapse:collapse;width:100%;min-width:1050px;font-variant-numeric:tabular-nums;font-size:13px}
+.region-table th{background:#172b35;font-weight:500;color:#bdd5df;text-align:right;padding:10px;white-space:nowrap;border-bottom:1px solid #34505b}
+.region-table th:first-child,.region-table th:nth-child(2){text-align:left}
+.region-table th[colspan]{text-align:center}
+.region-table td{padding:10px;border-bottom:1px solid #223945;text-align:right;white-space:nowrap}
+.region-table td:first-child{text-align:left;max-width:190px;white-space:normal}
+.region-table tr.active{background:#1c3635;box-shadow:inset 3px 0 #6cdcc0}
+.region-table small{display:block;color:#96b3bf;font-size:12px;margin-top:5px}
+.region-row-name{border:0;background:transparent;padding:4px 0;color:#e0f1eb;text-align:left;max-width:190px;overflow-wrap:anywhere;font-weight:600}
+.region-row-name i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:8px}
+.region-preview{width:280px}.region-preview button{padding:0;overflow:hidden;border-radius:5px;background:#0a151e;vertical-align:middle}
+.region-preview button+button{margin-left:7px}.region-preview canvas{display:block;width:144px;height:72px}
+.region-preview button+button canvas{width:106px}
+#regionSummary button:disabled,#regionEditor button:disabled{cursor:not-allowed}
+@media(max-width:1000px){#regionEditor{max-height:none}.region-toolbar{gap:8px}#regionSummary{padding:12px}}

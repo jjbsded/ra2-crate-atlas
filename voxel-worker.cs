@@ -3,6 +3,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 class VoxelWorker {
     const string D = "CncVxlRenderText.dll";
     [DllImport("kernel32", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool SetDllDirectory(string path);
@@ -24,6 +25,9 @@ class VoxelWorker {
         byte[] data=new byte[w*h]; if(data.Length>0) Marshal.Copy(ptr,data,0,data.Length); return data;
     }
     static int Main(string[] args) {
+        // Python's pipe protocol is UTF-8 regardless of the Windows code page.
+        Console.InputEncoding = new UTF8Encoding(false);
+        Console.OutputEncoding = new UTF8Encoding(false);
         try {
             SetDllDirectory(args[0]); CncImgCreate(); CncImgSetMaxFacing(32);
             CncImgSetLightingSource(-1,1,1);

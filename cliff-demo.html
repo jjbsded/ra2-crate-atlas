@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>高差演示 · 工具箱概率分析</title>
+<link rel="stylesheet" href="realmap-ui.css?v=16"><link rel="stylesheet" href="page-navigation.css?v=2"><link rel="stylesheet" href="terrain3d.css?v=5"><link rel="stylesheet" href="cliff-demo.css?v=1"></head>
+<body data-scene="single"><main class="cliff-page">
+<header class="app-header"><div><span class="eyebrow">TERRAIN LAB / 高差演示</span><h1>高处的一格，会影响哪些低格？</h1><p>旋转查看六个判定位置，对比放箱前后的地面通行属性。</p><nav class="page-links" aria-label="其他演示"><a class="mechanism-link" href="index.html">概率演示 →</a></nav></div><a class="page-switch to-maps" href="maps.html"><span class="page-switch-icon" aria-hidden="true">▦</span><span><small>切换页面</small><strong>真实地图计算工具</strong></span><span class="page-switch-arrow" aria-hidden="true">→</span></a></header>
+<div class="cliff-controls"><label for="cliffScene">场景 <select id="cliffScene" disabled><option value="single" selected>单高格 · 六个判定位置</option><option value="real">冰天雪地 · 原图局部</option></select></label><div class="cliff-examples" id="cliffExamples"><button id="cliffHigh">孤立高格</button><button id="cliffRough">Rough 例外</button><button id="cliffClear">受影响的普通低格</button><button id="cliffOutside">未受影响的低格</button></div><button id="cliffReload">重新加载演示</button></div>
+<p id="cliffSceneNote">正在读取内置演示…</p><p id="cliffLoadError" role="alert"></p>
+<dialog id="terrain3dDialog" class="cliff-inline" aria-labelledby="terrain3dTitle">
+<div class="terrain3d-shell">
+ <div class="terrain3d-header"><h2 id="terrain3dTitle">3D 地形</h2><button id="terrain3dClose" hidden>关闭</button></div>
+ <div class="terrain3d-controls">
+  <label hidden>附近范围 <select id="terrain3dRadius"><option value="4">9 × 9 格</option></select></label><button id="terrain3dRecenter" hidden>以选中格为中心</button>
+  <button id="terrain3dReset">恢复游戏视角</button><button id="terrain3dLeft" aria-label="向左旋转 3D 视角">↶ 旋转</button><button id="terrain3dRight" aria-label="向右旋转 3D 视角">旋转 ↷</button>
+  <label><input type="checkbox" id="terrain3dMarkers" checked>判定标识</label><label><input type="checkbox" id="terrain3dDecorations" checked>桥梁 / 树木 / 矿物</label><label title="按原始贴图轮廓和深度重建崖壁"><input type="checkbox" id="terrain3dRelief" checked>精细崖壁</label>
+  <button id="terrain3dProbability" aria-pressed="false" hidden>概率:关</button><button id="terrain3dCrate" aria-pressed="false">预览放箱后</button>
+ </div>
+ <div id="terrain3dStage"><canvas id="terrain3dCanvas" tabindex="0" aria-label="可旋转的高差演示">3D 查看需要支持 WebGL 的浏览器。</canvas><div id="terrain3dLabels" aria-hidden="true"></div><div id="terrain3dLoading" role="status">正在读取原始地形贴图…</div><div class="terrain3d-gesture">拖动旋转 · 滚轮 / 双指缩放 · Shift 或右键拖动平移 · 点格选择 · 方向键旋转</div></div>
+ <div class="terrain3d-footer">
+  <div id="terrain3dLegend" aria-label="当前 3D 范围内的判定标识">
+   <span><i></i>高差判定范围</span><span><i class="risk-current"></i>放箱后禁行 <b id="terrain3dCount-current">0</b></span>
+   <span class="cliff-map-only"><i class="risk-potential"></i>清空后潜在禁行 <b id="terrain3dCount-potential">0</b></span><span class="cliff-map-only"><i class="risk-zero"></i>Rough · 落箱概率 0 <b id="terrain3dCount-zero">0</b></span>
+   <span id="terrain3dLegendOther" hidden><i class="risk-other"></i>Rough · 未归入异常点 <b id="terrain3dCount-other">0</b></span><span><i class="higher"></i>相关高格</span>
+  </div>
+  <p id="terrain3dError" role="alert"></p><p id="terrain3dDetail" role="status" aria-live="polite"></p><div id="terrain3dRelations"></div>
+  <p id="terrain3dRiskScope" class="terrain3d-scope">高差达到 4 级且相对位置命中时，普通 Clear 低格开局即变为 Rock；示例中的 Rough 低格在放箱重算后才变为 Rock。蓝色只表示高差条件，未标色不代表可通行。</p>
+  <p id="terrain3dSource"></p><p id="terrain3dProbabilityNote" class="terrain3d-scope" hidden></p><details id="terrain3dWarnings" hidden><summary>缺失资源详情</summary><p id="terrain3dWarningsText"></p></details>
+ </div>
+</div>
+</dialog>
+<footer>演示使用内置原版样例，无需先导入地图或选择游戏目录。放箱按钮只切换演示，不会修改地图文件；具体地图请在真实地图计算工具中选格后使用“3D查看”。</footer>
+</main><script src="terrain3d.js?v=13"></script><script src="cliff-demo.js?v=1"></script></body></html>

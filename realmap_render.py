@@ -6,18 +6,14 @@ Sprites remain beneath the viewer's information layers. See RENDERING.md.
 """
 import json
 import math
-import struct
-from pathlib import Path
 
 import numpy as np
 from PIL import Image
+from realmap_bridges import HIGH_NAMES, sprite_frame
 
-VERSION = 4
-SHADOW_ALPHA = 128  # WAE ObjectRenderer.DrawShadow: Color(255,255,255,128).
-
-
-def palette(raw):
-    return [tuple((v << 2) | (v >> 4) for v in raw[i:i+3]) for i in range(0, 768, 3)]
+VERSION = 10
+# Compatibility exports; shared sprite code lives below both renderers.
+from realmap_sprites import palette, sprite_spec, shadow_frame, SHADOW_ALPHA
 
 
 def simplify(points, tolerance=1.0):
@@ -80,77 +76,6 @@ def camera_rect(meta, origin):
     return [x, y, 60*w, 30*h+135]
 
 
-def sprite_spec(kind, overlay, frame, res, theater):
-    from realmap import yes, ini_integer
-    cfg = theater['effectiveRules'].get(kind, {})
-    art = res.art.get(kind, {})
-    name = art.get('IMAGE', cfg.get('IMAGE', kind)).lower()
-    ext, stem = theater['ext'], theater['stem']
-    is_theater = yes(art.get('THEATER', 'no'))
-    filename = name+('.'+ext if is_theater else '.shp')
-    mixes = [stem+'md.mix', stem+'.mix', ext+'.mix', 'conqmd.mix', 'conquer.mix', 'genermd.mix', 'generic.mix']
-    if yes(art.get('NEWTHEATER', 'no')):
-        letter = dict(TEMPERATE='t', SNOW='a', URBAN='u', NEWURBAN='n', DESERT='d', LUNAR='l')[theater['name']]
-        names = [name[:1]+letter+name[2:]+'.shp', name[:1]+'g'+name[2:]+'.shp']
-        for filename in names:
-            try:
-                raw = res.get(mixes, filename)
-                break
-            except ValueError:
-                pass
-        else:
-            raise ValueError('No original theater sprite for '+kind)
-    else:
-        raw = res.get(mixes, filename)
-    palname = 'iso'+ext+'.pal'
-    offset = 0
-    if overlay:
-        if yes(cfg.get('WALL', 'no')) or yes(cfg.get('ISVEINHOLEMONSTER', 'no')):
-            palname = 'unit'+ext+'.pal'
-        elif yes(cfg.get('TIBERIUM', 'no')) or yes(cfg.get('ISVEINS', 'no')):
-            palname = stem+'.pal'
-        if any(yes(cfg.get(k, 'no')) for k in ('TIBERIUM', 'WALL', 'ISVEINS', 'CRATE')):
-            offset -= 12
-        if cfg.get('LAND', '').upper() == 'TIBERIUM':
-            offset -= 1
-        if yes(cfg.get('ISVEINS', 'no')):
-            offset -= 1
-    elif yes(cfg.get('SPAWNSTIBERIUM', 'no')):
-        palname = 'unit'+ext+'.pal'
-        offset = -15
-    else:
-        offset = ini_integer(cfg.get('YDRAWFUDGE', '0'))
-    if art.get('PALETTE'):
-        palname = art['PALETTE'].lower().replace('~~~', ext)
-        if not palname.endswith('.pal'):
-            palname += ext+'.pal'
-    colors = palette(res.get(['cachemd.mix', 'cache.mix'], palname))
-    return raw, colors, offset, dict(file=filename, frame=frame, palette=palname, yOffset=offset)
-
-
-def shadow_frame(raw, frame, cfg, art):
-    """Original paired SHP mask; empty frames stay empty (ore/gems, etc.)."""
-    from realmap import shp_frame, yes
-    count = struct.unpack_from('<4H', raw)[3]
-    if yes(cfg.get('NOSHADOW', 'no')) or yes(art.get('NOSHADOW', 'no')):
-        return None, dict(shadowFrame=None, shadowStatus='NoShadow')
-    if count < 2 or count % 2 or not 0 <= frame < count//2:
-        return None, dict(shadowFrame=None, shadowStatus='no paired shadow')
-    index = count//2+frame
-    im = shp_frame(raw, index, [(v, v, v) for v in range(256)])
-    pixels = np.asarray(im)
-    nonzero = pixels[:, :, 3] != 0
-    if not nonzero.any():
-        return None, dict(shadowFrame=index, shadowStatus='empty')
-    # All stock shadow silhouettes use index 1. Do not mistake ordinary art in
-    # an unpaired SHP for a shadow merely because it has an even frame count.
-    if np.any(pixels[:, :, 0][nonzero] != 1):
-        return None, dict(shadowFrame=index, shadowStatus='not a shadow mask')
-    mask = im.getchannel('A').point(lambda value: SHADOW_ALPHA if value else 0)
-    return mask, dict(shadowFrame=index, shadowStatus='original SHP', shadowAlpha=SHADOW_ALPHA,
-                      shadowPixels=int(nonzero.sum()), shadowBounds=list(mask.getbbox()))
-
-
 def apply_shadow(canvas, mask, x, y, level, owners, levels, bodies, factor=1):
     """Receive shadows on ground at the caster's level, beneath solid sprites.
 
@@ -179,8 +104,40 @@ def apply_shadow(canvas, mask, x, y, level, owners, levels, bodies, factor=1):
     return count
 
 
+def bridge_terrain_mask(im, x, y, level, stencil):
+    """FA2SPHE bridge stencil: bridge level+3, terrain level+1, GE comparison.
+
+    Bridge SHPs span neighboring cells, including transparent Overlay owners.
+    Later water/ground must not erase them. Keep this color mask separate from
+    the terrain ownership buffer used for cell picking and probability overlays.
+    """
+    alpha = np.asarray(im.getchannel('A')).copy()
+    h, w = alpha.shape
+    height, width = stencil.shape
+    left, top, right, bottom = max(0, x), max(0, y), min(width, x+w), min(height, y+h)
+    if left < right and top < bottom:
+        part = alpha[top-y:bottom-y, left-x:right-x]
+        part[stencil[top:bottom, left:right] > min(level+1, 127)] = 0
+    return Image.fromarray(alpha)
+
+
+def mark_sprite_stencil(im, x, y, threshold, stencil):
+    height, width = stencil.shape
+    left, top = max(0, x), max(0, y)
+    right, bottom = min(width, x+im.width), min(height, y+im.height)
+    if left < right and top < bottom:
+        alpha = np.asarray(im.getchannel('A'))
+        part = stencil[top:bottom, left:right]
+        part[alpha[top-y:bottom-y, left-x:right-x] != 0] = min(threshold, 127)
+
+
+def mark_bridge_stencil(im, x, y, level, stencil):
+    mark_sprite_stencil(im, x, y, level+3, stencil)
+
+
 def render(cells, res, theater, tmps, folder, meta, progress):
-    from realmap import tile_parts, shp_frame, yes
+    from realmap_sprites import tile_parts, shp_frame
+    from realmap_format import yes
     colors = palette(theater['palette'])
     ordered = sorted(cells.values(), key=lambda c: (c['x']+c['y'], c['x']))
     minx = min(30*(c['x']-c['y'])-30 for c in ordered)-90
@@ -198,6 +155,10 @@ def render(cells, res, theater, tmps, folder, meta, progress):
         painter.voxels.close()
     scene = canvas.copy()
     object_bodies = Image.new('L', (width, height))
+    # Same-level terrain must not erase sprite pixels extending beyond the
+    # anchor cell. Higher foreground terrain still wins the depth comparison.
+    # This is solely the object scene; picking/ground/probability stay untouched.
+    object_stencil = np.zeros((height, width), dtype=np.uint8)
     object_shadows = []
     event_index = 0
     def draw_objects(before=float('inf')):
@@ -209,6 +170,7 @@ def render(cells, res, theater, tmps, folder, meta, progress):
             drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
             scene.paste(drawn, (round(x*factor), round(y*factor)), drawn)
             object_bodies.paste(255, (x,y,x+im.width,y+im.height), im.getchannel('A'))
+            mark_sprite_stencil(im, x, y, level+2, object_stencil)
             if part['shadow'] is not None:
                 object_shadows.append((part['shadow'], round(cx+part.get('shadowX', part['x'])),
                     round(cy+part.get('shadowY', part['y'])), level))
@@ -221,11 +183,25 @@ def render(cells, res, theater, tmps, folder, meta, progress):
     tiles, sprites, missing, audit = {}, {}, set(), {}
     records = []
     bounds = camera_rect(meta, [-minx, -miny])
+    def bridge_overlay(cell):
+        name = cell['overlayName'] or ''
+        return name in HIGH_NAMES or name.startswith(('LOBRDG', 'LOBRDB'))
+    bridge_stencil = (np.zeros((height, width), dtype=np.uint8)
+                      if any(bridge_overlay(c) for c in ordered) else None)
     for ident, c in enumerate(ordered, 1):
         draw_objects(c['x']+c['y'])
         key = c['file'], c['subTile']
         if key not in tiles:
-            parts = tile_parts(tmps[c['file']], c['subTile'], colors)
+            if c.get('terrainError'):
+                # Saved height survives, but this is explicitly unknown ground.
+                im = Image.new('RGBA', (60, 30))
+                from PIL import ImageDraw
+                pen = ImageDraw.Draw(im)
+                pen.polygon([(30, 0), (59, 15), (30, 29), (0, 15)], fill='#654757', outline='#d59ab6')
+                pen.line([(17, 15), (30, 8), (43, 15), (30, 22), (17, 15)], fill='#e4b4c9')
+                parts = [(im, 0, 0)]
+            else:
+                parts = tile_parts(tmps[c['file']], c['subTile'], colors)
             ground_parts = parts if c['slope'] else parts[:1]
             bx = min(dx for im, dx, dy in ground_parts)
             by = min(dy for im, dx, dy in ground_parts)
@@ -243,13 +219,37 @@ def render(cells, res, theater, tmps, folder, meta, progress):
         for i, (im, px, py) in enumerate(parts):
             at = (cx-30+px, cy-15+py)
             owner.paste(ident if not i or c['slope'] else 0, (*at, at[0]+im.width, at[1]+im.height), im.getchannel('A'))
-            bodies.paste(0, (*at, at[0]+im.width, at[1]+im.height), im.getchannel('A'))
-            object_bodies.paste(0, (*at, at[0]+im.width, at[1]+im.height), im.getchannel('A'))
+            alpha = im.getchannel('A')
+            level = c['level']
+            if i and py < 0 and py+im.height <= 15:
+                level += int((py-15)/-30)
+            if bridge_stencil is not None:
+                # Editor DirectXTerrain also raises the comparison height of
+                # short cliff extras whose artwork is entirely above the tile.
+                alpha = bridge_terrain_mask(im, *at, level, bridge_stencil)
+                im = im.copy()
+                im.putalpha(alpha)
+            bodies.paste(0, (*at, at[0]+im.width, at[1]+im.height), alpha)
+            object_alpha = bridge_terrain_mask(im, *at, level, object_stencil)
+            object_bodies.paste(0, (*at, at[0]+im.width, at[1]+im.height), object_alpha)
             drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
             canvas.paste(drawn, (round(at[0]*factor), round(at[1]*factor)), drawn)
-            scene.paste(drawn, (round(at[0]*factor), round(at[1]*factor)), drawn)
+            scene_alpha = object_alpha if factor == 1 else object_alpha.resize(drawn.size)
+            scene.paste(drawn, (round(at[0]*factor), round(at[1]*factor)), scene_alpha)
+        # Match FA2SPHE's bridge ordering: draw the next diagonal cell's bridge
+        # before foreground banks/abutments. Drawing at the owner's normal
+        # depth makes the end of the SHP float over the adjoining bank.
+        sprite_cells = []
+        ahead = cells.get((c['x']+1, c['y']+1))
+        if ahead and bridge_overlay(ahead):
+            sprite_cells.append((ahead, True))
+        if not bridge_overlay(c) or (c['x']-1, c['y']-1) not in cells:
+            sprite_cells.append((c, True))
         # Both can coexist; an ore overlay must not replace the terrain object.
-        for kind, is_overlay, frame in [(c['overlayName'], True, c['overlayData']), (c['terrain'], False, 0)]:
+        sprite_cells.append((c, False))
+        for sc, is_overlay in sprite_cells:
+            kind = sc['overlayName'] if is_overlay else sc['terrain']
+            frame = sprite_frame(sc) if is_overlay else 0
             if not kind:
                 continue
             skey = kind, is_overlay, frame
@@ -257,7 +257,7 @@ def render(cells, res, theater, tmps, folder, meta, progress):
                 try:
                     raw, pal, offset, spec = sprite_spec(kind, is_overlay, frame, res, theater)
                     cfg = theater['effectiveRules'].get(kind, {})
-                    mask, shadow_spec = shadow_frame(raw, frame, cfg, res.art.get(kind, {}))
+                    mask, shadow_spec = shadow_frame(raw, frame, cfg, res.art.get(cfg.get('IMAGE', kind).upper(), {}))
                     solid = (not is_overlay or any(yes(cfg.get(k, 'no')) for k in ('WALL', 'CRATE', 'ISAROCK'))
                              or not yes(cfg.get('DRAWFLAT', 'yes')))
                     sprites[skey] = (shp_frame(raw, frame, pal), offset, mask, solid)
@@ -269,14 +269,20 @@ def render(cells, res, theater, tmps, folder, meta, progress):
             sprite = sprites[skey]
             if sprite:
                 im, offset, shadow, solid = sprite
-                x, y = cx-im.width//2, cy-im.height//2+offset
+                if is_overlay and sc.get('bridge') and sc['bridge']['kind'] == 'low':
+                    sc['bridge']['emptySprite'] = im.getbbox() is None
+                sx = 30*(sc['x']-sc['y'])-minx
+                sy = 15*(sc['x']+sc['y']-sc['level'])-miny
+                x, y = sx-im.width//2, sy-im.height//2+offset
+                if is_overlay and bridge_overlay(sc):
+                    mark_bridge_stencil(im, x, y, sc['level'], bridge_stencil)
                 drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
                 canvas.paste(drawn, (round(x*factor), round(y*factor)), drawn)
                 scene.paste(drawn, (round(x*factor), round(y*factor)), drawn)
                 bodies.paste(255 if solid else 0, (x, y, x+im.width, y+im.height), im.getchannel('A'))
                 object_bodies.paste(255 if solid else 0, (x, y, x+im.width, y+im.height), im.getchannel('A'))
                 if shadow is not None:
-                    shadows.append((shadow, x, y, c['level']))
+                    shadows.append((shadow, x, y, sc['level']))
     draw_objects()
     progress('裁切坡面与前景悬崖的遮挡关系', 88)
     owners = np.asarray(owner)
@@ -331,28 +337,20 @@ def render(cells, res, theater, tmps, folder, meta, progress):
                 objectStyle='original sprites below information; unrendered objects have occupancy badges')
 
 
-def refresh_result(path):
-    """Explicit render-only upgrade of a saved report; never recompute probability.
+def refresh_sprite_issues(meta, rendering):
+    """Render upgrades must not retain obsolete missing-art warnings."""
+    prefix = '地形物／覆盖物贴图未能绘制：'
+    if 'loadIssues' in meta:
+        meta['loadIssues'] = [issue for issue in meta['loadIssues']
+                              if not issue.get('message', '').startswith(prefix)]
+        meta['loadIssues'].extend(dict(message=prefix+kind, count=1, cells=[])
+                                 for kind in rendering.get('missingSprites', []))
 
-    For legacy results use matching original source bytes, including map overrides.
-    Future results preserve source.map beside the report for repeatable rendering.
-    """
-    from realmap import ROOT, parse_map, sha
-    path = Path(path)
-    result = json.loads(path.read_text('utf8'))
-    meta = result['metadata']
-    choices = [path.parent/'source.map', ROOT.parents[1]/'scripts/crate_generation_research/heck-analysis'/meta['filename']]
-    source = next((p for p in choices if p.is_file() and sha(p.read_bytes()) == meta['sourceSha256']), None)
-    if source is None:
-        raise ValueError('旧报告缺少哈希匹配的地图原文件；请重新导入地图以升级绘图。')
-    if meta.get('previewOnly'):
-        from realmap_mod import preview
-        return preview(source.read_bytes(), path.parent, meta['filename'], lambda *a:None)['rendering']
-    _, res, theater, tmps, _ = parse_map(source.read_bytes(), path.parent, meta['version'], lambda *a: None)
-    cells = {(c['x'], c['y']): c for c in result['cells']}
-    result['rendering'] = render(cells, res, theater, tmps, path.parent, meta, lambda *a: None)
-    path.write_text(json.dumps(result, ensure_ascii=False, separators=(',', ':')), 'utf8')
-    return result['rendering']
+
+def refresh_result(path):
+    """Legacy entry; new callers import realmap_refresh.refresh_result."""
+    from realmap_refresh import refresh_result as refresh
+    return refresh(path)
 
 
 if __name__ == '__main__':

@@ -12,10 +12,20 @@ source are included. Stock game archives are copied from the user’s local inst
 - lzokay 2.1.0: distribution license included; https://pypi.org/project/lzokay/
 - Node.js 24.19.0: full version-specific LICENSE included in runtime/node/LICENSE; https://nodejs.org/
 - @napi-rs/canvas and Windows x64 native module: package licenses included; https://github.com/Brooooooklyn/canvas
+- Three.js 0.160.0: MIT, vendored as `lib/three-r160.min.js`; full license in `lib/three-LICENSE.txt`. Upstream: https://github.com/mrdoob/three.js/tree/r160. Loaded locally, without a CDN dependency.
 - FFmpeg: GPLv3 build copied from the locally installed binary, complete GPL text in runtime/ffmpeg/COPYING.GPLv3. Build version/configuration in runtime/ffmpeg/build-version.txt. Project/source: https://ffmpeg.org/ and https://www.gyan.dev/ffmpeg/builds/
 
 Original graphics, example maps and game data retain their respective owners'
 rights. This folder is a local tool bundle, not a transfer of those rights.
+`examples/cliff-demo.json` contains a small original YR snow-terrain excerpt
+and its textures for the offline height-difference demonstration. Its source
+map hash is recorded in the file; it contains no Mod assets or configuration.
+The offline official multiplayer catalog in `official-maps` preserves 248 map
+files from the user's original `MULTI.MIX` and `multimd.mix`, without rewriting
+their bytes. Names and mode registrations come from the official PKT and CSF
+resources; Traditional Chinese names are displayed in Simplified Chinese.
+Archive, registry, string-table and individual map SHA-256 hashes, as well as
+omitted registry references, are recorded in `official-maps/catalog.json`.
 Object rendering integration (2026-10-14): `resource_context/ra2map.py` and
 `resource_context/ra2mod.py` are copies of the user's local ra2yr-map v0.9
 read-only parsing tools, with their original source headers preserved.

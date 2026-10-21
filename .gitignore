@@ -16,14 +16,43 @@
 !/verify-random-frame.cjs
 !/verify-timing.cjs
 !/verify-ui-enhancements.cjs
+!/verify-regions.cjs
+!/verify-region-workspace.cjs
+!/benchmark-map-view.cjs
+!/verify-map-view-cache.cjs
+!/verify-transfer-origins.cjs
+!/verify-selection-keyboard.cjs
+!/verify-resource-ui.cjs
+!/verify-portable.py
 !/server.py
 !/realmap.py
+!/realmap_bridges.py
+!/verify-bridge-native.py
+!/verify-bridge-layers-native.py
+!/verify-bridges.py
+!/verify-bridge-render.py
+!/verify-map-loading-native.py
+!/verify-remaining-maps.py
 !/realmap_exact.py
 !/realmap_render.py
+!/realmap_3d.py
+!/verify-realmap-3d.py
+!/verify-terrain3d.cjs
+!/lib/
 !/realmap_objects.py
 !/realmap_voxel.py
 !/realmap_mod.py
+!/realmap_approx.py
+!/terrain_depth.py
+!/verify-partial-loading.py
+!/verify-directory-resources.py
 !/original_resources.py
+!/official_maps.py
+!/directory_picker.py
+!/build-map-catalog.py
+!/official-maps/
+!/verify-official-maps.py
+!/verify-official-maps.cjs
 !/runtime_bootstrap.py
 !/build-portable.py
 !/realmap-search.c
@@ -37,6 +66,8 @@
 
 /docs/*
 !/docs/random-crate-generation.md
+!/docs/bridge-crates.md
+!/docs/stock-map-loading.md
 /runtime/*
 !/runtime/voxel/
 !/runtime/ffmpeg/
@@ -48,8 +79,9 @@
 !/output/realmap-tools/map-search.exe
 !/output/realmap-tools/map-search.sha256
 !/output/realmap-tools/voxel-worker.exe
+!/output/realmap-tools/voxel-worker.sha256
 
-# Optional directory settings and Mod assets stay local.
+# Legacy local settings and data/game-directory.json stay local.
 /profiles/local.json
 **/__pycache__/
 *.py[cod]
@@ -59,6 +91,31 @@
 Thumbs.db
 .DS_Store
 
-!/verify-directory-resources.py
-
 !/verify-release-resources.py
+!/verify-object-layout.py
+!/verify-sprite-resolution.py
+!/verify-mineral-cache.cjs
+!/verify-mineral-cache.py
+!/verify-minerals.py
+!/map_results.py
+!/map_jobs.py
+!/verify-map-jobs.py
+!/verify-map-results.cjs
+!/verify-map-results.py
+!/ARCHITECTURE.md
+!/verify-voxel-lifecycle.py
+
+!/realmap_format.py
+!/realmap_resources.py
+!/realmap_parser.py
+!/realmap_sprites.py
+!/verify-module-boundaries.py
+!/verify-map-presentation.cjs
+
+!/realmap_refresh.py
+
+!/build-cliff-demo.py
+!/verify-cliff-demo.py
+!/verify-portable-install.py
+!/map_test_fixtures.py
+!/verify-source-package.py

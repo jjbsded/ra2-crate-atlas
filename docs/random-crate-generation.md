@@ -1,5 +1,7 @@
 # 红警 2 随机工具箱的坐标生成与失败处理
 
+> 本文保留机制研究时的阶段记录。“本机研究记录”所指反汇编、截图和实验输出不随源码或便携包分发；示例中的 `local-research` 也须由研究者自行准备。当前已支持的功能和模型边界以 [真实地图说明](../REAL-MAPS.md) 为准，启动与打包见 [README](../README.md)。
+
 更新日期：2026-10-13。用途：为机制介绍视频提供可复查的结论、流程和演示素材。
 
 研究对象是遭遇战／多人游戏的**随机工具箱补充流程**。分别检查了本地原版红警 2 `game.exe` 和尤里的复仇 `gamemd.exe` 的磁盘指令，并用尤复反编译归档、YRpp 类型定义和 Phobos 的实际 Hook 源码交叉解释。地图预放箱子、触发器造箱、摧毁单位掉箱及奖励抽取不是同一入口，不能把本报告的完整流程直接套用过去。第 6.1 节另对照了地图触发及建筑 `CrateBeneath` 入口，解释建筑废墟引发的失败。
@@ -209,7 +211,7 @@ YRpp 的占用位定义列出了步兵子格／Terrain、单位、飞机、建�
 
 **这是镜头显示范围与地图可用边界不重合的情况。就随机箱候选而言，它与其他可用边界外的真实格一样被拒绝；但它仍有真实地面属性，与完整地图外的 InvalidCell 不同。** 不能把屏幕上能看见的地面一律纳入热力图的合法落点。
 
-这不是仅凭地图截图作出的判断。镜头位置约束函数 [YR `0x6D8640`](D:/Ra2/Work/scripts/crate_generation_research/yr-006D8640.asm.txt) 和 [RA2 `0x6A8C80`](D:/Ra2/Work/scripts/crate_generation_research/ra2-006A8C80.asm.txt) 都使用以下上限位置公式，其中 `screenH` 为游戏战术视口高度：
+这不是仅凭地图截图作出的判断。镜头位置约束函数 YR `0x6D8640`（本机研究记录：`yr-006D8640.asm.txt`） 和 RA2 `0x6A8C80`（本机研究记录：`ra2-006A8C80.asm.txt`） 都使用以下上限位置公式，其中 `screenH` 为游戏战术视口高度：
 
 ```text
 镜头中心可达到的最小 Y = screenH / 2 + 15 × (W + 2T - 5)
@@ -219,8 +221,8 @@ YRpp 的占用位定义列出了步兵子格／Terrain、单位、飞机、建�
 
 其他系统对这条边界的使用进一步解释了“看得见但不能走／盖”的现象：
 
-- [格子通行属性重算 `0x483C80`](D:/Ra2/Work/scripts/crate_generation_research/yr-00483C80.asm.txt)先调用 `IsWithinUsableArea(coords,true)`，越界就写入 `Passability=7` 并返回。这条分支没有把 `LandType` 改成海水或陆地。
-- [单位鼠标动作 `0x700600`](D:/Ra2/Work/scripts/crate_generation_research/yr-00700600.asm.txt)在 `0x700AF6` 检查同一可用边界，失败转到不能移动的结果；[通常建造格检查 `0x47C620`](D:/Ra2/Work/scripts/crate_generation_research/yr-0047C620.asm.txt)在 `0x47C880` 也检查它。
+- 格子通行属性重算 `0x483C80`（本机研究记录：`yr-00483C80.asm.txt`）先调用 `IsWithinUsableArea(coords,true)`，越界就写入 `Passability=7` 并返回。这条分支没有把 `LandType` 改成海水或陆地。
+- 单位鼠标动作 `0x700600`（本机研究记录：`yr-00700600.asm.txt`）在 `0x700AF6` 检查同一可用边界，失败转到不能移动的结果；通常建造格检查 `0x47C620`（本机研究记录：`yr-0047C620.asm.txt`）在 `0x47C880` 也检查它。
 - 随机箱在附近搜索和最终放置时均检查可用边界。因此，即使这片区域事先已有地图对象，也不使自动落箱合法；最终箱子辅助函数还明确将 `IKnowWhatImDoing` 临时置 0，不能拿地图初始化／预放对象的宽松条件代替它。
 
 | 区域 | 可否成为随机起点 | 初始陆海属性 | 可否成为最终落点 |
@@ -241,7 +243,7 @@ x-y < 2(L+VW)-W
 y-x < W-2L
 ```
 
-另一个真实地图解析细节是 `LocalSize` 的运行时裁剪。[YR `0x567230`](D:/Ra2/Work/scripts/crate_generation_research/yr-00567230.asm.txt)／[RA2 `0x549AE0`](D:/Ra2/Work/scripts/crate_generation_research/ra2-00549AE0.asm.txt)先求输入矩形与完整地图矩形的交集，再按顺序执行：
+另一个真实地图解析细节是 `LocalSize` 的运行时裁剪。YR `0x567230`（本机研究记录：`yr-00567230.asm.txt`）／RA2 `0x549AE0`（本机研究记录：`ra2-00549AE0.asm.txt`）先求输入矩形与完整地图矩形的交集，再按顺序执行：
 
 ```text
 L  = max(L, 2)
@@ -283,7 +285,7 @@ VH = min(VH, H-T-6)
 
 建筑销毁后的处理遍历基础格，逐格写入 `Cell.OverlayTypeIndex = 0xEF`（十进制 239），并重新计算格子属性；基础原点额外保存 `Cell.Rubble` 建筑类型指针，用于废墟图像。**因此不能只找 `Cell.Rubble != nullptr` 的那一格来判断整片废墟**，其他基础格的 Overlay 也会挡箱。图像超出基础格的部分则不能直接视为占用。
 
-本地原版 [rules.ini](D:/Ra2/Work/video/crate-generation-demo/assets/source/rules.ini) 与尤复原始资源／补丁中的规则一致，关键设置如下；尤复来源与散列见 [规则摘录](D:/Ra2/Work/scripts/crate_generation_research/rubble-stock-rulesmd.json)。
+本地原版 rules.ini（本机研究记录：`rules.ini`） 与尤复原始资源／补丁中的规则一致，关键设置如下；尤复来源与散列见 规则摘录（本机研究记录：`rubble-stock-rulesmd.json`）。
 
 ```ini
 [RUBBLE_OVERLAY]
@@ -316,14 +318,14 @@ INI 列表写的是 `243=RUBBLE_OVERLAY`，但按 `[OverlayTypes]` 实际条目�
 
 | 证据 | RA2 `game.exe` | YR `gamemd.exe` |
 | --- | --- | --- |
-| 销毁后写废墟 Overlay | [函数 0x43EBA0](D:/Ra2/Work/scripts/crate_generation_research/ra2-0043EBA0.asm.txt)，写入点 `0x43EC6C` | [函数 0x441F60](D:/Ra2/Work/scripts/crate_generation_research/yr-00441F60.asm.txt)，写入点 `0x44202C`；[反编译](D:/Ra2/Work/scripts/crate_generation_research/yr-00441F60.c.txt) |
-| 触发动作调用指定位置入口 | [0x6B2830](D:/Ra2/Work/scripts/crate_generation_research/ra2-006B2830.asm.txt)：`0x6B2854 → 0x54E580` | [0x6E38B0](D:/Ra2/Work/scripts/crate_generation_research/yr-006E38B0.asm.txt)：`0x6E38D7 → 0x56BEC0`；主动作分派的[内联路径](D:/Ra2/Work/scripts/crate_generation_research/yr-006DF690.asm.txt)同样调用 |
-| 指定位置只搜索、放置一次 | [0x54E580](D:/Ra2/Work/scripts/crate_generation_research/ra2-0054E580.asm.txt)：Put 失败跳 `0x54E6C8` 返回 false | [0x56BEC0](D:/Ra2/Work/scripts/crate_generation_research/yr-0056BEC0.asm.txt)：Put 失败跳 `0x56C00A` 返回 false；[反编译](D:/Ra2/Work/scripts/crate_generation_research/yr-0056BEC0.c.txt) |
+| 销毁后写废墟 Overlay | 函数 0x43EBA0（本机研究记录：`ra2-0043EBA0.asm.txt`），写入点 `0x43EC6C` | 函数 0x441F60（本机研究记录：`yr-00441F60.asm.txt`），写入点 `0x44202C`；反编译（本机研究记录：`yr-00441F60.c.txt`） |
+| 触发动作调用指定位置入口 | 0x6B2830（本机研究记录：`ra2-006B2830.asm.txt`）：`0x6B2854 → 0x54E580` | 0x6E38B0（本机研究记录：`yr-006E38B0.asm.txt`）：`0x6E38D7 → 0x56BEC0`；主动作分派的内联路径（本机研究记录：`yr-006DF690.asm.txt`）同样调用 |
+| 指定位置只搜索、放置一次 | 0x54E580（本机研究记录：`ra2-0054E580.asm.txt`）：Put 失败跳 `0x54E6C8` 返回 false | 0x56BEC0（本机研究记录：`yr-0056BEC0.asm.txt`）：Put 失败跳 `0x56C00A` 返回 false；反编译（本机研究记录：`yr-0056BEC0.c.txt`） |
 | `CrateBeneath` 调用同一指定位置入口 | `0x43EE48`、`0x43EE61 → 0x54E580` | `0x442208`、`0x442221 → 0x56BEC0` |
 | 最终拒绝非空 Overlay | `0x493B0F` | `0x4A192F`；在 Overlay 构造前即返回 false |
 | 随机入口失败后重抽 | `0x54E55F～0x54E566` | `0x56BE91～0x56BE98` |
 
-YR 的 [Overlay 类型默认值](D:/Ra2/Work/scripts/crate_generation_research/yr-005FE250.asm.txt)（Land 字段 `+0x298`）、[格子属性重算](D:/Ra2/Work/scripts/crate_generation_research/yr-0047D2B0.asm.txt)及前述 E03／E04 通行检查共同说明废墟为什么能成为候选。[新增核查脚本](D:/Ra2/Work/scripts/crate_generation_research/verify_rubble_evidence.py)检查两版调用目标、条件分支、字段写入和规则；结果存入 [废墟证据清单](D:/Ra2/Work/scripts/crate_generation_research/rubble-evidence-manifest.json)。这是静态取证，尚未做实机断点复现。
+YR 的 Overlay 类型默认值（本机研究记录：`yr-005FE250.asm.txt`）（Land 字段 `+0x298`）、格子属性重算（本机研究记录：`yr-0047D2B0.asm.txt`）及前述 E03／E04 通行检查共同说明废墟为什么能成为候选。新增核查脚本（本机研究记录：`verify_rubble_evidence.py`）检查两版调用目标、条件分支、字段写入和规则；结果存入 废墟证据清单（本机研究记录：`rubble-evidence-manifest.json`）。这是静态取证，尚未做实机断点复现。
 
 #### 对概率热力图的含义
 
@@ -335,7 +337,7 @@ YR 的 [Overlay 类型默认值](D:/Ra2/Work/scripts/crate_generation_research/y
 
 ### 6.2 围墙、斜坡、树木／信号灯与矿石钻井
 
-本节同时核对原版两份可执行文件、三个 stock rules 来源和两个 stock art 来源；摘录与散列见 [Terrain 规则证据](D:/Ra2/Work/scripts/crate_generation_research/terrain-stock-rules.json)。结论指相应原版对象，地图内覆盖规则或插件可能改变结果。
+本节同时核对原版两份可执行文件、三个 stock rules 来源和两个 stock art 来源；摘录与散列见 Terrain 规则证据（本机研究记录：`terrain-stock-rules.json`）。结论指相应原版对象，地图内覆盖规则或插件可能改变结果。
 
 #### 围墙：在附近搜索期间排除
 
@@ -347,9 +349,9 @@ YR 的 [Overlay 类型默认值](D:/Ra2/Work/scripts/crate_generation_research/y
 
 `TREE01`、交通信号灯 `TRFF01～04`、路灯等是 Terrain 对象。原版按地图气候读取 `TemperateOccupationBits` 或 `SnowOccupationBits`；例如 TREE01 为 4／6，TRFF01 为 4／7。其值是**同一格内的子位置位掩码，不是占了 4 格或 7 格**。
 
-YR [Terrain 写占用函数 `0x71C110`](D:/Ra2/Work/scripts/crate_generation_research/yr-0071C110.asm.txt)／RA2 [对应函数 `0x6E38F0`](D:/Ra2/Work/scripts/crate_generation_research/ra2-006E38F0.asm.txt)把掩码低三位分别转换为 `Cell.OccupationFlags` 的 `0x04、0x08、0x10`。箱子的附近搜索不忽略这些占用，所以任意一个有效位就足以排除该格；不会因为只占了一个步兵子位置，就把箱子塞进同格的另一个角落。贴图伸到邻格不代表邻格也写了占用。
+YR Terrain 写占用函数 `0x71C110`（本机研究记录：`yr-0071C110.asm.txt`）／RA2 对应函数 `0x6E38F0`（本机研究记录：`ra2-006E38F0.asm.txt`）把掩码低三位分别转换为 `Cell.OccupationFlags` 的 `0x04、0x08、0x10`。箱子的附近搜索不忽略这些占用，所以任意一个有效位就足以排除该格；不会因为只占了一个步兵子位置，就把箱子塞进同格的另一个角落。贴图伸到邻格不代表邻格也写了占用。
 
-用户所指的无敌、持续生矿对象对应原版 **`TIBTRE01～03` 矿石钻井（TerrainClass）**，不是提供金钱的 `CAOILD` 科技钻油井建筑。三者规则为 `SpawnsTiberium=yes`、`Immune=yes`，art 基础为 `1x1`。规则未显式写占用掩码，但 [TerrainType 构造函数](D:/Ra2/Work/scripts/crate_generation_research/yr-0071DA80.asm.txt)给温带、雪地掩码都初始化为 7；RA2 `0x6E5260` 相同。因此：
+用户所指的无敌、持续生矿对象对应原版 **`TIBTRE01～03` 矿石钻井（TerrainClass）**，不是提供金钱的 `CAOILD` 科技钻油井建筑。三者规则为 `SpawnsTiberium=yes`、`Immune=yes`，art 基础为 `1x1`。规则未显式写占用掩码，但 TerrainType 构造函数（本机研究记录：`yr-0071DA80.asm.txt`）给温带、雪地掩码都初始化为 7；RA2 `0x6E5260` 相同。因此：
 
 - **钻井本体格**有 Terrain 占用，附近搜索跳过，继续找周围格；不因为免伤或没有血条而变成空地。
 - **周围已经长出矿石的格**按矿石 Overlay 处理：没有其他阻挡时可能进入候选，最终放箱因 Overlay 非空失败，随后整轮重抽。
@@ -361,7 +363,7 @@ YR [Terrain 写占用函数 `0x71C110`](D:/Ra2/Work/scripts/crate_generation_res
 
 随机箱的附近搜索没有启用“必须可建造”，`IsClearToMove` 也没有一条统一的“非平地就拒绝”。因此，普通可通行坡面 `SlopeIndex=1～4` 可以放箱，前提是可用边界、占用、通行、候选投影及空 Overlay 等其余条件都满足。不能沿用普通建筑要求平地的检查。
 
-但 [YR Overlay::Mark `0x5FC570`](D:/Ra2/Work/scripts/crate_generation_research/yr-005FC570.asm.txt) 和 [RA2 `0x5DA970`](D:/Ra2/Work/scripts/crate_generation_research/ra2-005DA970.asm.txt)有额外限制：
+但 YR Overlay::Mark `0x5FC570`（本机研究记录：`yr-005FC570.asm.txt`） 和 RA2 `0x5DA970`（本机研究记录：`ra2-005DA970.asm.txt`）有额外限制：
 
 ```cpp
 if (cell.SlopeIndex > 4 && overlay.ArrayIndex != 178)
@@ -370,7 +372,7 @@ if (cell.SlopeIndex > 4 && overlay.ArrayIndex != 178)
 
 stock Overlay 数组第 178 项是 `VEINHOLEDUMMY`，而陆箱 CRATE 为 179、水箱 WCRATE 为 242，均不在豁免范围内。这些是运行时顺序索引，不能用 INI 左边的数字替代。
 
-此限制并不只针对不可通行悬崖。已读取 `ra2.mix/isotemp.mix` 的 82 份 slope／ramp TMP：[坡面素材元数据](D:/Ra2/Work/scripts/crate_generation_research/slope-stock-tiles.json)中 `slope01.tem` 为坡型 1，`slope05.tem` 为坡型 5；两者 TMP 地面代码都是 13。引擎 [`0x544BE0`](D:/Ra2/Work/scripts/crate_generation_research/yr-00544BE0.asm.txt)经表 `0x8288E4` 把 13 转为 `LandType::Clear=0`，其 Track 倍率为 100%。所以**坡型大于 4 的格子也可能通过附近搜索**。TMP 原始地面代码与 Cell.LandType 枚举不是同一编号。
+此限制并不只针对不可通行悬崖。已读取 `ra2.mix/isotemp.mix` 的 82 份 slope／ramp TMP：坡面素材元数据（本机研究记录：`slope-stock-tiles.json`）中 `slope01.tem` 为坡型 1，`slope05.tem` 为坡型 5；两者 TMP 地面代码都是 13。引擎 `0x544BE0`（本机研究记录：`yr-00544BE0.asm.txt`）经表 `0x8288E4` 把 13 转为 `LandType::Clear=0`，其 Track 倍率为 100%。所以**坡型大于 4 的格子也可能通过附近搜索**。TMP 原始地面代码与 Cell.LandType 枚举不是同一编号。
 
 更关键的是失败传播：
 
@@ -385,7 +387,7 @@ stock Overlay 数组第 178 项是 `VEINHOLEDUMMY`，而陆箱 CRATE 为 179、�
 
 **原版默认设置下不会。它会保留非空槽位，等这次登记的存续计时到期后，再走过期换箱流程。** 因此上文的“不重抽”指当前生成调用结束，也没有下一帧的缺箱补偿；不是说这个槽位从此永远不会再次生成。
 
-依据是 [YR 更新函数 `0x56BBE0`](D:/Ra2/Work/scripts/crate_generation_research/yr-0056BBE0.asm.txt)／[RA2 `0x54E300`](D:/Ra2/Work/scripts/crate_generation_research/ra2-0054E300.asm.txt)。它们遍历 256 个槽，只看位置是否为空以及计时器是否到期；整个更新函数没有读取 Cell.OverlayTypeIndex，也没有“登记的箱子不存在就立即重建”的分支。其核心逻辑可概括为：
+依据是 YR 更新函数 `0x56BBE0`（本机研究记录：`yr-0056BBE0.asm.txt`）／RA2 `0x54E300`（本机研究记录：`ra2-0054E300.asm.txt`）。它们遍历 256 个槽，只看位置是否为空以及计时器是否到期；整个更新函数没有读取 Cell.OverlayTypeIndex，也没有“登记的箱子不存在就立即重建”的分支。其核心逻辑可概括为：
 
 ```cpp
 if (slot.Location != Empty && slot.Timer.Expired()) {
@@ -420,7 +422,7 @@ P_F(1000 轮全返回失败) = q_F^1000
 
 上述三类概率质量合计为 1。按当前随机逻辑帧口径，应先在同一帧 F 内处理重抽，再对帧分布精确平均；不能把 `g_F` 并入 `q_F`，也不能将剩余格擅自归一化到 100%。倍率基准“直接抽到一个坐标＝1”可以保持不变。当前平地 demo 没有这类坡面，仍属于 `g_F=0` 的特例；本次研究未新增 demo 场景或重新导出视频。
 
-复查脚本：[verify_terrain_edges_evidence.py](D:/Ra2/Work/scripts/crate_generation_research/verify_terrain_edges_evidence.py)。结果：[地形与边界证据清单](D:/Ra2/Work/scripts/crate_generation_research/terrain-edges-evidence-manifest.json)，共 62 个两版二进制锚点（含后续补充的存续计时／过期更新检查）、3 份 stock rules、82 份坡面 TMP 全部通过。地址只是本文核对版本的位置，换补丁或插件必须重新确认。
+复查脚本：verify_terrain_edges_evidence.py（本机研究记录：`verify_terrain_edges_evidence.py`）。结果：地形与边界证据清单（本机研究记录：`terrain-edges-evidence-manifest.json`），共 62 个两版二进制锚点（含后续补充的存续计时／过期更新检查）、3 份 stock rules、82 份坡面 TMP 全部通过。地址只是本文核对版本的位置，换补丁或插件必须重新确认。
 
 ### 6.3 悬崖旁能随机出箱，却不能走过去：落箱条件与路径可达性不同
 
@@ -479,7 +481,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 另外，这里讨论的是**确实显示出来的随机箱子**，不应直接套用第 6.2 节“坡型 >4，Overlay 没有落下却结束”的失败情形：后者没有实际箱子 Overlay，不是同一种观察结果。
 
-复查：[verify_cliff_evidence.py](D:/Ra2/Work/scripts/crate_generation_research/verify_cliff_evidence.py)；[原版悬崖 TMP／规则及二进制锚点](D:/Ra2/Work/scripts/crate_generation_research/cliff-stock-tiles.json)。17 个两版机器码／虚表锚点、140 个注册素材文件检查通过；这仍是静态核查，尚未对用户看到的具体格做实机复现。函数与字段命名还参照 [YRpp CellClass](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/CellClass.h) 和 [YRpp UnitClass](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/UnitClass.h)，实际判断以本文核对的原程序指令为准。
+复查：verify_cliff_evidence.py（本机研究记录：`verify_cliff_evidence.py`）；原版悬崖 TMP／规则及二进制锚点（本机研究记录：`cliff-stock-tiles.json`）。17 个两版机器码／虚表锚点、140 个注册素材文件检查通过；这仍是静态核查，尚未对用户看到的具体格做实机复现。函数与字段命名还参照 [YRpp CellClass](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/CellClass.h) 和 [YRpp UnitClass](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/UnitClass.h)，实际判断以本文核对的原程序指令为准。
 
 ### 6.4 直接解析冰天雪地：已定位 27 格、5 组封闭地块
 
@@ -487,7 +489,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 **用途修正：这 27 格属于用户明确排除的正常孤立高原，只作为“可落箱不代表可达”的研究样例，不是后续程序应特别标记的异常点。** 数据保留非零生成可能性，并统一设为 `annotationClassification=normal-isolated-plateau`、`showSpecialMarker=false`；这项分类针对本节两份精确地图版本，不是已实现的通用视觉识别算法。
 
-![冰天雪地定位总览](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/overview.png)
+!冰天雪地定位总览（本机研究记录：`overview.png`）
 
 #### 地图身份与完整解码核对
 
@@ -516,7 +518,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 这里的“组”按允许八方向邻接的宽松地块连接划分，不宣称组内每条斜向路径都能被具体单位采用。对于“能否从组外进入”的结论，这种放宽不会制造假阳性：即使放宽后，外围仍被 Rock 完整封闭。
 
-![27 个坐标及外围阻挡格](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/coordinates.png)
+!27 个坐标及外围阻挡格（本机研究记录：`coordinates.png`）
 
 图片底层直接使用原始雪地 TMP 和 `isosno.pal`，按格子高度投影；它是静态地形标注图，未模拟实机照明和对象渲染。矿石、树木等对象未绘制，四个相关岩石 Overlay 用 `R` 标注，分析时并未忽略其阻挡属性。
 
@@ -554,7 +556,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 #### 复现文件与结论范围
 
-完整 [坐标 CSV](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/coordinates.csv)、[逐格证据与 72 格封闭边界 JSON](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/report.json)、[解析及断言脚本](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/analyze_heck.py)、[分块解码脚本](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/decode-packs.ps1)、[标注图生成脚本](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/render_findings.py)均已保存。原始地图只读提取到研究目录，未改写游戏资源。解码脚本需要 Windows PowerShell 5／.NET Framework，以兼容本机安装的 CNCMaps 库。
+完整 坐标 CSV（本机研究记录：`coordinates.csv`）、逐格证据与 72 格封闭边界 JSON（本机研究记录：`report.json`）、解析及断言脚本（本机研究记录：`analyze_heck.py`）、分块解码脚本（本机研究记录：`decode-packs.ps1`）、标注图生成脚本（本机研究记录：`render_findings.py`）均已保存。原始地图只读提取到研究目录，未改写游戏资源。解码脚本需要 Windows PowerShell 5／.NET Framework，以兼容本机安装的 CNCMaps 库。
 
 这是对原版地图初始静态状态的确定性分析，27 格均有封闭边界和可落箱的证据；尚未在实机中逐格诱发随机刷新。“不能进入”指普通步兵／履带单位从组外逐格移动，不包括超时空传送、空运或地图直接预放。对树木子格、单位体积等附加限制可能产生的其他不可达情形，本节不声称穷尽所有单位类型。
 
@@ -589,11 +591,11 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 后续已加入 F6～F10 单键操作与整区批量试箱：F9 对锁定区域的 25 个起点依次执行所选原生算法，允许保留多个箱子，并可统一清理。F10 可清理全图现有箱子；另可在原生 256 槽满时清理当前区域外一个箱子腾位。未扩容原生数组。此前生成的箱子会影响下一格的搜索，批量结果不是独立单箱试验，也不作为概率抽样。快捷键只在已连接游戏前台临时接管，配置文件不变；具体操作和新版验收状态以工具说明、验证记录为准。
 
-已实现独立检查器：[启动](../scripts/crate_probe/Start-Probe.cmd)、[使用说明](../scripts/crate_probe/README.md)。连接已核对的原版尤复 1.001 后，可锁定鼠标或指定中心坐标，逐格尝试原生指定位置生成，或仅覆盖原生随机生成的第一次起点。后续附近搜索、重抽和放置继续走游戏函数，同时记录请求格、每次抽点、实际落点及实际箱子 Overlay。游戏自身的随机刷新也会记录。
+已实现独立检查器：启动（本机研究记录：`Start-Probe.cmd`）、使用说明（本机研究记录：`README.md`）。连接已核对的原版尤复 1.001 后，可锁定鼠标或指定中心坐标，逐格尝试原生指定位置生成，或仅覆盖原生随机生成的第一次起点。后续附近搜索、重抽和放置继续走游戏函数，同时记录请求格、每次抽点、实际落点及实际箱子 Overlay。游戏自身的随机刷新也会记录。
 
 它还支持选中单位轨迹、原生拾取前后状态、F7 战场截图和报告 ZIP。试验成功与否不直接转成不可达结论，正常孤立高原继续排除在特别提示之外。指定起点试验不用于估计概率，不改变演示程序的精确概率计算。
 
-实现及验证分层保存在工具目录：`evidence/binary-manifest.json` 是静态字节核对，`app/selftest-result.json` 是自有合成引擎测试；实机过程见 [验证记录](../scripts/crate_probe/VALIDATION.md)。三者不能混同。实机初次验证发现，逻辑入口的 `InGameLogic` 标志可为 false；检查器已移除这一错误的战场就绪前提。后续又定位并修正了步兵 Type 与坦克 Type 字段偏移不同导致的崩溃，增加类型切换回归。最终修正版在单人“冰天雪地”通过两种落箱入口、清理、坦克移动、步兵选择和原生拾取验证；格线此前已由用户确认对齐。自动结果与人工／拾取日志证据分别保存，不将有限操作验收延伸为所有状态的稳定性保证。
+实现及验证分层保存在工具目录：`evidence/binary-manifest.json` 是静态字节核对，`app/selftest-result.json` 是自有合成引擎测试；实机过程见 验证记录（本机研究记录：`VALIDATION.md`）。三者不能混同。实机初次验证发现，逻辑入口的 `InGameLogic` 标志可为 false；检查器已移除这一错误的战场就绪前提。后续又定位并修正了步兵 Type 与坦克 Type 字段偏移不同导致的崩溃，增加类型切换回归。最终修正版在单人“冰天雪地”通过两种落箱入口、清理、坦克移动、步兵选择和原生拾取验证；格线此前已由用户确认对齐。自动结果与人工／拾取日志证据分别保存，不将有限操作验收延伸为所有状态的稳定性保证。
 
 另一个已定位的工具问题是 `CollectCrate` 声明与原二进制 ABI 不符：头文件标为 void，但多个移动调用者实际消费 AL；旧挂钩未保留返回值，会使特定 UID 的坦克停滞。同局脱离后恢复移动，修复后的挂钩原样传回 AL，并已加入能区分旧／新 DLL 的回归测试。最终实机日志确认此前受影响的 UID 1073152 能到达 `(60,110)`、`(59,108)` 并拾取箱子。此前由这一故障产生的“不可移动”不能作为地图通行异常的证据。
 
@@ -601,7 +603,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 2026-10-13 的原版尤复 1.001 实机记录确认：**该格确实生成过真实箱子，而且落箱前是 Rough，落箱后变成 Rock，箱子消失后仍保持 Rock。** 这解释了用户先看到箱子但捡不到，随后又无法在同一点重复生成的现象。它属于放箱前后状态不同的问题，不是第 6.4 节排除的普通孤立高原。
 
-本次生成使用检查器“随机算法：仅指定第一次起点”（`mode=2`），之后搜索、重抽与放置均执行原生代码；不能将这次事件写成“自然随机恰好抽到了该点”。证据来自 PID 53340，游戏 SHA-256 `3e81a61775d2745d1dabe397325ef663cd994ffc194da4e998e3bf5d2d308600`。原始日志片段、规则、机器码核对和只读内存快照已归档到 [99,105 证据](../scripts/crate_generation_research/heck-analysis/point-99-105/evidence.json)，可运行 [核查脚本](../scripts/crate_generation_research/verify_cliff_crate_point.py)复查。
+本次生成使用检查器“随机算法：仅指定第一次起点”（`mode=2`），之后搜索、重抽与放置均执行原生代码；不能将这次事件写成“自然随机恰好抽到了该点”。证据来自 PID 53340，游戏 SHA-256 `3e81a61775d2745d1dabe397325ef663cd994ffc194da4e998e3bf5d2d308600`。原始日志片段、规则、机器码核对和只读内存快照已归档到 99,105 证据（本机研究记录：`evidence.json`），可运行 核查脚本（本机研究记录：`verify_cliff_crate_point.py`）复查。
 
 | 时点 | `(99,105)` 的实际状态 | 含义 |
 | --- | --- | --- |
@@ -619,7 +621,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 4. 检查的相对坐标为 `(0,-1)、(-1,0)、(2,2)、(1,1)、(-1,1)、(1,-1)`；本点命中 `(-1,+1)`，即 `(98,106)`。高度达到“当前高度+4”，且原版 `CliffBackImpassability=2`，于是 `0x47D53E` 将本格的 LandType 写为 Rock。这里没有把箱子撤销或重新检查放置后是否还能走入。
 5. 原版 `[Rock]` 的 Foot／Track 速度均为 0；普通地面通行检查使用此运行时 LandType，因此不能正常走进该格拾取。`0x4A1AA0` 的原生箱子移除路径清除 Overlay、powerup 并重绘，但不调用上述属性重算，不把 LandType 还原成 Rough。实机箱子消失后的快照与此一致。
 
-关键代码可直接复查：[Overlay 默认值](../scripts/crate_generation_research/yr-005FE250.asm.txt)、[Overlay 放置后重算](../scripts/crate_generation_research/yr-005FC570.asm.txt)、[地面属性重算](../scripts/crate_generation_research/yr-0047D2B0.asm.txt)、[通行检查](../scripts/crate_generation_research/yr-004834A0.c.txt)、[箱子移除](../scripts/crate_generation_research/heck-analysis/point-99-105/native-remove.asm.txt)。反编译文件中的部分函数名是自动推断的旧名，地址和机器码是这里的取证依据。
+关键代码可直接复查：Overlay 默认值（本机研究记录：`yr-005FE250.asm.txt`）、Overlay 放置后重算（本机研究记录：`yr-005FC570.asm.txt`）、地面属性重算（本机研究记录：`yr-0047D2B0.asm.txt`）、通行检查（本机研究记录：`yr-004834A0.c.txt`）、箱子移除（本机研究记录：`native-remove.asm.txt`）。反编译文件中的部分函数名是自动推断的旧名，地址和机器码是这里的取证依据。
 
 #### 消失、复现与概率分析的边界
 
@@ -635,7 +637,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 本轮全部解码 **19,690 格**，按原生类型默认值重建初始 LandType，并穷举 **39,601 个初始坐标**（X、Y 各 1～199）和每次搜索结果的所有可选下标，验证存在实际随机放置路径。它没有抽样，也没有用“地形看起来能放”代替附近搜索；本轮只判定生成可能性，没有计算完整概率倍率。
 
-![落箱后变为 Rock 的 13 格总览](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/overview.png)
+!落箱后变为 Rock 的 13 格总览（本机研究记录：`overview.png`）
 
 #### 全部保留坐标
 
@@ -661,7 +663,7 @@ TMP 的原始地面码与引擎 `LandType` 枚举不同；此处按 YR `0x8288E4
 
 F 区六格位于右侧高原外围的 **Level 6 地面**；此前排除的 27 格在 **Level 10 高原上**。两份清单无重叠。排除的 27 格本身已处于地图最高高度，不满足本轮“另有高出 4 级的邻格”条件。新目标在忽略树木的宽松地形连接图上均连接主体地形；这不等于已经逐格验证了具体单位的路径。
 
-[全部坐标放大图](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/coordinates.png) · [A](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-A.png) · [B](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-B.png) · [C](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-C.png) · [D](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-D.png) · [E](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-E.png) · [F](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-F.png) · [G](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/detail-G.png)
+全部坐标放大图（本机研究记录：`coordinates.png`） · A（本机研究记录：`detail-A.png`） · B（本机研究记录：`detail-B.png`） · C（本机研究记录：`detail-C.png`） · D（本机研究记录：`detail-D.png`） · E（本机研究记录：`detail-E.png`） · F（本机研究记录：`detail-F.png`） · G（本机研究记录：`detail-G.png`）
 
 底图直接使用原始雪地 TMP 和 `isosno.pal`，按实际高度投影。坐标、格线与触发高邻格标注位于上层；树木用 `T` 表示位置，矿石和对象贴图、动态照明未渲染。图片是数据标注图，不是逐点实机截图。
 
@@ -673,7 +675,7 @@ F 区六格位于右侧高原外围的 **Level 6 地面**；此前排除的 27 �
 
 原生搜索会继续扩圈，最多收集 24 项；存在投影匹配的候选时，只在匹配组内用帧取模选择。针对上述原始静态地图，穷举所有起点后，这 9 格**从未进入最终用于选择的候选组**，因此不能列入本轮可随机落箱的 13 格。重抽仍然面对相同地图与相同选择规则，不会凭空赋予这些格子非零生成可能性。
 
-这并不表示它们在所有战局中永久不能出箱：单位占用、地形／对象变化、其他箱子造成的 LandType 改写都可能改变搜索结果。它们单独保存在 [次选组候选 CSV](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/shadowed-candidates.csv)，没有叠加到主标注图。后续读取实际战场状态时，应重新计算候选支持，而不是把这 9 格永久列入黑名单。
+这并不表示它们在所有战局中永久不能出箱：单位占用、地形／对象变化、其他箱子造成的 LandType 改写都可能改变搜索结果。它们单独保存在 次选组候选 CSV（本机研究记录：`shadowed-candidates.csv`），没有叠加到主标注图。后续读取实际战场状态时，应重新计算候选支持，而不是把这 9 格永久列入黑名单。
 
 #### 核对方法与复现文件
 
@@ -681,9 +683,9 @@ F 区六格位于右侧高原外围的 **Level 6 地面**；此前排除的 27 �
 
 搜索重建保留半径 0 的重复枚举、上下边交错及左右边交错的顺序、24 项上限、半径 0～31、投影优先组和帧取模。C 扫描器遍历全部起点；另用可读 Python 实现核对全部 22 个目标起点及空结果、满 24 项、次选组、地图外围等情况。对保留的 13 格还逐个验证直接起点必选自身的证据。
 
-- [13 格坐标 CSV](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/coordinates.csv)：坐标、TMP、前后地面、高邻格、初始搜索支持及实机证据标识。
-- [完整扫描 JSON](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/rock-transition/report.json)：13 个保留点、9 个次选组反例、27 格排除清单、游戏／地图／规则与脚本哈希。
-- [分析脚本](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/analyze_rock_transition.py)、[搜索支持枚举器](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/scan_crate_support.c)、[标注图脚本](D:/Ra2/Work/scripts/crate_generation_research/heck-analysis/render_rock_transition.py)。
+- 13 格坐标 CSV（本机研究记录：`coordinates.csv`）：坐标、TMP、前后地面、高邻格、初始搜索支持及实机证据标识。
+- 完整扫描 JSON（本机研究记录：`report.json`）：13 个保留点、9 个次选组反例、27 格排除清单、游戏／地图／规则与脚本哈希。
+- 分析脚本（本机研究记录：`analyze_rock_transition.py`）、搜索支持枚举器（本机研究记录：`scan_crate_support.c`）、标注图脚本（本机研究记录：`render_rock_transition.py`）。
 
 **证据层级：`(99,105)` 有实机前后状态记录，其余 12 格是相同原生机制下的确定性静态预测，尚未逐格实测。** 游戏资源及地图文件未修改。两份原版 RA2／YR 地图相关地形相同，本轮引擎行为结论限定于已核对的尤复 1.001，不冒充新的 RA2 实机验收。实际试箱应从未在这些格子生成过箱子的局面开始。
 
@@ -722,9 +724,9 @@ F 区六格位于右侧高原外围的 **Level 6 地面**；此前排除的 27 �
 
 新增路径依据是 **尤复 1.001 二进制核对与静态地图对照**，未进行新一轮拆树／烧痕实机测试；不能把 `(100,58)` 写成已有实机复现。可复核的材料：
 
-- [核查脚本](../scripts/crate_generation_research/verify_terrain_disturbance.py)、[14 个机器码锚点与对照结果](../scripts/crate_generation_research/terrain-disturbance-evidence.json)。
-- [树木移除反汇编](../scripts/crate_generation_research/yr-0071C930.asm.txt)、[Smudge 放置入口](../scripts/crate_generation_research/yr-006B4BE0.asm.txt)、[Smudge 字段写入](../scripts/crate_generation_research/yr-006B6080.asm.txt)。
-- [仅清除 TREE11 的完整分析结果](../video/crate-generation-demo/output/tree-clearance-study/without-tree-100-58/result.json)。原图未改动，派生结果不能当作原图概率。
+- 核查脚本（本机研究记录：`verify_terrain_disturbance.py`）、14 个机器码锚点与对照结果（本机研究记录：`terrain-disturbance-evidence.json`）。
+- 树木移除反汇编（本机研究记录：`yr-0071C930.asm.txt`）、Smudge 放置入口（本机研究记录：`yr-006B4BE0.asm.txt`）、Smudge 字段写入（本机研究记录：`yr-006B6080.asm.txt`）。
+- 仅清除 TREE11 的完整分析结果（本机研究记录：`result.json`）。原图未改动，派生结果不能当作原图概率。
 - [YRpp 的 CellClass::RecalcAttributes 接口说明](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/CellClass.h)、[ObjectClass 的 Limbo 接口](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/ObjectClass.h)提供符号含义；结论以本地原版机器码、虚表目标和写入字段为准。
 
 ## 7. 完整流程与失败后的去向
@@ -810,9 +812,9 @@ y = trunc((YP - XP) / 2)
 
 ## 9. 供视频制作使用的图示与镜头顺序
 
-[坐标采样与落点权重示意图 PNG](D:/Ra2/Work/scripts/crate_generation_research/sampling-geometry.png)（[SVG 矢量版](D:/Ra2/Work/scripts/crate_generation_research/sampling-geometry.svg)）来自一个可复算的离线模型：`Size=64×64`、`LocalSize=3,5,58,52`，平地全陆地、无障碍、无桥、固定逻辑帧 600，枚举全部初始坐标对。模型不执行游戏，不读取实际地图，也不模拟连续放箱后已有箱子的相互排斥。
+坐标采样与落点权重示意图 PNG（本机研究记录：`sampling-geometry.png`）（SVG 矢量版（本机研究记录：`sampling-geometry.svg`））来自一个可复算的离线模型：`Size=64×64`、`LocalSize=3,5,58,52`，平地全陆地、无障碍、无桥、固定逻辑帧 600，枚举全部初始坐标对。模型不执行游戏，不读取实际地图，也不模拟连续放箱后已有箱子的相互排斥。
 
-在这组明确假设下，16129 个初始坐标中，6095 个原地找到候选，9834 个被挪到别处，200 个在搜索范围内没有候选。这些数字只用于解释算法为何能产生偏差，**不是任意官方地图的实测概率**。[模型及边界样例结果](D:/Ra2/Work/scripts/crate_generation_research/geometry-results.json)保留了全部统计口径。
+在这组明确假设下，16129 个初始坐标中，6095 个原地找到候选，9834 个被挪到别处，200 个在搜索范围内没有候选。这些数字只用于解释算法为何能产生偏差，**不是任意官方地图的实测概率**。模型及边界样例结果（本机研究记录：`geometry-results.json`）保留了全部统计口径。
 
 建议的镜头／讲解顺序：
 
@@ -842,22 +844,22 @@ y = trunc((YP - XP) / 2)
 
 | 编号 | 检查内容 | RA2 地址 | YR 地址及本地证据 |
 | --- | --- | --- | --- |
-| E01 | 空槽、两次抽样、1000 轮上限 | [0x54E410](D:/Ra2/Work/scripts/crate_generation_research/ra2-0054E410.asm.txt) | [0x56BD40](D:/Ra2/Work/scripts/crate_generation_research/yr-0056BD40.asm.txt) |
-| E02 | 附近搜索、环范围、24 项、按帧取模 | [0x5502E0](D:/Ra2/Work/scripts/crate_generation_research/ra2-005502E0.asm.txt) | [0x56DC20 反汇编](D:/Ra2/Work/scripts/crate_generation_research/yr-0056DC20.asm.txt)，[反编译归档](D:/Ra2/Work/scripts/crate_generation_research/yr-0056DC20.c.txt) |
-| E03 | 1×1 通行调用及 Overlay 参数 | `0x550CF0` | [0x56E7C0](D:/Ra2/Work/scripts/crate_generation_research/yr-0056E7C0.asm.txt) |
-| E04 | 占用字节、墙、地面通行倍率 | [0x478760](D:/Ra2/Work/scripts/crate_generation_research/ra2-00478760.asm.txt) | [0x4834A0](D:/Ra2/Work/scripts/crate_generation_research/yr-004834A0.asm.txt) |
-| E05 | 放箱、无 Overlay、计时 | [0x4939A0](D:/Ra2/Work/scripts/crate_generation_research/ra2-004939A0.asm.txt)，[0x493AD0](D:/Ra2/Work/scripts/crate_generation_research/ra2-00493AD0.asm.txt) | [0x4A17C0](D:/Ra2/Work/scripts/crate_generation_research/yr-004A17C0.asm.txt)，[0x4A18F0](D:/Ra2/Work/scripts/crate_generation_research/yr-004A18F0.asm.txt) |
-| E06 | 抽样范围初始化、实际地图边界、可用边界 | [初始化片段](D:/Ra2/Work/scripts/crate_generation_research/ra2-00548BCB.asm.txt)，[0x55A660](D:/Ra2/Work/scripts/crate_generation_research/ra2-0055A660.asm.txt) | [创建地图反编译](D:/Ra2/Work/scripts/crate_generation_research/yr-00565C10.c.txt)，[0x568300](D:/Ra2/Work/scripts/crate_generation_research/yr-00568300.asm.txt)，[0x578460](D:/Ra2/Work/scripts/crate_generation_research/yr-00578460.asm.txt)，[0x578540](D:/Ra2/Work/scripts/crate_generation_research/yr-00578540.asm.txt) |
-| E07 | 场景有界随机数 | [0x6388A0](D:/Ra2/Work/scripts/crate_generation_research/ra2-006388A0.asm.txt) | [0x65C7E0](D:/Ra2/Work/scripts/crate_generation_research/yr-0065C7E0.asm.txt) |
-| E08 | 开局、捡箱、过期的补充调用 | [开局](D:/Ra2/Work/scripts/crate_generation_research/ra2-0065E989.asm.txt)、[捡箱](D:/Ra2/Work/scripts/crate_generation_research/ra2-00477043.asm.txt)、[过期](D:/Ra2/Work/scripts/crate_generation_research/ra2-0054E300.asm.txt)；调用点分别为 `0x65E9C1`、`0x477070`、`0x54E360` | [开局](D:/Ra2/Work/scripts/crate_generation_research/yr-0068695C.asm.txt)、[捡箱](D:/Ra2/Work/scripts/crate_generation_research/yr-00481D86.asm.txt)、[过期](D:/Ra2/Work/scripts/crate_generation_research/yr-0056BBE0.asm.txt) |
-| E09 | 本地完整反编译归档 | 无同等 RA2 C 归档，本题直接检查机器码 | [gamemd.exe.c](D:/Ra2/Work/_tmp_ra2yr_resource/decompile-results/gamemd.exe.c) |
+| E01 | 空槽、两次抽样、1000 轮上限 | 0x54E410（本机研究记录：`ra2-0054E410.asm.txt`） | 0x56BD40（本机研究记录：`yr-0056BD40.asm.txt`） |
+| E02 | 附近搜索、环范围、24 项、按帧取模 | 0x5502E0（本机研究记录：`ra2-005502E0.asm.txt`） | 0x56DC20 反汇编（本机研究记录：`yr-0056DC20.asm.txt`），反编译归档（本机研究记录：`yr-0056DC20.c.txt`） |
+| E03 | 1×1 通行调用及 Overlay 参数 | `0x550CF0` | 0x56E7C0（本机研究记录：`yr-0056E7C0.asm.txt`） |
+| E04 | 占用字节、墙、地面通行倍率 | 0x478760（本机研究记录：`ra2-00478760.asm.txt`） | 0x4834A0（本机研究记录：`yr-004834A0.asm.txt`） |
+| E05 | 放箱、无 Overlay、计时 | 0x4939A0（本机研究记录：`ra2-004939A0.asm.txt`），0x493AD0（本机研究记录：`ra2-00493AD0.asm.txt`） | 0x4A17C0（本机研究记录：`yr-004A17C0.asm.txt`），0x4A18F0（本机研究记录：`yr-004A18F0.asm.txt`） |
+| E06 | 抽样范围初始化、实际地图边界、可用边界 | 初始化片段（本机研究记录：`ra2-00548BCB.asm.txt`），0x55A660（本机研究记录：`ra2-0055A660.asm.txt`） | 创建地图反编译（本机研究记录：`yr-00565C10.c.txt`），0x568300（本机研究记录：`yr-00568300.asm.txt`），0x578460（本机研究记录：`yr-00578460.asm.txt`），0x578540（本机研究记录：`yr-00578540.asm.txt`） |
+| E07 | 场景有界随机数 | 0x6388A0（本机研究记录：`ra2-006388A0.asm.txt`） | 0x65C7E0（本机研究记录：`yr-0065C7E0.asm.txt`） |
+| E08 | 开局、捡箱、过期的补充调用 | 开局（本机研究记录：`ra2-0065E989.asm.txt`）、捡箱（本机研究记录：`ra2-00477043.asm.txt`）、过期（本机研究记录：`ra2-0054E300.asm.txt`）；调用点分别为 `0x65E9C1`、`0x477070`、`0x54E360` | 开局（本机研究记录：`yr-0068695C.asm.txt`）、捡箱（本机研究记录：`yr-00481D86.asm.txt`）、过期（本机研究记录：`yr-0056BBE0.asm.txt`） |
+| E09 | 本地完整反编译归档 | 无同等 RA2 C 归档，本题直接检查机器码 | gamemd.exe.c（本机研究记录：`gamemd.exe.c`） |
 | E10 | Phobos 对采样的实际修改 | 不适用：该 Hook 对应尤复 | [Hooks.Crates.cpp](https://github.com/Phobos-developers/Phobos/blob/develop/src/Misc/Hooks.Crates.cpp) |
 | E11 | 类型、参数与字段交叉解释 | 结合对应机器码验证 | [YRpp MapClass](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/MapClass.h)，[YRpp CellClass](https://github.com/Phobos-developers/YRpp/blob/phobos-dev/CellClass.h) |
-| E12 | 无效格初始化、默认 LandType=Clear | [全局占位格初始化 0x547930](D:/Ra2/Work/scripts/crate_generation_research/ra2-00547930.asm.txt)，[构造函数 0x470F10](D:/Ra2/Work/scripts/crate_generation_research/ra2-00470F10.asm.txt) | [全局占位格初始化 0x565060](D:/Ra2/Work/scripts/crate_generation_research/yr-00565060.asm.txt)，[构造函数 0x47BBF0](D:/Ra2/Work/scripts/crate_generation_research/yr-0047BBF0.asm.txt)，[构造函数反编译](D:/Ra2/Work/scripts/crate_generation_research/yr-0047BBF0.c.txt) |
-| E13 | Terrain 占用位、矿石钻井默认掩码 | [0x6E38F0](D:/Ra2/Work/scripts/crate_generation_research/ra2-006E38F0.asm.txt)、[0x6E5260](D:/Ra2/Work/scripts/crate_generation_research/ra2-006E5260.asm.txt) | [0x71C110](D:/Ra2/Work/scripts/crate_generation_research/yr-0071C110.asm.txt)、[0x71DA80](D:/Ra2/Work/scripts/crate_generation_research/yr-0071DA80.asm.txt)、[规则／art 摘录](D:/Ra2/Work/scripts/crate_generation_research/terrain-stock-rules.json) |
-| E14 | Overlay 坡型限制与失败未向外传播 | [Mark](D:/Ra2/Work/scripts/crate_generation_research/ra2-005DA970.asm.txt)、[构造](D:/Ra2/Work/scripts/crate_generation_research/ra2-005DA7D0.asm.txt)、[Unlimbo](D:/Ra2/Work/scripts/crate_generation_research/ra2-005D3890.asm.txt) | [Mark](D:/Ra2/Work/scripts/crate_generation_research/yr-005FC570.asm.txt)、[构造](D:/Ra2/Work/scripts/crate_generation_research/yr-005FC380.asm.txt)、[Unlimbo](D:/Ra2/Work/scripts/crate_generation_research/yr-005F4EC0.asm.txt)、[TMP 摘录](D:/Ra2/Work/scripts/crate_generation_research/slope-stock-tiles.json) |
-| E15 | LocalSize 裁剪与镜头顶部余量 | [0x549AE0](D:/Ra2/Work/scripts/crate_generation_research/ra2-00549AE0.asm.txt)、[0x6A8C80](D:/Ra2/Work/scripts/crate_generation_research/ra2-006A8C80.asm.txt) | [0x567230](D:/Ra2/Work/scripts/crate_generation_research/yr-00567230.asm.txt)、[0x6D8640](D:/Ra2/Work/scripts/crate_generation_research/yr-006D8640.asm.txt)、[通行属性重算](D:/Ra2/Work/scripts/crate_generation_research/yr-00483C80.asm.txt) |
-| E16 | 箱子局部落点与车辆路径可达性、崖后属性 | [高差过渡 0x4C8730](D:/Ra2/Work/scripts/crate_generation_research/ra2-004C8730.asm.txt)、[属性重算 0x472540](D:/Ra2/Work/scripts/crate_generation_research/ra2-00472540.asm.txt) | [车辆进入格 0x73F0A0](D:/Ra2/Work/scripts/crate_generation_research/yr-0073F0A0.asm.txt)、[高差过渡 0x4D9C60](D:/Ra2/Work/scripts/crate_generation_research/yr-004D9C60.asm.txt)、[属性重算 0x47D2B0](D:/Ra2/Work/scripts/crate_generation_research/yr-0047D2B0.asm.txt)、[温带／雪地悬崖素材](D:/Ra2/Work/scripts/crate_generation_research/cliff-stock-tiles.json) |
+| E12 | 无效格初始化、默认 LandType=Clear | 全局占位格初始化 0x547930（本机研究记录：`ra2-00547930.asm.txt`），构造函数 0x470F10（本机研究记录：`ra2-00470F10.asm.txt`） | 全局占位格初始化 0x565060（本机研究记录：`yr-00565060.asm.txt`），构造函数 0x47BBF0（本机研究记录：`yr-0047BBF0.asm.txt`），构造函数反编译（本机研究记录：`yr-0047BBF0.c.txt`） |
+| E13 | Terrain 占用位、矿石钻井默认掩码 | 0x6E38F0（本机研究记录：`ra2-006E38F0.asm.txt`）、0x6E5260（本机研究记录：`ra2-006E5260.asm.txt`） | 0x71C110（本机研究记录：`yr-0071C110.asm.txt`）、0x71DA80（本机研究记录：`yr-0071DA80.asm.txt`）、规则／art 摘录（本机研究记录：`terrain-stock-rules.json`） |
+| E14 | Overlay 坡型限制与失败未向外传播 | Mark（本机研究记录：`ra2-005DA970.asm.txt`）、构造（本机研究记录：`ra2-005DA7D0.asm.txt`）、Unlimbo（本机研究记录：`ra2-005D3890.asm.txt`） | Mark（本机研究记录：`yr-005FC570.asm.txt`）、构造（本机研究记录：`yr-005FC380.asm.txt`）、Unlimbo（本机研究记录：`yr-005F4EC0.asm.txt`）、TMP 摘录（本机研究记录：`slope-stock-tiles.json`） |
+| E15 | LocalSize 裁剪与镜头顶部余量 | 0x549AE0（本机研究记录：`ra2-00549AE0.asm.txt`）、0x6A8C80（本机研究记录：`ra2-006A8C80.asm.txt`） | 0x567230（本机研究记录：`yr-00567230.asm.txt`）、0x6D8640（本机研究记录：`yr-006D8640.asm.txt`）、通行属性重算（本机研究记录：`yr-00483C80.asm.txt`） |
+| E16 | 箱子局部落点与车辆路径可达性、崖后属性 | 高差过渡 0x4C8730（本机研究记录：`ra2-004C8730.asm.txt`）、属性重算 0x472540（本机研究记录：`ra2-00472540.asm.txt`） | 车辆进入格 0x73F0A0（本机研究记录：`yr-0073F0A0.asm.txt`）、高差过渡 0x4D9C60（本机研究记录：`yr-004D9C60.asm.txt`）、属性重算 0x47D2B0（本机研究记录：`yr-0047D2B0.asm.txt`）、温带／雪地悬崖素材（本机研究记录：`cliff-stock-tiles.json`） |
 
 ### 10.3 反编译资料的使用限制
 
@@ -867,22 +869,22 @@ y = trunc((YP - XP) / 2)
 
 ### 10.4 复查与待录制实验
 
-证据目录：[crate_generation_research](D:/Ra2/Work/scripts/crate_generation_research)，[散列与核查清单](D:/Ra2/Work/scripts/crate_generation_research/evidence-manifest.json)。[静态导出脚本](D:/Ra2/Work/scripts/crate_generation_research/inspect_binary.py)只读二进制，以 PE 映射读取指令，并导出字节及 Capstone 反汇编。示例：
+证据目录：crate_generation_research（本机研究记录：`crate_generation_research`），散列与核查清单（本机研究记录：`evidence-manifest.json`）。静态导出脚本（本机研究记录：`inspect_binary.py`）只读二进制，以 PE 映射读取指令，并导出字节及 Capstone 反汇编。示例：
 
 ```powershell
-& 'C:\Users\52640\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' `
-  'D:\Ra2\Work\scripts\crate_generation_research\inspect_binary.py' yr 56BD40 56BEC0
+& python `
+  '.\local-research\inspect_binary.py' yr 56BD40 56BEC0
 ```
 
-[几何模型脚本](D:/Ra2/Work/scripts/crate_generation_research/geometry_model.py)可以重建统计与 SVG；模型已核对半径 31 能找到唯一候选、半径 32 找不到，以及占用格与 Overlay 格失败阶段不同的示例。它没有模拟完整随机数状态、高差、桥梁或游戏对象生命周期。
+几何模型脚本（本机研究记录：`geometry_model.py`）可以重建统计与 SVG；模型已核对半径 31 能找到唯一候选、半径 32 找不到，以及占用格与 Overlay 格失败阶段不同的示例。它没有模拟完整随机数状态、高差、桥梁或游戏对象生命周期。
 
-研究部分完成的是**静态二进制取证、反编译对照、插件源码核对和限定条件下的离线模型**；50 项关键地址的调用目标或指令字节已用[核查脚本](D:/Ra2/Work/scripts/crate_generation_research/verify_evidence.py)对两份二进制重新验证，文档本地链接已检查，示意图已检查排版。没有修改游戏、注入 DLL、运行实机断点实验或录制实机视频。下节另提供由离线模型生成的讲解视频。若要展示游戏进程中的实际失败路径，建议分别记录“初始坐标、附近搜索返回坐标、放置返回值、失败计数”，单看最终箱子出现位置无法区分“附近移动”与“重新抽点”。
+研究部分完成的是**静态二进制取证、反编译对照、插件源码核对和限定条件下的离线模型**；50 项关键地址的调用目标或指令字节已用核查脚本（本机研究记录：`verify_evidence.py`）对两份二进制重新验证，文档本地链接已检查，示意图已检查排版。没有修改游戏、注入 DLL、运行实机断点实验或录制实机视频。下节另提供由离线模型生成的讲解视频。若要展示游戏进程中的实际失败路径，建议分别记录“初始坐标、附近搜索返回坐标、放置返回值、失败计数”，单看最终箱子出现位置无法区分“附近移动”与“重新抽点”。
 
 高桥桥面／桥下、浮空单位不同状态、边缘高差及被修改的 Overlay 规则，应作为独立实机样例；本报告给出的条件足以解释其检查入口，但未把每一种状态都宣称为已实测。
 
 ## 11. 按实际地图方向绘制的交互演示与视频
 
-已实现 [菱形地图演示程序](D:/Ra2/Work/video/crate-generation-demo/index.html)，运行 [启动演示.cmd](D:/Ra2/Work/video/crate-generation-demo/启动演示.cmd) 可打开交互页面并导出 MP4。[运行说明与模型边界](D:/Ra2/Work/video/crate-generation-demo/README.md)记录了全部操作和限定条件。
+已实现 [菱形地图演示程序](../index.html)，运行 [启动演示.cmd](../启动演示.cmd) 可打开交互页面并导出 MP4。[运行说明与模型边界](../README.md)记录了全部操作和限定条件。
 
 这里采用真实画面中的方向：`screenX ∝ X−Y`、`screenY ∝ X+Y`，所以 X 向右下增大，Y 向左下增大。宽 90 的地图上，左上 `(1,90)`、右上 `(90,1)` 位于相同高度；缩成宽 8 后，分别为 `(1,8)`、`(8,1)`。不要把前文统计示意图的逻辑 X/Y 方格直接当作游戏的屏幕投影。
 
@@ -890,7 +892,7 @@ y = trunc((YP - XP) / 2)
 
 11 个预设覆盖地图外、地图内但可视边界外、建筑、不可通行地形、地面单位、已有箱子、普通空地、矿石，以及三种海洋／小岛场景。可指定初始坐标、单步查看各圈、展开扫描记录并修改逻辑帧，以观察候选数量和取模选择。半径 0 的重复记录、24 条候选上限与 Overlay 放置失败后的整轮重抽均保留。本微型图的最大搜索半径是 `min(8+6,32)-1=13`，不能讲成固定 31。
 
-已经更新为 [十一场景示范视频](D:/Ra2/Work/video/crate-generation-demo/output/crate-generation-demo.mp4)（约 398 秒，1600×900，24 fps，无声字幕画面），同时输出 [逐步轨迹 JSON](D:/Ra2/Work/video/crate-generation-demo/output/crate-generation-demo.json) 和 [可编辑字幕 SRT](D:/Ra2/Work/video/crate-generation-demo/output/crate-generation-demo.srt)。视频按界面 01～11 顺序展示全部案例，每章末尾增加 10 秒全起点概率总览。视频和交互程序共用机制与绘图代码，避免另写动画脚本造成流程偏差。
+已经更新为 十一场景示范视频（本机研究记录：`crate-generation-demo.mp4`）（约 398 秒，1600×900，24 fps，无声字幕画面），同时输出 逐步轨迹 JSON（本机研究记录：`crate-generation-demo.json`） 和 可编辑字幕 SRT（本机研究记录：`crate-generation-demo.srt`）。视频按界面 01～11 顺序展示全部案例，每章末尾增加 10 秒全起点概率总览。视频和交互程序共用机制与绘图代码，避免另写动画脚本造成流程偏差。
 
 海洋预设 09 从真实水格 `(1,8)` 开始，采用 Float，半径 2 找到可用区内的 `(3,8)` 并生成水箱。预设 10 将真实地图全部设为 Water，地图外起点 `(2,3)` 读取默认 InvalidCell/Clear，采用 Track，半径 0～13 全部无候选；Empty 的最终放置失败后，第二轮指定 `(6,7)`，重新读取 Water 并切换 Float，生成水箱。矿石预设从 `(9,7)` 开始，先通过通行检查，再被 Overlay 检查拒绝并重抽。
 
@@ -898,7 +900,7 @@ y = trunc((YP - XP) / 2)
 
 **演示采用指定首点及指定第二轮起点，不是原版 RNG 的种子回放。** 只模拟存在空闲箱子槽、标准 Clear/Water/Tiberium 通行规则的平地场景，无高差、海滩和桥梁通行例外。讲解动画的时间不会推进程序里用于取模的固定逻辑帧；这些动画秒数不是游戏算法的执行耗时。模型已检查四种布局共 676 个起点，108 个步骤画面验证素材低于全部格线与信息，并检查说明文字边界。矿石贴图已将误用 SHP 画布中心的锚点修正为裁剪后矿堆中心，消除视觉错位，逻辑仍占一格。新增概率层使用全起点枚举，不沿用动画指定输入。
 
-演示贴图现已换为本机原版温带地面、水面、矿石、岩石、GAPILL、陆地箱和水箱，并复用红警小球大战的犀牛车身、炮塔和炮管。地面／水面／普通岩石覆盖物／两种箱子用 `isotem.pal` 解码，TIB01 矿石用 `temperat.pal`，GAPILL 用 `unittem.pal`；来源、散列、帧号与调色盘判断记录在 [素材说明](D:/Ra2/Work/video/crate-generation-demo/assets/README.md)。水面为原始 TMP 的静态取样；贴图和新生成箱子全部在格线、坐标、搜索标记、红蓝边界和文字的下层。
+演示贴图现已换为本机原版温带地面、水面、矿石、岩石、GAPILL、陆地箱和水箱，并复用红警小球大战的犀牛车身、炮塔和炮管。地面／水面／普通岩石覆盖物／两种箱子用 `isotem.pal` 解码，TIB01 矿石用 `temperat.pal`，GAPILL 用 `unittem.pal`；来源、散列、帧号与调色盘判断记录在 素材说明（本机研究记录：`README.md`）。水面为原始 TMP 的静态取样；贴图和新生成箱子全部在格线、坐标、搜索标记、红蓝边界和文字的下层。
 
 ### 11.1 概率倍率热力图（固定帧基础公式）
 
@@ -921,18 +923,18 @@ y = trunc((YP - XP) / 2)
 
 配色另支持原多色、淡黄→深红的暖色和淡蓝→深蓝的冷色。多色保持原来的 0～169× 固定色标；暖色／冷色以完整布局的最高倍率对应最深色，按对数刻度插值。海陆筛选、最低门槛均不会改变色标范围。最低显示倍率可以用滑条或输入框设置，按未取整的实际倍率作 `≥` 比较；低于门槛时，任何透明度设置下均不绘制该格的概率填色和倍率文字。默认门槛为 0，坐标文字由其独立开关控制。PNG 截图和 MP4 导出沿用配色、门槛及文字设置。
 
-[计算实现](D:/Ra2/Work/video/crate-generation-demo/probability.js)与[校验脚本](D:/Ra2/Work/video/crate-generation-demo/verify-probability.cjs)覆盖四种布局、四个逻辑帧共 2704 个起点，检查概率守恒、单轮／1000 轮上限、无解布局及 24 种开关／不透明度／海陆筛选组合。[热力图预览](D:/Ra2/Work/video/crate-generation-demo/output/heatmap-water_margin.png)展示海陆混合场景。真实地图文件解析、高差、坡面、桥梁以及大图性能处理尚未接入，本阶段不将平地 demo 的结论当作任意地图的逐格精确概率。
+[计算实现](../probability.js)与校验脚本（本机研究记录：`verify-probability.cjs`）覆盖四种布局、四个逻辑帧共 2704 个起点，检查概率守恒、单轮／1000 轮上限、无解布局及 24 种开关／不透明度／海陆筛选组合。热力图预览（本机研究记录：`heatmap-water_margin.png`）展示海陆混合场景。真实地图文件解析、高差、坡面、桥梁以及大图性能处理尚未接入，本阶段不将平地 demo 的结论当作任意地图的逐格精确概率。
 
 
 ### 11.2 精确分数与搜索索引优化
 
 当前 demo 从最初版本起就完整枚举全部起点，没有使用蒙特卡洛估计。本次进一步保存有限重抽的精确整数分数：设 N=169、F=N−S、L=1000，D=N^L，G=(N^L−F^L)/S（S>0，此除法整除）。每格最终概率为 n_c×G/D，倍率为 n_c×G×N/D，完全失败概率为 F^L/D；S=0 时全部失败。BigInt 计算不把极小但非零的失败概率抹为零。JSON 用公共分母 D、每来源权重 G、失败分子 F^L 的整数字符串与各格 hits 表示精确结果；小数字段仅供显示。门槛筛选也使用整数交叉相乘，避免舍入把略低于门槛的格子误显示出来。
 
-新增 [probability-index.js](D:/Ra2/Work/video/crate-generation-demo/probability-index.js)：先复用参考判定计算 Track／Float 掩码，再以切比雪夫距离直接定位首个非空环。距离传播不受障碍和海水阻断，不是寻路；该环仍按原顺序扫描，保留 r=0 重复项、24 条截断、固定帧取模和最终 Overlay 拒绝。连续数组缓存候选段，换帧无需重扫地形；修改布局后索引自动失效。参考逐圈实现保留在 model.js 供动画与独立对照。
+新增 [probability-index.js](../probability-index.js)：先复用参考判定计算 Track／Float 掩码，再以切比雪夫距离直接定位首个非空环。距离传播不受障碍和海水阻断，不是寻路；该环仍按原顺序扫描，保留 r=0 重复项、24 条截断、固定帧取模和最终 Overlay 拒绝。连续数组缓存候选段，换帧无需重扫地形；修改布局后索引自动失效。参考逐圈实现保留在 model.js 供动画与独立对照。
 
-N 个起点、最大半径 R 的最坏格检查由 O(N·R²) 降为首次 O(N·R)，复用布局后换帧的映射为 O(N)，空间 O(N)；整数分数运算成本另随位数增长。[等价性验证](D:/Ra2/Work/video/crate-generation-demo/output/exact-verification.json)覆盖 49,399 组起点／帧结果，含候选 24 条截断、半径 31 可达／32 不可达，以及 30 组精确分布的整数概率守恒。原逐圈模型与优化结果逐项一致。
+N 个起点、最大半径 R 的最坏格检查由 O(N·R²) 降为首次 O(N·R)，复用布局后换帧的映射为 O(N)，空间 O(N)；整数分数运算成本另随位数增长。等价性验证（本机研究记录：`exact-verification.json`）覆盖 49,399 组起点／帧结果，含候选 24 条截断、半径 31 可达／32 不可达，以及 30 组精确分布的整数概率守恒。原逐圈模型与优化结果逐项一致。
 
-本机四种 8×6 布局的 15 次中位数中，首次搜索索引与全部起点映射比原扫描快约 3.4～30.4 倍；包含分数和结果对象的完整冷计算约 0.43～0.60 ms，复用布局后换帧约 0.17～0.30 ms。[基准脚本](D:/Ra2/Work/video/crate-generation-demo/benchmark-probability.cjs)和[原始测量](D:/Ra2/Work/video/crate-generation-demo/output/probability-benchmark.json)可复查。这些数字不代表尚未接入的真实大地图性能。
+本机四种 8×6 布局的 15 次中位数中，首次搜索索引与全部起点映射比原扫描快约 3.4～30.4 倍；包含分数和结果对象的完整冷计算约 0.43～0.60 ms，复用布局后换帧约 0.17～0.30 ms。基准脚本（本机研究记录：`benchmark-probability.cjs`）和原始测量（本机研究记录：`probability-benchmark.json`）可复查。这些数字不代表尚未接入的真实大地图性能。
 
 这里的精确性限定于已建模的静态平地图、固定逻辑帧和均匀独立起点概率空间。原生伪随机数发生器具有状态相关性；未指定种子／完整状态的分布，不能将本结果宣称为真实 PRNG 的跨种子精确分布。已知完整状态时一次调用的落点是确定结果。高差、桥梁和真实地图解析也需单独复现后，才能将此方法用于真实地图。
 
@@ -951,7 +953,7 @@ S(f)=0 的项取 0。先平均单轮成功率再归一化／求重抽，或者�
 
 精确整数表达为 D=P×N^L，G(f)=(N^L−(N−S(f))^L)/S(f)，每格分子 A(c)=Σ_f n(c,f)×G(f)，失败分子 B=Σ_f (N−S(f))^L。JSON 保存公共分母 D、每格 A(c) 和 B；精确分数为 A(c)/D。按相同 S(f) 分组汇总，复用搜索索引及大整数权重；零概率、有限重抽失败质量和倍率门槛比较均保持精确。
 
-[当前实现](D:/Ra2/Work/video/crate-generation-demo/probability.js)的 `computeRandom` 用于网页及视频，`compute` 固定帧接口留作参考验证。[新增检查](D:/Ra2/Work/video/crate-generation-demo/output/random-frame-verification.json)对照 16,224 组起点／帧组合，验证与参考逐圈实现一致、周期重复、整数概率守恒、先重抽后平均和改变演示帧不改变热力图。本机完整冷计算约 1.9～2.6 ms；不代表尚未接入的真实大地图性能。原有平地／无桥梁、均匀独立起点和非实机 PRNG 状态分布的边界仍然适用。
+[当前实现](../probability.js)的 `computeRandom` 用于网页及视频，`compute` 固定帧接口留作参考验证。新增检查（本机研究记录：`random-frame-verification.json`）对照 16,224 组起点／帧组合，验证与参考逐圈实现一致、周期重复、整数概率守恒、先重抽后平均和改变演示帧不改变热力图。本机完整冷计算约 1.9～2.6 ms；不代表尚未接入的真实大地图性能。原有平地／无桥梁、均匀独立起点和非实机 PRNG 状态分布的边界仍然适用。
 
 ### 11.4 真实地图分析入口（2026-10-13）
 
@@ -967,4 +969,4 @@ S(f)=0 的项取 0。先平均单轮成功率再归一化／求重抽，或者�
 
 界面支持高度投影、缩放／平移、坐标定位、独立异常图层、概率透明度／海陆／配色／门槛、PNG、CSV 和精确分数导出。所有标注位于游戏原始美术之上。
 
-**当前仍有明确适用边界**：不运行地图触发或动态比赛状态，不加载模组插件；桥梁／隧道分层通行、特殊基础、自定义类型、斜坡预放矿石加载顺序等未验证输入会停止计算。该功能不是完整寻路器，也未实现一般的“看似相连但实际不通”视觉分类。机制、公式、依赖及操作说明见 [REAL-MAPS.md](D:/Ra2/Work/video/crate-generation-demo/REAL-MAPS.md)，回归证据见 [verification.json](D:/Ra2/Work/video/crate-generation-demo/output/realmap-verification/verification.json)。
+**当前仍有明确适用边界**：不运行地图触发或动态比赛状态，不加载模组插件；桥梁／隧道分层通行、特殊基础、自定义类型、斜坡预放矿石加载顺序等未验证输入会停止计算。该功能不是完整寻路器，也未实现一般的“看似相连但实际不通”视觉分类。机制、公式、依赖及操作说明见 [REAL-MAPS.md](../REAL-MAPS.md)，回归证据见 verification.json（本机研究记录：`verification.json`）。

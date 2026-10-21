@@ -112,14 +112,14 @@
     if(!step.origin||M.key(step.origin)!=='8,1')label('8,1 · 右上',...(()=>{const p=point([8,1]);return[p[0]+2,p[1]-31];})(),C.text,17);
     label('地图边界 Size',ox-8*hw+74,oy+21*hh+29,C.red,16);
     line([ox+6*hw,oy+10*hh],[874,oy+10*hh],C.blue,1.5,[4,4]);
-    label('可视边界 LocalSize',956,oy+10*hh+5,C.blue,16);
+    label('模型可用边界 LocalSize',956,oy+10*hh+5,C.blue,16);
     if(step.origin){const [x,y]=point(step.origin);label(`起点 (${step.origin})`,x,y-40,C.amber,18);}
     if(step.selected){const [x,y]=point(step.selected);label(`${step.failed?'被 Overlay 拒绝':step.placed?(step.crateKind==='watercrate'?'新水箱':'新陆地箱'):'选中'} (${step.selected})`,x,y+49,step.failed?C.red:C.green,17);}
     // Coordinate compass stays separate from the map content.
     const compass=[875,600];line(compass,[936,630],C.text,2);line(compass,[814,630],C.text,2);
     text('X +',937,638,18);text('Y +',778,638,18);text('X 向右下 / Y 向左下',787,672,16,C.muted);
     if(density){
-      text(`相对倍率 · ${H.PALETTE_NAMES[heat.palette]} / 仅直接抽中 = 1×`,52,598,18,C.text,true);
+      text(`相对倍率 · ${H.PALETTE_NAMES[heat.palette]} / 1× 基准 ${D.percent(display.baselineProbability)}`,52,598,18,C.text,true);
       const ticks=H.legend(heat.palette,display.maxMultiplier);
       if(heat.palette==='multi')ticks.forEach((v,i)=>box(52+i*86,612,69,17,H.color(v),null,3));
       else{
@@ -132,10 +132,10 @@
         const tickX=52+i*671/7,labelX=tickX-(i===7?ctx.measureText(caption).width:i?ctx.measureText(caption).width/2:0);
         text(caption,heat.palette==='multi'?52+i*86:labelX,650,14,C.muted);
       });
-      text(`仅显示 ≥ ${heat.minMultiplier.toFixed(1)}× · ${heat.palette==='multi'?'多色色标固定':'最深色对应全图最高倍率'} · 绿色圆角：建筑/单位占用`,52,678,15,C.muted);
+      text(`仅显示 ≥ ${heat.minMultiplier.toFixed(1)}× · ${heat.palette==='multi'?'多色色标固定':'最深色对应全图最高倍率'} · 绿色圆角：占用标识`,52,678,15,C.muted);
     }else if(world.id==='island')text('逐格检查，不是寻路；黄色虚线只连接起点与落点。',52,648,17,C.muted);
-    text('红框：地图格的外包络',52,714,16,C.red);text('蓝框：可视／可用格的外包络',282,714,16,C.blue);
-    if(summary)text({all:'全部显示',water:'仅显示海洋',land:'仅显示陆地'}[heat.filter],850,714,16,C.muted);
+    text('红框：地图格的外包络',52,714,16,C.red);text('蓝框：模型可用格的外包络',282,714,16,C.blue);
+    if(summary)text({all:'全部显示',water:'仅显示水面',land:'仅显示陆地'}[heat.filter],850,714,16,C.muted);
     else{text('黄色：起点／当前检查',604,714,16,C.amber);text('绿色：候选／落点',850,714,16,C.green);}
     ctx.restore();
     if(summary)return;

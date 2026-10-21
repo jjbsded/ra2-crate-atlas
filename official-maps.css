@@ -1,0 +1,28 @@
+#officialMapsDialog{width:min(980px,96vw);max-width:none;height:min(840px,92dvh);max-height:none;margin:auto;padding:0;border:1px solid #426074;border-radius:16px;background:#111e28;color:#dfebf3;overflow:hidden;box-shadow:0 24px 100px #0009}
+#officialMapsDialog::backdrop{background:#03101ac9;backdrop-filter:blur(3px)}
+.official-maps-shell{height:100%;display:flex;flex-direction:column;min-height:0}
+.official-maps-header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 24px 14px}
+.official-maps-header h2{font-size:23px;margin:5px 0 0}
+.official-maps-search{padding:0 24px 14px;display:grid;gap:12px}
+.official-maps-query{display:flex;gap:10px}.official-maps-query input{width:100%;min-width:0;font-size:16px;padding:12px 14px;background:#0c1821;border-color:#486679}
+#officialMapClear{flex-shrink:0;white-space:nowrap}
+.official-maps-filters{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.official-maps-filters label{font-size:13px}.official-maps-filters select{padding:7px 10px}
+#officialMapCount{margin-left:auto;font-size:12px;color:#92acbd;font-variant-numeric:tabular-nums}
+.official-maps-results{flex:1;min-height:100px;overflow:auto;padding:0 24px 14px;scrollbar-gutter:stable}
+#officialMapList{display:grid;gap:7px}
+.official-map-row{position:relative;display:grid;gap:7px;width:100%;padding:13px 124px 13px 16px;text-align:left;background:#142532;border-color:#2a4253}
+.official-map-row strong{font-size:15px;font-weight:500;overflow-wrap:anywhere}.official-map-meta{font-size:12px;color:#92aebe;overflow-wrap:anywhere}
+.official-map-row[aria-selected=true]{background:#213b45;border-color:#86d9b8;box-shadow:inset 3px 0 #86d9b8}
+.official-map-row:focus-visible{outline:2px solid #f5ce80;outline-offset:1px}
+.official-map-badge{position:absolute;right:15px;top:15px;font-size:11px;color:#9cd8c3;background:#244338;border-radius:5px;padding:3px 7px;white-space:nowrap}
+.official-map-badge.unavailable{color:#c2af91;background:#39352b}
+#officialMapEmpty{text-align:center;padding:30px 14px;color:#9fb6c7}
+#officialMapError{white-space:pre-wrap;color:#ffb6b6}#officialMapError:empty{display:none}
+.official-maps-footer{padding:14px 24px 20px;border-top:1px solid #2d4554;background:#13242e;flex-shrink:0}
+.official-maps-footer p{font-size:12px;margin:6px 0}
+#officialMapSelected{font-size:16px;color:#e7f3ed;font-weight:600}
+#officialMapDetails{min-height:20px;color:#aac6d1}.unavailable#officialMapDetails{color:#edc99b}
+.official-maps-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:12px}
+#officialMapAnalyze{min-width:145px;padding:11px 18px}#officialMapAnalyze:disabled{cursor:not-allowed}
+.official-maps-note{color:#809bad!important;line-height:1.55}
+@media(max-width:650px){#officialMapsDialog{width:100vw;height:100dvh;border-radius:0;border:0}.official-maps-header{padding:16px 14px 12px}.official-maps-search{padding:0 14px 12px}.official-maps-results{padding:0 14px 12px}.official-maps-footer{padding:12px 14px}.official-maps-header h2{font-size:21px}.official-map-row{padding:12px 110px 12px 12px}.official-map-row strong{font-size:14px}.official-map-badge{right:10px;top:13px}#officialMapCount{margin:0;width:100%}.official-maps-filters{gap:8px}.official-maps-actions{justify-content:space-between;gap:8px}.official-maps-actions label{font-size:12px}.official-maps-note{font-size:11px!important}}

@@ -4,13 +4,15 @@ import json
 from pathlib import Path
 import re
 import sys
-import time
 
-from realmap import ROOT, Resources, THEATERS, sha
+from runtime_bootstrap import ROOT
+from realmap_resources import Resources, THEATERS
+from realmap_format import sha
 
 sys.path.insert(0, str(ROOT/'resource_context'))
 from ra2mod import Context, Resources as DirectoryResources
 
+DIRECTORY_VERSIONS = ('directory', 'shikong')  # Compatibility with old reports only.
 DISCOVERY_VERSION = 1
 
 
@@ -119,7 +121,7 @@ def _discover(root, manifest):
     sources = {name: (items[0][0].label if (items := reader.candidates(name)) else None)
                for name in (rules, art)}
     if not sources[art]:
-        issues.append(f'未找到 {art}；缺失定义的对象保留占用信息，未计算概率')
+        issues.append(f'未找到 {art}；缺失定义的对象按未知物体处理，概率不保证准确')
     if unknown:
         issues.append('非常规命名的 MIX 作为末级候选读取，游戏是否加载及其优先级无法确认：'+', '.join(unknown))
     assumptions = ['自动发现顺序：散装文件优先；数字扩展包倒序；标准资源包；其他 MIX 作为末级候选。'
@@ -142,7 +144,7 @@ def status():
         engine = '尤里的复仇' if found['engineVersion']=='yr' else '红色警戒 2'
         return dict(ready=True, configured=True, root=found['config']['root'], engineVersion=found['engineVersion'],
                     sources=found['sources'], warnings=found['issues'], archiveCount=found['archiveCount'],
-                    reason=f'目录资源已就绪 · 自动识别为{engine}资源 · {found["archiveCount"]} 个 MIX · 仅外观预览，未计算概率')
+                    reason=f'目录资源已就绪 · 自动识别为{engine}资源 · {found["archiveCount"]} 个 MIX · 近似概率，不保证准确')
     except (OSError, ValueError, TypeError, AttributeError) as error:
         return dict(ready=False, configured=bool(value), root=value, reason='目录资源无法读取：'+str(error))
 
@@ -160,13 +162,18 @@ def configure(root):
     return status()
 
 
-def root_for_report(meta):
+def discovery_for_report(meta):
     root = meta.get('resourceRoot') or selected_root()
     if not root:
         raise ValueError('该结果需要游戏目录资源，请设置目录并重新分析地图')
-    if meta.get('resourceFingerprint') and discover(root)['fingerprint'] != meta['resourceFingerprint']:
+    found = discover(root)
+    if meta.get('resourceFingerprint') and found['fingerprint'] != meta['resourceFingerprint']:
         raise ValueError('该结果对应的游戏资源已变化，请使用所选目录重新分析地图')
-    return root
+    return found
+
+
+def root_for_report(meta):
+    return discovery_for_report(meta)['config']['root']
 
 
 class ModResources(Resources):
@@ -205,32 +212,7 @@ class ModResources(Resources):
         raise ValueError('所选游戏目录中找不到 '+filename)
 
 
-def preview(data, folder, filename, progress):
-    from realmap import parse_map, render_ground
-    root = selected_root()
-    if not root:
-        raise ValueError('预览目录资源地图需要在“游戏目录（可选）”中设置对应游戏目录')
-    start = time.perf_counter()
-    folder.mkdir(parents=True, exist_ok=True)
-    source = folder/'source.map'; source.write_bytes(data)
-    progress('从所选目录发现规则、art 和资源包', 5)
-    res = ModResources(root, source)
-    cells, res, theater, tmps, meta = parse_map(data, folder, res.version, progress,
-        resource_context=res, visual_only=True)
-    meta.update(filename=Path(filename.replace('\\','/')).name[:160], resourceProfile='directory',
-                previewOnly=True, version='directory', engineVersion=res.version, resourceRoot=res.discovery['config']['root'], resourceFiles=list(res.mix_paths))
-    meta['warnings'] = ['目录资源外观预览：尚未验证 Mod 的放箱／通行规则，未计算概率或禁行风险。',
-                        '动画显示静态帧，未运行触发、任务或扩展 DLL。', *res.discovery['assumptions'], *res.discovery['issues']]
-    missing = [i.get('name','') for i in res.context.issues if i['code']=='unresolved-include-or-root']
-    if missing:
-        meta['warnings'].append('资源配置包含缺失的 INI：'+', '.join(missing)+'；预览仅使用成功读取的定义，缺失对象保留标识。')
-    for c in cells.values():
-        c.update(probability=None, multiplier=None, oneAttemptProbability=None, terms=[], marked=False, potentialMarked=False)
-    rendering = render_ground(cells, res, theater, tmps, folder, meta, progress)
-    meta['elapsedSeconds'] = round(time.perf_counter()-start, 3)
-    report = dict(schemaVersion=3, model='mod-visual-preview', metadata=meta, rendering=rendering,
-        probability=None, markers=[], zeroProbabilityRockCandidates=[], potentialMarkers=[], clearance=None, cells=list(cells.values()))
-    (folder/'result.json').write_text(json.dumps(report, ensure_ascii=False, separators=(',',':')), 'utf8')
-    (folder/'resource-audit.json').write_text(json.dumps(dict(profile=res.context.identity,
-        sources=res.context.sources, issues=res.context.issues), ensure_ascii=False, indent=2), 'utf8')
-    return report
+def preview(data, folder, filename, progress, minerals_enabled=True, resource_root=None):
+    """Compatibility entry; new analysis callers use realmap.analyze."""
+    from realmap import analyze_directory
+    return analyze_directory(data, folder, filename, progress, minerals_enabled, resource_root)
