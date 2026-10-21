@@ -5,6 +5,7 @@ from ctypes import wintypes as w
 import os
 from pathlib import Path
 import uuid
+from i18n_settings import language
 
 
 class GUID(ctypes.Structure):
@@ -55,8 +56,9 @@ def _folder_dialog(initial=''):
         # SetTitle=17, SetOkButtonLabel=18, GetResult=20.
         # Pick folders, filesystem only, existing path, no cwd/recent-file changes.
         _check(_method(dialog, 9, w.DWORD)(dialog, 0x20 | 0x40 | 0x800 | 0x8 | 0x02000000))
-        _check(_method(dialog, 17, w.LPCWSTR)(dialog, '选择地图对应的游戏根目录'))
-        _check(_method(dialog, 18, w.LPCWSTR)(dialog, '选择此文件夹'))
+        english = language() == 'en'
+        _check(_method(dialog, 17, w.LPCWSTR)(dialog, 'Choose the game root directory for this map' if english else '选择地图对应的游戏根目录'))
+        _check(_method(dialog, 18, w.LPCWSTR)(dialog, 'Select this folder' if english else '选择此文件夹'))
         if initial.strip() and Path(initial).is_dir():
             shell = ctypes.WinDLL('shell32')
             shell.SHCreateItemFromParsingName.argtypes = [w.LPCWSTR, ctypes.c_void_p,

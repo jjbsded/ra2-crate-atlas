@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>高差演示 · 工具箱概率分析</title>
-<link rel="stylesheet" href="realmap-ui.css?v=16"><link rel="stylesheet" href="page-navigation.css?v=2"><link rel="stylesheet" href="terrain3d.css?v=5"><link rel="stylesheet" href="cliff-demo.css?v=1"></head>
+<link rel="stylesheet" href="realmap-ui.css?v=16"><link rel="stylesheet" href="page-navigation.css?v=2"><link rel="stylesheet" href="terrain3d.css?v=5"><link rel="stylesheet" href="cliff-demo.css?v=1"><script src="language-settings.js"></script><script src="i18n-en.js?v=1"></script><script src="i18n.js?v=1"></script></head>
 <body data-scene="single"><main class="cliff-page">
 <header class="app-header"><div><span class="eyebrow">TERRAIN LAB / 高差演示</span><h1>高处的一格，会影响哪些低格？</h1><p>旋转查看六个判定位置，对比放箱前后的地面通行属性。</p><nav class="page-links" aria-label="其他演示"><a class="mechanism-link" href="index.html">概率演示 →</a></nav></div><a class="page-switch to-maps" href="maps.html"><span class="page-switch-icon" aria-hidden="true">▦</span><span><small>切换页面</small><strong>真实地图计算工具</strong></span><span class="page-switch-arrow" aria-hidden="true">→</span></a></header>
 <div class="cliff-controls"><label for="cliffScene">场景 <select id="cliffScene" disabled><option value="single" selected>单高格 · 六个判定位置</option><option value="real">冰天雪地 · 原图局部</option></select></label><div class="cliff-examples" id="cliffExamples"><button id="cliffHigh">孤立高格</button><button id="cliffRough">Rough 例外</button><button id="cliffClear">受影响的普通低格</button><button id="cliffOutside">未受影响的低格</button></div><button id="cliffReload">重新加载演示</button></div>
@@ -29,4 +29,4 @@
 </div>
 </dialog>
 <footer>演示使用内置原版样例，无需先导入地图或选择游戏目录。放箱按钮只切换演示，不会修改地图文件；具体地图请在真实地图计算工具中选格后使用“3D查看”。</footer>
-</main><script src="terrain3d.js?v=13"></script><script src="cliff-demo.js?v=1"></script></body></html>
+</main><script>CrateI18n.mount();</script><script src="terrain3d.js?v=13"></script><script src="cliff-demo.js?v=1"></script></body></html>

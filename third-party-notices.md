@@ -1,3 +1,5 @@
+**English** | [简体中文](third-party-notices.zh-CN.md)
+
 # Bundled runtime components
 
 This local portable build preserves Python's LICENSE.txt and each Python
@@ -23,7 +25,7 @@ map hash is recorded in the file; it contains no Mod assets or configuration.
 The offline official multiplayer catalog in `official-maps` preserves 248 map
 files from the user's original `MULTI.MIX` and `multimd.mix`, without rewriting
 their bytes. Names and mode registrations come from the official PKT and CSF
-resources; Traditional Chinese names are displayed in Simplified Chinese.
+resources; Traditional Chinese names are displayed in Simplified Chinese; English UI names are display translations.
 Archive, registry, string-table and individual map SHA-256 hashes, as well as
 omitted registry references, are recorded in `official-maps/catalog.json`.
 Object rendering integration (2026-10-14): `resource_context/ra2map.py` and

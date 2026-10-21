@@ -117,8 +117,14 @@ def verify(root):
             assert status['ready'] == {'ra2': True, 'yr': True} and not status['mod']['configured'], status
             demo = request('/examples/cliff-demo.json')
             assert len(demo['single']['cells']) == 81
-            for page in ('/index.html', '/maps.html', '/cliff-demo.html', '/terrain3d.js', '/lib/three-r160.min.js'):
+            for page in ('/index.html', '/maps.html', '/cliff-demo.html', '/terrain3d.js', '/lib/three-r160.min.js',
+                         '/i18n.js', '/i18n-en.js', '/README.md', '/README.zh-CN.md', '/PORTABLE.en.md'):
                 assert len(request(page, raw=True)) > 100
+            preference = request('/language-settings.js', raw=True).decode('utf8')
+            assert 'CrateLanguageSettings' in preference
+            assert request('/api/preferences/language', {'language':'en'}) == {'language':'en'}
+            assert '"saved": "en"' in request('/language-settings.js', raw=True).decode('utf8')
+            assert b'Random crate' in request('/research?language=en', raw=True)
             catalog = request('/api/maps/catalog'); reports = []
             for version, name in (('ra2', 'mp32s8.map'), ('yr', 'xmp32s8.map')):
                 entry = next(e for e in catalog['maps'] if e['variants'].get(version, {}).get('file') == name)
@@ -138,8 +144,10 @@ def verify(root):
             rendered = request(objects)['rendering']['objects']
             assert rendered['total'] == 4 and not rendered['missing'], rendered
             assert set(rendered['categories']) == {'STRUCTURES', 'INFANTRY', 'UNITS', 'AIRCRAFT'}, rendered
-            video = complete(request('/api/export', {'options': {'preset':'empty'}, 'timing': {'speed':10}}), '/api/job/')
+            video = complete(request('/api/export', {'language':'en', 'options': {'preset':'empty'}, 'timing': {'speed':10}}), '/api/job/')
             assert len(request(video, raw=True)) > 1000
+            subtitles = request(video.replace('.mp4', '.srt'), raw=True).decode('utf8')
+            assert 'placement' in subtitles.lower() and not any('\u3400' <= c <= '\u9fff' for c in subtitles)
             run([root/'runtime/ffmpeg/ffmpeg.exe', '-v', 'error', '-i', root/video.lstrip('/'), '-f', 'null', '-'])
             print('PASS minerals/cache, 3D, SHP buildings/infantry, VXL vehicles/aircraft and MP4 decode', flush=True)
             result = {'result':'PASS', 'build':json.loads((root/'portable-build.json').read_text('utf8')),

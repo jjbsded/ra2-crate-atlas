@@ -1,6 +1,8 @@
 /* Shared terrain, probability and risk layers for the viewer and full-map export. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const occupancy=typeof module!=='undefined'?require('./occupancy-overlay.js'):root.CrateOccupancyOverlay;
  const CrateProbability=typeof module!=='undefined'?require('./probability.js'):root.CrateProbability;
  const transfers=typeof module!=='undefined'?require('./transfer-origins.js'):root.CrateTransferOrigins;
@@ -219,7 +221,7 @@
     ctx.save();ctx.beginPath();for(const [a,b]of selectionArms(c,state.scale)){ctx.moveTo(x+a[0],y+a[1]);ctx.lineTo(x+b[0],y+b[1]);}
     ctx.lineCap='round';ctx.strokeStyle='#102b3a';ctx.lineWidth=5;ctx.stroke();ctx.strokeStyle='#46e86f';ctx.lineWidth=3.5;ctx.stroke();ctx.restore();
     const points=surface(c,true).flat(),top=Math.min(...points.map(p=>p[1]),-15)*state.scale+y;
-    const label=`选中 ${c.x}, ${c.y}`,h=22;ctx.font='600 11px "Microsoft YaHei",sans-serif';const w=ctx.measureText(label).width+20;
+    const label=_t`选中 ${c.x}, ${c.y}`,h=22;ctx.font='600 11px "Microsoft YaHei",sans-serif';const w=ctx.measureText(label).width+20;
     const positions=[[x-w/2,top-42],[x+Math.max(...points.map(p=>p[0]),30)*state.scale+22,y-h/2],
      [x-w/2,y+Math.max(...points.map(p=>p[1]),15)*state.scale+22],[x+Math.min(...points.map(p=>p[0]),-30)*state.scale-22-w,y-h/2]];
     const boxes=positions.map(([bx,by])=>({x:Math.max(area.x+4,Math.min(area.x+area.w-w-4,bx)),y:Math.max(area.y+4,Math.min(area.y+area.h-h-4,by)),w,h}));

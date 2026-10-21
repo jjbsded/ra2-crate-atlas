@@ -1,17 +1,19 @@
 /* Shared geometry for the canvas overview, viewport outline and drag-to-pan. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  // Directions follow the isometric map on screen (before elevation), not the
  // raw X/Y axes. All eight offsets address adjacent logical cells.
  const directions=[
-  {id:'NW',label:'↖',name:'向左上选格',dx:-1,dy:0,col:0,row:0},
-  {id:'N',label:'↑',name:'向上选格',dx:-1,dy:-1,col:1,row:0},
-  {id:'NE',label:'↗',name:'向右上选格',dx:0,dy:-1,col:2,row:0},
-  {id:'W',label:'←',name:'向左选格',dx:-1,dy:1,col:0,row:1},
-  {id:'E',label:'→',name:'向右选格',dx:1,dy:-1,col:2,row:1},
-  {id:'SW',label:'↙',name:'向左下选格',dx:0,dy:1,col:0,row:2},
-  {id:'S',label:'↓',name:'向下选格',dx:1,dy:1,col:1,row:2},
-  {id:'SE',label:'↘',name:'向右下选格',dx:1,dy:0,col:2,row:2}
+  {id:'NW',label:'↖',name:_t('向左上选格'),dx:-1,dy:0,col:0,row:0},
+  {id:'N',label:'↑',name:_t('向上选格'),dx:-1,dy:-1,col:1,row:0},
+  {id:'NE',label:'↗',name:_t('向右上选格'),dx:0,dy:-1,col:2,row:0},
+  {id:'W',label:'←',name:_t('向左选格'),dx:-1,dy:1,col:0,row:1},
+  {id:'E',label:'→',name:_t('向右选格'),dx:1,dy:-1,col:2,row:1},
+  {id:'SW',label:'↙',name:_t('向左下选格'),dx:0,dy:1,col:0,row:2},
+  {id:'S',label:'↓',name:_t('向下选格'),dx:1,dy:1,col:1,row:2},
+  {id:'SE',label:'↘',name:_t('向右下选格'),dx:1,dy:0,col:2,row:2}
  ];
  function neighbor(lookup,cell,direction){return cell?lookup.get(`${cell.x+direction.dx},${cell.y+direction.dy}`)||null:null;}
  function position(area,p,w,h){return{x:Math.max(area.x,Math.min(area.x+area.w-w,p.x)),y:Math.max(area.y,Math.min(area.y+area.h-h,p.y))};}

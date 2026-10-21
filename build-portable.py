@@ -22,12 +22,13 @@ APPLICATION_MODULES = (
     'realmap.py', 'realmap_bridges.py', 'realmap_exact.py', 'realmap_render.py', 'realmap_refresh.py',
     'realmap_3d.py', 'terrain_depth.py', 'realmap_objects.py', 'realmap_voxel.py',
     'realmap_mod.py', 'realmap_approx.py', 'original_resources.py',
-    'official_maps.py', 'directory_picker.py', 'runtime_bootstrap.py',
+    'official_maps.py', 'directory_picker.py', 'runtime_bootstrap.py', 'i18n_settings.py',
 )
 EXTRA_FILES = ('voxel-worker.cs', 'realmap-search.c', 'requirements.txt', 'export.cjs')
 DATA_FILES = (
     'examples/mp32s8.map', 'examples/xmp32s8.map', 'examples/cliff-demo.json',
     'docs/random-crate-generation.md', 'docs/bridge-crates.md', 'docs/stock-map-loading.md',
+    'docs/random-crate-generation.en.md', 'docs/bridge-crates.en.md', 'docs/stock-map-loading.en.md',
     'resource_context/ra2map.py', 'resource_context/ra2mod.py',
     'lib/three-r160.min.js', 'lib/three-LICENSE.txt',
     'official-maps/catalog.json', 'official-maps/maps.zip',

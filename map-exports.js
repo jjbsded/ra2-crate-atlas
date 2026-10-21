@@ -1,6 +1,8 @@
 /* Download serializers and controls; snapshots never mutate the viewer. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  function report(data,display){
   const cells=data.cells.map(c=>{const{exactN,px,py,...raw}=c;return{...raw,...display.exportCell(c)};});
   return {text:JSON.stringify({...data,probability:data.metadata.previewOnly?null:{...data.probability,display:display.metadata},cells}),type:'application/json',name:data.metadata.previewOnly?'map-visual-preview.json':data.metadata.approximate?'crate-map-probability-approximate.json':'crate-map-probability.json'};
@@ -32,25 +34,25 @@
   const {state,display}=getContext();
   if(!state.data||$('mapImageExport').disabled)return;
   const source={data:state.data,image:state.image,objectImage:state.objectImage,cells:state.cells,lookup:new Map(state.lookup)},snapshotDisplay=display,options=mapOptions({snapshotRegions:true}),out=document.createElement('canvas');
-  const button=$('mapImageExport'),status=$('mapImageStatus');button.disabled=true;status.textContent='正在生成完整地图 JPEG，沿用当前筛选与图层设置…';
+  const button=$('mapImageExport'),status=$('mapImageStatus');button.disabled=true;_i18n?.setBusy('map-image',true);status.textContent=_t('正在生成完整地图 JPEG，沿用当前筛选与图层设置…');
   try{
    const plan=imageExport.layout(source.data.rendering);
    // Paint the progress message before the independent full-size render.
    await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
    out.width=plan.width;out.height=plan.height;const target=out.getContext('2d',{alpha:false});
-   if(!target)throw Error('无法分配地图图片画布，请关闭其他大图后重试。');
+   if(!target)throw Error(_t('无法分配地图图片画布，请关闭其他大图后重试。'));
    const result=imageExport.render(target,source,snapshotDisplay,options,plan);
-   const blob=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(Error('图片编码失败，请关闭其他大图后重试。')),'image/jpeg',.95));
+   const blob=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(Error(_t('图片编码失败，请关闭其他大图后重试。'))),'image/jpeg',.95));
    const extension=blob.type==='image/jpeg'?'jpg':'png';
-   save(blob,`${source.data.metadata.filename}-完整地图.${extension}`);
-   status.textContent=`已导出完整地图 · ${plan.width} × ${plan.height} · ${(blob.size/1024**2).toFixed(1)} MB · ${source.data.metadata.previewOnly?details.previewLabel(source.data.metadata)+'（未计算概率）':result.labels.toLocaleString()+' 格倍率；请在图片查看器中放大至 100% 阅读。'}`;
-  }catch(error){status.textContent='地图图片未导出：'+error.message;}
-  finally{out.width=out.height=1;button.disabled=false;}
+   save(blob,_t`${source.data.metadata.filename}-完整地图.${extension}`);
+   status.textContent=_t`已导出完整地图 · ${plan.width} × ${plan.height} · ${(blob.size/1024**2).toFixed(1)} MB · ${source.data.metadata.previewOnly?details.previewLabel(source.data.metadata)+_t('（未计算概率）'):result.labels.toLocaleString()+_t(' 格倍率；请在图片查看器中放大至 100% 阅读。')}`;
+  }catch(error){status.textContent=_t('地图图片未导出：')+error.message;}
+  finally{out.width=out.height=1;button.disabled=false;_i18n?.setBusy('map-image',false);}
  };
 
   $('cellFraction').onclick=()=>{
    const {state,display}=getContext();
-   if(!state.selected){message('先点击格子或按坐标定位。',true);return;}
+   if(!state.selected){message(_t('先点击格子或按坐标定位。'),true);return;}
    download(fraction(state.data,state.selected,display));
   };
  }

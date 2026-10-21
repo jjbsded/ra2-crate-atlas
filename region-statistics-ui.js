@@ -1,8 +1,10 @@
 /* Region workspace. Persistence is keyed by source bytes, never an analysis job URL. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const R=root.CrateRegionStatistics,$=id=>document.getElementById(id);
- const format=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2});
+ const format=new Intl.NumberFormat(_i18n?.language||'zh-CN',{maximumFractionDigits:2});
  const amount=n=>n===null?'—':(n>0&&n<.01?n.toPrecision(2):format.format(n))+'×';
  function create({getState,getDisplay,schedule,pick,area,onMode}){
   let doc=R.defaults(),lookup=new Map(),eligible=new Map(),stats=new Map(),storageKey='',active=false,stroke=null,hover=null,history=[],future=[],saveTimer=null,storageBlocked=false,nameEditing=false,colorEditing=false,opacityEditing=false;
@@ -14,7 +16,7 @@
   const removing=()=>Boolean(stroke?.baseRemove??($('regionOperation').value==='remove'))!==shiftHeld;
   function interactionHint(){
    $('regionEyedropper').setAttribute('aria-pressed',String(tool()==='picker'));
-   $('regionModifierStatus').textContent=!active?'':picking()?'取色：点击已有区域；不改变选区':shiftHeld?`Shift · 临时${removing()?'取消选择':'选择'}`:'';
+   $('regionModifierStatus').textContent=!active?'':picking()?_t('取色：点击已有区域；不改变选区'):shiftHeld?_t`Shift · 临时${removing()?_t('取消选择'):_t('选择')}`:'';
   }
   function modifiers(e={}){
    const shift=typeof e.shiftKey==='boolean'?e.shiftKey:shiftHeld,ctrl=typeof e.ctrlKey==='boolean'?e.ctrlKey:ctrlHeld;
@@ -38,10 +40,10 @@
   }
   function persist(){
    clearTimeout(saveTimer);saveTimer=null;if(!storageKey||storageBlocked)return;
-   try{localStorage.setItem(storageKey,R.encode(doc));status('已自动保存 · 本浏览器');}
-   catch{status('自动保存失败：浏览器存储不可用或已满。请导出划分备份。',true);}
+   try{localStorage.setItem(storageKey,R.encode(doc));status(_t('已自动保存 · 本浏览器'));}
+   catch{status(_t('自动保存失败：浏览器存储不可用或已满。请导出划分备份。'),true);}
   }
-  function saveSoon(){if(storageBlocked)return;status('正在自动保存…');clearTimeout(saveTimer);saveTimer=setTimeout(persist,300);}
+  function saveSoon(){if(storageBlocked)return;status(_t('正在自动保存…'));clearTimeout(saveTimer);saveTimer=setTimeout(persist,300);}
   function remember(raw){history.push(raw);if(history.length>20)history.shift();future=[];}
   function checkpoint(){remember(R.encode(doc));}
   function dirty(save=true){refresh();schedule();if(save)saveSoon();}
@@ -49,7 +51,7 @@
    closePicker();
    cancel();hover=null;shiftHeld=ctrlHeld=false;active=!!value&&!state().data?.metadata.previewOnly;interactionHint();
    $('regionToggle').setAttribute('aria-pressed',String(active));
-   $('regionToggle').textContent=active?'结束区域统计':'区域统计';
+   $('regionToggle').textContent=active?_t('结束区域统计'):_t('区域统计');
    $('regionToolbar').hidden=$('regionEditor').hidden=$('regionSummary').hidden=!active;
    $('cellAside').hidden=active;$('map').classList.toggle('region-editing',active);
    $('mapInteractionHint').hidden=active;
@@ -67,27 +69,27 @@
    storageKey=nextKey;
    if(keep){/* Recompute statistics/artwork while keeping selection and undo. */}
    else if(storageKey){
-    try{const raw=localStorage.getItem(storageKey);if(raw){doc=R.decode(raw,eligible);const old=JSON.parse(raw),removed=old.regions.reduce((n,r)=>n+r.cells.filter(k=>!eligible.has(k)).length,0);status('已恢复此地图的区域划分');$('regionActionStatus').textContent=removed?`已排除 ${removed} 处可选边界外的格子归属。`:'';if(old.defaultRegionCount!==12||old.selectionBoundsVersion!==1||removed)saveSoon();}else status('划分后自动保存 · 本浏览器');}
-    catch{storageBlocked=true;status('已有区域记录无法读取，暂不覆盖。可导出当前划分备份。',true);}
-   }else{storageBlocked=true;status('结果缺少地图标识，无法自动保存；请重新分析。',true);}
+    try{const raw=localStorage.getItem(storageKey);if(raw){doc=R.decode(raw,eligible);const old=JSON.parse(raw),removed=old.regions.reduce((n,r)=>n+r.cells.filter(k=>!eligible.has(k)).length,0);status(_t('已恢复此地图的区域划分'));$('regionActionStatus').textContent=removed?_t`已排除 ${removed} 处可选边界外的格子归属。`:'';if(old.defaultRegionCount!==12||old.selectionBoundsVersion!==1||removed)saveSoon();}else status(_t('划分后自动保存 · 本浏览器'));}
+    catch{storageBlocked=true;status(_t('已有区域记录无法读取，暂不覆盖。可导出当前划分备份。'),true);}
+   }else{storageBlocked=true;status(_t('结果缺少地图标识，无法自动保存；请重新分析。'),true);}
    $('regionToggle').disabled=!!s.data.metadata.previewOnly;
-   $('regionToggle').title=s.data.metadata.previewOnly?'外观预览没有概率，无法统计':'划分地区并比较概率';
+   $('regionToggle').title=s.data.metadata.previewOnly?_t('外观预览没有概率，无法统计'):_t('划分地区并比较概率');
    if(active&&s.data.metadata.previewOnly)setMode(false);else refresh();schedule();
   }
   function refresh(){
    if(!state().data||state().data.metadata.previewOnly)return;
    const r=current(),selector=$('regionActive');closePicker();$('regionOptions').replaceChildren();regionChoices=[];
-   $('regionActiveText').textContent=`${r.name} · ${r.cells.size} 格`;$('regionActiveSwatch').style.backgroundColor=r.color;
+   $('regionActiveText').textContent=_t`${R.displayName(r)} · ${r.cells.size} 格`;$('regionActiveSwatch').style.backgroundColor=r.color;
    for(const reg of doc.regions){
     const option=document.createElement('button');option.type='button';option.value=reg.id;option.className='region-option';option.tabIndex=-1;
     option.setAttribute('role','option');option.setAttribute('aria-selected',String(reg.id===doc.active));
     const dot=document.createElement('i');dot.className='region-swatch';dot.style.backgroundColor=reg.color;dot.setAttribute('aria-hidden','true');
-    const name=document.createElement('span');name.className='region-option-name';name.textContent=reg.name;
-    const count=document.createElement('small');count.textContent=`${reg.cells.size} 格`;
+    const name=document.createElement('span');name.className='region-option-name';name.textContent=R.displayName(reg);
+    const count=document.createElement('small');count.textContent=_t`${reg.cells.size} 格`;
     option.append(dot,name,count);option.onclick=()=>{closePicker(true);activate(reg.id);};
     $('regionOptions').append(option);regionChoices.push(option);
    }
-   selector.value=doc.active;if(document.activeElement!==$('regionName'))$('regionName').value=r.name;$('regionColor').value=r.color;$('regionOverlap').checked=doc.overlap;
+   selector.value=doc.active;if(document.activeElement!==$('regionName'))$('regionName').value=R.displayName(r);$('regionColor').value=r.color;$('regionOverlap').checked=doc.overlap;
    $('regionUndo').disabled=!history.length;$('regionRedo').disabled=!future.length;$('regionClear').disabled=!r.cells.size;$('regionDelete').disabled=doc.regions.length<=1;$('regionAdd').disabled=doc.regions.length>=64;
    $('regionTransparency').value=doc.transparency;$('regionTransparencyValue').textContent=doc.transparency+'%';
    $('regionFocus').disabled=!r.cells.size;$('regionEditor').style.setProperty('--region-color',r.color);
@@ -101,12 +103,12 @@
    for(const reg of order){
     const tr=document.createElement('tr');tr.classList.toggle('active',reg.id===doc.active);
     const label=document.createElement('td'),button=document.createElement('button');button.className='region-row-name';
-    const dot=document.createElement('i');dot.style.backgroundColor=reg.color;button.append(dot,document.createTextNode(reg.name));
+    const dot=document.createElement('i');dot.style.backgroundColor=reg.color;button.append(dot,document.createTextNode(R.displayName(reg)));
     button.setAttribute('aria-pressed',String(reg.id===doc.active));button.onclick=()=>activate(reg.id);label.append(button);
-    const count=document.createElement('small');count.textContent=`${reg.cells.size.toLocaleString()} 格`;label.append(count);tr.append(label);
+    const count=document.createElement('small');count.textContent=_t`${reg.cells.size.toLocaleString()} 格`;label.append(count);tr.append(label);
     const preview=document.createElement('td');preview.className='region-preview';
     for(const overview of [false,true]){
-     const b=document.createElement('button');b.title=overview?'在全图中定位此区域':'查看区域包围范围';b.setAttribute('aria-label',`${overview?'全图定位':'查看地形'}：${reg.name}`);b.disabled=!reg.cells.size;
+     const b=document.createElement('button');b.title=overview?_t('在全图中定位此区域'):_t('查看区域包围范围');b.setAttribute('aria-label',`${overview?_t('全图定位'):_t('查看地形')}：${R.displayName(reg)}`);b.disabled=!reg.cells.size;
      const cv=thumbnail(reg,overview);b.append(cv);b.onclick=()=>{activate(reg.id);focus();};preview.append(b);
     }
     tr.append(preview);
@@ -114,16 +116,16 @@
      const g=stats.get(reg.id)[group];
      for(const field of ['total','average']){
       const td=document.createElement('td');td.textContent=amount(g[field]);
-      td.title=`${state().data.metadata.approximate?'近似统计，不保证准确；':''}${g.count} 格（含零概率格）${field==='average'?'；总倍率 ÷ 本类格数':''}`;
-      if(field==='average'){const count=document.createElement('small');count.textContent=`${g.count.toLocaleString()} 格`;td.append(count);}
+      td.title=_t`${state().data.metadata.approximate?_t('近似统计，不保证准确；'):''}${g.count} 格（含零概率格）${field==='average'?_t('；总倍率 ÷ 本类格数'):''}`;
+      if(field==='average'){const count=document.createElement('small');count.textContent=_t`${g.count.toLocaleString()} 格`;td.append(count);}
       tr.append(td);
      }
     }
     body.append(tr);
    }
    const selected=stats.get(doc.active),metric=$('regionLive');
-   metric.textContent=`${state().data.metadata.approximate?'近似统计 · 不保证准确 · ':''}当前 ${r.cells.size.toLocaleString()} 格 · 综合 ${amount(selected.all.total)} · 平均 ${amount(selected.all.average)}`;
-   $('regionCount').textContent=`${doc.regions.length} 个区域${doc.overlap?' · 可重叠，各区独立统计':' · 不重叠'}`;
+   metric.textContent=_t`${state().data.metadata.approximate?_t('近似统计 · 不保证准确 · '):''}当前 ${r.cells.size.toLocaleString()} 格 · 综合 ${amount(selected.all.total)} · 平均 ${amount(selected.all.average)}`;
+   $('regionCount').textContent=_t`${doc.regions.length} 个区域${doc.overlap?_t(' · 可重叠，各区独立统计'):_t(' · 不重叠')}`;
   }
   function activate(id){cancel();doc.active=id;nameEditing=colorEditing=false;hover=null;refresh();saveSoon();schedule();}
   function focus(){
@@ -181,7 +183,7 @@
    const index=Number(overview);if(cached.images[index])return cached.images[index];
    const cv=document.createElement('canvas');cv.width=overview?132:180;cv.height=90;cv.setAttribute('aria-hidden','true');cached.images[index]=cv;
    const ctx=cv.getContext('2d'),b=geometry(reg).bounds;ctx.fillStyle='#0a151e';ctx.fillRect(0,0,cv.width,cv.height);
-   if(!b){ctx.fillStyle='#78909f';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(overview?'全图位置':'尚未划分',cv.width/2,cv.height/2+4);return cv;}
+   if(!b){ctx.fillStyle='#78909f';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(overview?_t('全图位置'):_t('尚未划分'),cv.width/2,cv.height/2+4);return cv;}
    const crop=overview?{x:0,y:0,w:s.data.rendering.width,h:s.data.rendering.height}:b,scale=Math.min((cv.width-8)/crop.w,(cv.height-8)/crop.h);
    const view={scale,x:(cv.width-crop.w*scale)/2-crop.x*scale,y:(cv.height-crop.h*scale)/2-crop.y*scale};
    ctx.drawImage(source,crop.x,crop.y,crop.w,crop.h,(cv.width-crop.w*scale)/2,(cv.height-crop.h*scale)/2,crop.w*scale,crop.h*scale);
@@ -247,8 +249,8 @@
      const cell=pick(d.point),members=cell?doc.regions.filter(r=>r.cells.has(R.key(cell))):[];
      // Match visual stacking: the active region is on top, otherwise the latest region.
      const target=members.find(r=>r.id===doc.active)||members[members.length-1];
-     if(target){activate(target.id);$('regionTool').value=lastTool;controls();const label=`区域 ${target.id.slice(1)}`;$('regionActionStatus').textContent=`已取色：${target.name===label?label:label+' · '+target.name}；已恢复上次工具。`;}
-     else $('regionActionStatus').textContent=cell?'该格未划分区域，当前区域未变。':'此处没有地图格子，当前区域未变。';
+     if(target){activate(target.id);$('regionTool').value=lastTool;controls();const label=_t`区域 ${target.id.slice(1)}`,name=R.displayName(target);$('regionActionStatus').textContent=_t`已取色：${name===label?label:label+' · '+name}；已恢复上次工具。`;}
+     else $('regionActionStatus').textContent=cell?_t('该格未划分区域，当前区域未变。'):_t('此处没有地图格子，当前区域未变。');
     }
     interactionHint();schedule();return;
    }
@@ -329,43 +331,43 @@
   document.addEventListener('pointerdown',e=>{if(!$('regionPicker').contains(e.target))closePicker();});
   $('regionName').oninput=()=>{
    if(!nameEditing){checkpoint();nameEditing=true;}
-   current().name=$('regionName').value.trim().slice(0,48)||'未命名区域';dirty();
+   current().name=$('regionName').value.trim().slice(0,48)||_t('未命名区域');current().customName=true;dirty();
   };
-  $('regionName').onblur=()=>{nameEditing=false;$('regionName').value=current().name;};
+  $('regionName').onblur=()=>{nameEditing=false;$('regionName').value=R.displayName(current());};
   $('regionColor').oninput=()=>{if(!colorEditing){checkpoint();colorEditing=true;}current().color=$('regionColor').value;dirty();};
   $('regionColor').onchange=$('regionColor').onblur=()=>{colorEditing=false;};
   $('regionOverlap').onchange=()=>{
    checkpoint();doc.overlap=$('regionOverlap').checked;const removed=doc.overlap?0:R.exclusive(doc);dirty();
-   $('regionActionStatus').textContent=removed?`已移除 ${removed} 处重复归属，优先保留当前区域；可撤销。`:doc.overlap?'允许同一格归属多个区域。':'同一格只属于一个区域。';
+   $('regionActionStatus').textContent=removed?_t`已移除 ${removed} 处重复归属，优先保留当前区域；可撤销。`:doc.overlap?_t('允许同一格归属多个区域。'):_t('同一格只属于一个区域。');
   };
-  $('regionAdd').onclick=()=>{checkpoint();const n=doc.next++;doc.regions.push({id:`r${n}`,name:`区域 ${n}`,color:R.nextColor(doc.regions),cells:new Set()});doc.active=`r${n}`;dirty();};
-  $('regionClear').onclick=()=>{checkpoint();current().cells.clear();R.touch(current());dirty();$('regionActionStatus').textContent='已清空当前区域；可撤销。';};
-  $('regionDelete').onclick=()=>{if(doc.regions.length<=1)return;checkpoint();doc.regions=doc.regions.filter(r=>r.id!==doc.active);doc.active=doc.regions[0].id;dirty();$('regionActionStatus').textContent='已删除区域；可撤销。';};
+  $('regionAdd').onclick=()=>{checkpoint();const n=doc.next++;doc.regions.push({id:`r${n}`,name:_t`区域 ${n}`,color:R.nextColor(doc.regions),cells:new Set()});doc.active=`r${n}`;dirty();};
+  $('regionClear').onclick=()=>{checkpoint();current().cells.clear();R.touch(current());dirty();$('regionActionStatus').textContent=_t('已清空当前区域；可撤销。');};
+  $('regionDelete').onclick=()=>{if(doc.regions.length<=1)return;checkpoint();doc.regions=doc.regions.filter(r=>r.id!==doc.active);doc.active=doc.regions[0].id;dirty();$('regionActionStatus').textContent=_t('已删除区域；可撤销。');};
   function travel(redo){
    cancel();const stack=redo?future:history,raw=stack.pop();if(!raw)return;
-   (redo?history:future).push(R.encode(doc));doc=R.decode(raw,eligible);nameEditing=colorEditing=opacityEditing=false;dirty();$('regionActionStatus').textContent=redo?'已重做上一步。':'已撤销上一步。';
+   (redo?history:future).push(R.encode(doc));doc=R.decode(raw,eligible);nameEditing=colorEditing=opacityEditing=false;dirty();$('regionActionStatus').textContent=redo?_t('已重做上一步。'):_t('已撤销上一步。');
   }
   $('regionUndo').onclick=()=>travel(false);$('regionRedo').onclick=()=>travel(true);
   $('regionTransparency').oninput=()=>{if(!opacityEditing){checkpoint();opacityEditing=true;}doc.transparency=Math.max(0,Math.min(100,Number($('regionTransparency').value)||0));dirty();};
   $('regionTransparency').onchange=$('regionTransparency').onblur=()=>{opacityEditing=false;};
   $('regionFocus').onclick=focus;
   $('regionSort').onchange=$('regionAscending').onchange=refresh;
-  function controls(){if(tool()!=='picker')lastTool=tool();const brush=tool().startsWith('brush'),round=['brush-circle','brush-ellipse'].includes(tool());$('regionSizes').hidden=!brush;$('regionHeightLabel').hidden=round;$('regionWidthText').textContent=tool()==='brush-circle'?'直径':tool()==='brush-ellipse'?'横向直径':'宽度';hover=null;interactionHint();schedule();}
+  function controls(){if(tool()!=='picker')lastTool=tool();const brush=tool().startsWith('brush'),round=['brush-circle','brush-ellipse'].includes(tool());$('regionSizes').hidden=!brush;$('regionHeightLabel').hidden=round;$('regionWidthText').textContent=tool()==='brush-circle'?_t('直径'):tool()==='brush-ellipse'?_t('横向直径'):_t('宽度');hover=null;interactionHint();schedule();}
   $('regionTool').onchange=()=>{cancel();controls();};
   $('regionEyedropper').onclick=()=>{cancel();$('regionTool').value=tool()==='picker'?lastTool:'picker';controls();};
   $('regionOperation').onchange=()=>{hover=null;interactionHint();schedule();};
   for(const id of ['regionWidth','regionHeight'])$(id).onchange=()=>{$(id).value=id==='regionWidth'?width():height();schedule();};
   $('regionBackup').onclick=()=>{
    const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify({mapSha256:state().data.metadata.sourceSha256,selection:JSON.parse(R.encode(doc))})],{type:'application/json'}));
-   a.href=url;a.download=state().data.metadata.filename+'-区域划分.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+   a.href=url;a.download=state().data.metadata.filename+_t('-区域划分.json');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   $('regionRestore').onchange=async()=>{
    const file=$('regionRestore').files[0];if(!file)return;
    try{
-    if(file.size>128*1024*1024)throw Error('备份文件过大（上限 128 MB）');
-    const data=JSON.parse(await file.text());if(data.mapSha256!==state().data.metadata.sourceSha256)throw Error('备份属于另一张地图');
-    const restored=R.decode(JSON.stringify(data.selection),eligible);checkpoint();doc=restored;storageBlocked=false;dirty();$('regionActionStatus').textContent='已恢复备份（自动排除可选边界外的格子）；可撤销。';
-   }catch(e){$('regionActionStatus').textContent='恢复失败：'+e.message;}
+    if(file.size>128*1024*1024)throw Error(_t('备份文件过大（上限 128 MB）'));
+    const data=JSON.parse(await file.text());if(data.mapSha256!==state().data.metadata.sourceSha256)throw Error(_t('备份属于另一张地图'));
+    const restored=R.decode(JSON.stringify(data.selection),eligible);checkpoint();doc=restored;storageBlocked=false;dirty();$('regionActionStatus').textContent=_t('已恢复备份（自动排除可选边界外的格子）；可撤销。');
+   }catch(e){$('regionActionStatus').textContent=_t('恢复失败：')+e.message;}
    $('regionRestore').value='';
   };
   $('objects').addEventListener('change',()=>{if(active)refresh();});
@@ -376,8 +378,8 @@
   // Do not silently overwrite an update made in another tab.
   window.addEventListener('storage',e=>{
    if(e.key!==storageKey||!e.newValue)return;
-   if(stroke||saveTimer){storageBlocked=true;clearTimeout(saveTimer);saveTimer=null;status('另一页面修改了此地图划分。已暂停保存，请导出备份后刷新。',true);return;}
-   try{doc=R.decode(e.newValue,eligible);history=[];future=[];nameEditing=colorEditing=opacityEditing=false;dirty(false);status('已同步另一页面的区域划分');}catch{status('另一页面的区域记录无法读取',true);}
+   if(stroke||saveTimer){storageBlocked=true;clearTimeout(saveTimer);saveTimer=null;status(_t('另一页面修改了此地图划分。已暂停保存，请导出备份后刷新。'),true);return;}
+   try{doc=R.decode(e.newValue,eligible);history=[];future=[];nameEditing=colorEditing=opacityEditing=false;dirty(false);status(_t('已同步另一页面的区域划分'));}catch{status(_t('另一页面的区域记录无法读取'),true);}
   });
   document.addEventListener('keydown',e=>{
    if(active&&(e.key==='Shift'||e.key==='Control')&&!document.querySelector('dialog[open]')&&(hover||stroke||!e.target?.closest('input,textarea,select,[contenteditable]')))modifiers(e);

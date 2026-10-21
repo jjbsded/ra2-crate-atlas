@@ -1,6 +1,8 @@
 /* Local 3D inspection of a bounded patch. Probability results are never edited. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const H=1/Math.sqrt(6),key=c=>`${c.x},${c.y}`;
  function viewHalfSize(radius,zoom,width,heightPx){const size=radius*1.15+2,horizontal=(2*radius+1)*Math.SQRT2/2+1;return Math.max(size*.68,horizontal/(Math.max(1,width)/Math.max(1,heightPx)))/zoom;}
  function height(c,u,v){const[a,b,d,e]=c.corners||[0,0,0,0];return c.level+a*(1-u)*(1-v)+b*u*(1-v)+d*u*v+e*(1-u)*v;}
@@ -20,10 +22,10 @@
  // Risk flags come from the same exact analysis as the main map. Do not infer
  // an anomaly from Rough/high differences or from a rounded probability alone.
  const riskStyles={
-  current:{color:0xff77c6,alpha:.34,pattern:'solid',label:'放箱后禁行'},
-  potential:{color:0xed9dca,alpha:.22,pattern:'hatch',label:'清空后潜在禁行'},
-  zero:{color:0xf0ad69,alpha:.13,pattern:'dots',label:'Rough · 落箱概率 0'},
-  other:{color:0xb6bdc7,alpha:.13,pattern:'dots',label:'Rough · 未归入异常点'}
+  current:{color:0xff77c6,alpha:.34,pattern:'solid',label:_t('放箱后禁行')},
+  potential:{color:0xed9dca,alpha:.22,pattern:'hatch',label:_t('清空后潜在禁行')},
+  zero:{color:0xf0ad69,alpha:.13,pattern:'dots',label:_t('Rough · 落箱概率 0')},
+  other:{color:0xb6bdc7,alpha:.13,pattern:'dots',label:_t('Rough · 未归入异常点')}
  };
  function riskCategory(c){
   if(c.marked)return 'current';
@@ -33,37 +35,38 @@
  }
  function description(c,meta,after=false){
   if(meta.demonstration==='single'){
-   if(after)return `${land[c.land]} → ${land[c.postLand]} · ${c.postLand===3?'放箱后地面禁行':'放箱后地面类型允许通行'}`;
-   if(c.land===7&&c.higher.length)return 'Rough 例外 · 放箱前地面类型允许通行';
-   return `${land[c.land]} · ${c.land===3?'当前地面已禁行':'地面类型允许通行'}${c.higher.length?' · 命中高差判定':''}`;
+   if(after)return `${land[c.land]} → ${land[c.postLand]} · ${c.postLand===3?_t('放箱后地面禁行'):_t('放箱后地面类型允许通行')}`;
+   if(c.land===7&&c.higher.length)return _t('Rough 例外 · 放箱前地面类型允许通行');
+   return `${land[c.land]} · ${c.land===3?_t('当前地面已禁行'):_t('地面类型允许通行')}${c.higher.length?_t(' · 命中高差判定'):''}`;
   }
-  if(meta.previewOnly)return (meta.partialAnalysis?'部分地图预览':'地图外观预览')+' · 未验证禁行规则';
-  if(meta.approximate)return '近似概率，不保证准确 · 未验证禁行规则';
-  if(!meta.predictionEnabled)return '本图未启用四级高差禁行判定';
-  if(after)return `${land[c.land]} → ${land[c.postLand]} · ${c.postLand===3?'放箱后地面禁行':'放箱后未变为 Rock 地面'}`;
-  const category=riskCategory(c),prefix=c.land===7?'Rough 例外 · ':'';
-  if(category==='current')return `${prefix}当前可随机落箱，放箱后禁行 · 对应主图实色粉标`;
-  if(category==='potential')return `${prefix}当前落箱概率为 0；清空对象后可随机落箱，随后禁行 · 对应主图斜纹粉标`;
+  if(meta.previewOnly)return (meta.partialAnalysis?_t('部分地图预览'):_t('地图外观预览'))+_t(' · 未验证禁行规则');
+  if(meta.approximate)return _t('近似概率，不保证准确 · 未验证禁行规则');
+  if(!meta.predictionEnabled)return _t('本图未启用四级高差禁行判定');
+  if(after)return `${land[c.land]} → ${land[c.postLand]} · ${c.postLand===3?_t('放箱后地面禁行'):_t('放箱后未变为 Rock 地面')}`;
+  const category=riskCategory(c),prefix=c.land===7?_t('Rough 例外 · '):'';
+  if(category==='current')return _t`${prefix}当前可随机落箱，放箱后禁行 · 对应主图实色粉标`;
+  if(category==='potential')return _t`${prefix}当前落箱概率为 0；清空对象后可随机落箱，随后禁行 · 对应主图斜纹粉标`;
   if(category==='zero'){
-   const reason=c.primary===false?'；高度投影判定未选中此低格':c.status==='ghost'?'；此坡型不生成实体箱':'';
-   const cleared=c.clearance?.supported===false?'；清空对象后仍无随机落箱路径':'';
-   return `${prefix}随机落箱概率为 0${reason}${cleared} · 不属于主图异常点`;
+   const reason=c.primary===false?_t('；高度投影判定未选中此低格'):c.status==='ghost'?_t('；此坡型不生成实体箱'):'';
+   const cleared=c.clearance?.supported===false?_t('；清空对象后仍无随机落箱路径'):'';
+   return _t`${prefix}随机落箱概率为 0${reason}${cleared} · 不属于主图异常点`;
   }
-  if(category==='other')return `${prefix}未归入主图异常点；不能仅凭高差条件判断放箱风险`;
-  if(c.land===3)return `Rock · 当前地面已禁行${c.higher.length?'，命中高差判定':''}`;
-  return `${land[c.land]||'未知地面'} · ${c.higher.length?'命中高差位置；当前地面类型未变为 Rock':'未命中高差判定'}`;
+  if(category==='other')return _t`${prefix}未归入主图异常点；不能仅凭高差条件判断放箱风险`;
+  if(c.land===3)return _t`Rock · 当前地面已禁行${c.higher.length?_t('，命中高差判定'):''}`;
+  return `${land[c.land]||_t('未知地面')} · ${c.higher.length?_t('命中高差位置；当前地面类型未变为 Rock'):_t('未命中高差判定')}`;
  }
  let library;
  function loadLibrary(){
   if(root.THREE)return Promise.resolve(root.THREE);
-  if(!library)library=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='lib/three-r160.min.js';s.onload=()=>root.THREE?resolve(root.THREE):reject(Error('3D 绘图库未能初始化'));s.onerror=()=>{s.remove();library=null;reject(Error('3D 绘图库缺失，请检查工具文件是否完整'));};document.head.append(s);});
+  if(!library)library=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='lib/three-r160.min.js';s.onload=()=>root.THREE?resolve(root.THREE):reject(Error(_t('3D 绘图库未能初始化')));s.onerror=()=>{s.remove();library=null;reject(Error(_t('3D 绘图库缺失，请检查工具文件是否完整')));};document.head.append(s);});
   return library;
  }
  async function fetchPatch(context,{radius,signal}){
   const query=new URLSearchParams({result:context.result,x:context.cell.x,y:context.cell.y,radius});
   const response=await fetch('/api/maps/terrain3d?'+query,{signal}),text=await response.text();let data;
-  try{data=JSON.parse(text);}catch{throw Error('3D 接口尚未启动，请重新启动工具后重试');}
-  if(!response.ok)throw Error(data.error||'地形读取失败');return data;
+  try{data=JSON.parse(text);}catch{throw Error(_t('3D 接口尚未启动，请重新启动工具后重试'));}
+  _i18n?.diagnostics(data);
+  if(!response.ok)throw Error(data.error||_t('地形读取失败'));return data;
  }
  function create({getContext,onSelect,loadPatch=fetchPatch,embedded=false}){
   const $=id=>document.getElementById(id),dialog=$('terrain3dDialog'),stage=$('terrain3dStage'),canvas=$('terrain3dCanvas');
@@ -72,18 +75,18 @@
   function loading(value){busy=value;stage.classList.toggle('is-loading',value);$('terrain3dLoading').hidden=!value;for(const id of controls)$(id).disabled=value;}
   async function show(){
    const context=getContext();if(!context?.cell)return;
-   if(!dialog.open){probabilityOn=false;if(embedded)dialog.setAttribute('open','');else dialog.showModal();}$('terrain3dProbability').textContent='概率:'+(probabilityOn?'开':'关');$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityOn));if(!embedded)document.body.classList.add('terrain3d-open');
+   if(!dialog.open){probabilityOn=false;if(embedded)dialog.setAttribute('open','');else dialog.showModal();}$('terrain3dProbability').textContent=_t('概率:')+(probabilityOn?_t('开'):_t('关'));$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityOn));if(!embedded)document.body.classList.add('terrain3d-open');
    const ticket=++revision;controller?.abort();controller=new AbortController();view?.dispose();view=null;
-   loading(true);$('terrain3dError').textContent='';$('terrain3dLabels').replaceChildren();$('terrain3dRelations').replaceChildren();$('terrain3dSource').textContent='';$('terrain3dWarnings').hidden=true;$('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=true;canvas.setAttribute('aria-label','正在读取选中格附近地形');$('terrain3dCrate').textContent='预览放箱后';$('terrain3dCrate').setAttribute('aria-pressed','false');
-   $('terrain3dProbabilityNote').hidden=true;$('terrain3dTitle').textContent=`3D 地形 · (${context.cell.x}, ${context.cell.y})`;
-   $('terrain3dDetail').textContent='正在读取选中格附近的原始地块…';
+   loading(true);$('terrain3dError').textContent='';$('terrain3dLabels').replaceChildren();$('terrain3dRelations').replaceChildren();$('terrain3dSource').textContent='';$('terrain3dWarnings').hidden=true;$('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=true;canvas.setAttribute('aria-label',_t('正在读取选中格附近地形'));$('terrain3dCrate').textContent=_t('预览放箱后');$('terrain3dCrate').setAttribute('aria-pressed','false');
+   $('terrain3dProbabilityNote').hidden=true;$('terrain3dTitle').textContent=_t`3D 地形 · (${context.cell.x}, ${context.cell.y})`;
+   $('terrain3dDetail').textContent=_t('正在读取选中格附近的原始地块…');
    try{
     const [T,data]=await Promise.all([loadLibrary(),loadPatch(context,{radius:$('terrain3dRadius').value,signal:controller.signal})]);
     if(ticket!==revision||!dialog.open)return;
     const next=await makeView(T,data,context,ticket);
     if(ticket!==revision||!dialog.open){next?.dispose();return;}
     view=next;loading(false);view.update();
-   }catch(error){if(ticket!==revision||error.name==='AbortError')return;loading(false);$('terrain3dError').textContent=error.message;$('terrain3dDetail').textContent=embedded?'地形未能载入，可点击“重新加载演示”重试。':'地形未能载入。关闭后可重新打开重试。';for(const id of controls)$(id).disabled=true;}
+   }catch(error){if(ticket!==revision||error.name==='AbortError')return;loading(false);$('terrain3dError').textContent=error.message;$('terrain3dDetail').textContent=embedded?_t('地形未能载入，可点击“重新加载演示”重试。'):_t('地形未能载入。关闭后可重新打开重试。');for(const id of controls)$(id).disabled=true;}
   }
   function close(){++revision;controller?.abort();view?.dispose();view=null;busy=false;$('terrain3dLabels').replaceChildren();document.body.classList.remove('terrain3d-open');}
   $('terrain3dClose').onclick=()=>dialog.close();dialog.addEventListener('close',close);
@@ -109,7 +112,7 @@
    function dispose(){if(disposed)return;disposed=true;cancelAnimationFrame(frame);observer?.disconnect();events.abort();for(const g of geometries)g.dispose();for(const m of materials)m.dispose();for(const t of Object.values(textures))t.dispose();renderer.dispose();for(const l of labels)l.node.remove();}
    const events=new AbortController();let observer=null;
    try{
-    await Promise.all(Object.entries(data.textures).map(([id,url])=>new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>{if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();};im.onerror=()=>reject(Error('部分地形贴图无法解码'));im.src=url;})));
+    await Promise.all(Object.entries(data.textures).map(([id,url])=>new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>{if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();};im.onerror=()=>reject(Error(_t('部分地形贴图无法解码')));im.src=url;})));
     if(ticket!==revision){dispose();return null;}
     function surface(c,mat,offset=0,inset=0){
      const positions=[],uv=[],indices=[],n=c.slope?6:1;
@@ -201,10 +204,10 @@
      if(!selected.canPlace)after=false;decor.visible=$('terrain3dDecorations').checked;
      const fine=$('terrain3dRelief').checked&&reliefAssets.size>0;relief.visible=fine;coarse.visible=!fine;
      if(probabilityOn&&hasProbability)buildProbability();probabilityLayer.visible=probabilityOn&&hasProbability;
-     $('terrain3dProbability').disabled=busy||!hasProbability;$('terrain3dProbability').textContent='概率:'+(probabilityLayer.visible?'开':'关');$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityLayer.visible));
-     $('terrain3dProbability').title=hasProbability?'同时显示概率着色和倍率；沿用主图配色、筛选、透明度及 1× 标签设置，放大可查看倍率':'本图未计算概率';
+     $('terrain3dProbability').disabled=busy||!hasProbability;$('terrain3dProbability').textContent=_t('概率:')+(probabilityLayer.visible?_t('开'):_t('关'));$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityLayer.visible));
+     $('terrain3dProbability').title=hasProbability?_t('同时显示概率着色和倍率；沿用主图配色、筛选、透明度及 1× 标签设置，放大可查看倍率'):_t('本图未计算概率');
      $('terrain3dProbabilityNote').hidden=!probabilityLayer.visible;
-     $('terrain3dProbabilityNote').textContent=hasProbability?`${data.metadata.approximate?'近似概率，不保证准确；未知格按放箱失败重抽。':''}概率与主图使用同一结果；1× 基准 ${root.CrateProbabilityDisplay.percent(probability.display.baselineProbability)}。放大可查看倍率；仅切换显示，不重新计算。`:'';
+     $('terrain3dProbabilityNote').textContent=hasProbability?_t`${data.metadata.approximate?_t('近似概率，不保证准确；未知格按放箱失败重抽。'):''}概率与主图使用同一结果；1× 基准 ${root.CrateProbabilityDisplay.percent(probability.display.baselineProbability)}。放大可查看倍率；仅切换显示，不重新计算。`:'';
      const enabled=data.metadata.predictionEnabled,show=$('terrain3dMarkers').checked;
      const rel=relationships(selected,lookup);
      if(show&&enabled){
@@ -212,28 +215,28 @@
       for(const c of rel.higher)mark(c,0x79e0b7,.42);
       if(rel.affected.length)mark(selected,0x79e0b7,.38);
       for(const c of [...rel.higher,...rel.affected]){const a=point(selected,.5,.5,.08),b=point(c,.5,.5,.08),mid=a.clone().lerp(b,.5);mid.y=Math.max(a.y,b.y)+.65;line(new T.QuadraticBezierCurve3(a,mid,b).getPoints(28),0x92e8cd,{group:links,dashed:true,depthTest:false,opacity:.8});}
-      for(const c of rel.higher.slice(0,3))label(c,`高格 (${c.x}, ${c.y}) · L${c.level}`);
+      for(const c of rel.higher.slice(0,3))label(c,_t`高格 (${c.x}, ${c.y}) · L${c.level}`);
      }
      line(perimeter(selected,.055,.01),0x8fffaf,{group:links,dashed:true,depthTest:false,opacity:.45});line(perimeter(selected,.06,.01),0x58f495,{group:links});
      if(after){mark(selected,selected.postLand===3?0xff77c6:0x79e0b7,.43);const g=geometry(new T.BoxGeometry(.27,.27,.27)),box=new T.Mesh(g,material({color:0xd9a85b}));box.position.copy(point(selected,.5,.5,.16));marks.add(box);const edges=geometry(new T.EdgesGeometry(g)),edge=new T.LineSegments(edges,new T.LineBasicMaterial({color:0x47311a}));materials.add(edge.material);edge.position.copy(box.position);marks.add(edge);}
      const selectedRisk=riskStyles[riskCategory(selected)];
-     label(selected,`选中 (${selected.x}, ${selected.y}) · L${selected.level}${enabled&&selectedRisk?' · '+selectedRisk.label:''}`,true);
-     $('terrain3dTitle').textContent=`3D 地形 · (${selected.x}, ${selected.y})`;
-     $('terrain3dCrate').disabled=busy||!selected.canPlace;$('terrain3dCrate').setAttribute('aria-pressed',String(after));$('terrain3dCrate').textContent=after?'恢复放箱前':'预览放箱后';
-     $('terrain3dCrate').title=data.metadata.demonstration==='single'?(selected.canPlace?'只比较放箱前后的地面类型，不代表已计算随机落点概率':'此格地面已禁行，请选择 Rough 例外或普通可通行格'):selected.canPlace?'只比较地面类型，分析结果保持不变':'当前格没有已验证的实体箱随机落点，无法预览放箱';
+     label(selected,_t`选中 (${selected.x}, ${selected.y}) · L${selected.level}${enabled&&selectedRisk?' · '+selectedRisk.label:''}`,true);
+     $('terrain3dTitle').textContent=_t`3D 地形 · (${selected.x}, ${selected.y})`;
+     $('terrain3dCrate').disabled=busy||!selected.canPlace;$('terrain3dCrate').setAttribute('aria-pressed',String(after));$('terrain3dCrate').textContent=after?_t('恢复放箱前'):_t('预览放箱后');
+     $('terrain3dCrate').title=data.metadata.demonstration==='single'?(selected.canPlace?_t('只比较放箱前后的地面类型，不代表已计算随机落点概率'):_t('此格地面已禁行，请选择 Rough 例外或普通可通行格')):selected.canPlace?_t('只比较地面类型，分析结果保持不变'):_t('当前格没有已验证的实体箱随机落点，无法预览放箱');
      $('terrain3dMarkers').disabled=!enabled;
-     $('terrain3dDetail').textContent=`(${selected.x}, ${selected.y}) · 高度 ${selected.level} / 坡型 ${selected.slope} · ${description(selected,data.metadata,after)}${selected.occupied?' · 当前有对象占用':''}`;
+     $('terrain3dDetail').textContent=_t`(${selected.x}, ${selected.y}) · 高度 ${selected.level} / 坡型 ${selected.slope} · ${description(selected,data.metadata,after)}${selected.occupied?_t(' · 当前有对象占用'):''}`;
      $('terrain3dRelations').replaceChildren();
      const refs=selected.higher.length?selected.higher:selected.affected;
-     const prefix=document.createElement('span');prefix.textContent=!enabled?'':selected.higher.length?'相关高格：':selected.affected.length?'受此高格影响：':'附近没有与此格关联的高差判定。';$('terrain3dRelations').append(prefix);
-     for(const[x,y,l]of refs){const button=document.createElement('button');button.textContent=`(${x}, ${y}) L${l}`;button.disabled=!lookup.has(`${x},${y}`);button.title=button.disabled?'位于当前局部范围外，居中或扩大范围后查看':'选中此格';button.onclick=()=>choose(lookup.get(`${x},${y}`));$('terrain3dRelations').append(button);}
-     $('terrain3dSource').textContent=data.metadata.sourceDescription||`${data.metadata.filename} · ${data.metadata.theater} · 矿石${data.metadata.mineralsEnabled===false?'关（无矿石布局）':'开'} · ${cells.length} 格 / ${data.metadata.uniqueTiles} 种实际地块 · ${fine?'崖壁按原图轮廓与深度细分重建，未绘制的背面使用补面':'崖壁使用简化模型'}；坡面与树木为贴图重建。${data.metadata.missing.length?' '+data.metadata.missing.length+' 项资源缺失，使用占位或省略外观。':''}${data.metadata.bridgeNote?' '+data.metadata.bridgeNote:''}`;
+     const prefix=document.createElement('span');prefix.textContent=!enabled?'':selected.higher.length?_t('相关高格：'):selected.affected.length?_t('受此高格影响：'):_t('附近没有与此格关联的高差判定。');$('terrain3dRelations').append(prefix);
+     for(const[x,y,l]of refs){const button=document.createElement('button');button.textContent=`(${x}, ${y}) L${l}`;button.disabled=!lookup.has(`${x},${y}`);button.title=button.disabled?_t('位于当前局部范围外，居中或扩大范围后查看'):_t('选中此格');button.onclick=()=>choose(lookup.get(`${x},${y}`));$('terrain3dRelations').append(button);}
+     $('terrain3dSource').textContent=data.metadata.sourceDescription||_t`${data.metadata.filename} · ${data.metadata.theater} · 矿石${data.metadata.mineralsEnabled===false?_t('关（无矿石布局）'):_t('开')} · ${cells.length} 格 / ${data.metadata.uniqueTiles} 种实际地块 · ${fine?_t('崖壁按原图轮廓与深度细分重建，未绘制的背面使用补面'):_t('崖壁使用简化模型')}；坡面与树木为贴图重建。${data.metadata.missing.length?' '+data.metadata.missing.length+_t(' 项资源缺失，使用占位或省略外观。'):''}${data.metadata.bridgeNote?' '+data.metadata.bridgeNote:''}`;
      const warnings=data.metadata.missing;
      $('terrain3dWarnings').hidden=!warnings.length;$('terrain3dWarningsText').textContent=warnings.join('\n');
      const counts={current:0,potential:0,zero:0,other:0};for(const c of cells){const category=riskCategory(c);if(category)counts[category]++;}
      for(const category of Object.keys(counts)){$(`terrain3dCount-${category}`).textContent=counts[category];}
      $('terrain3dLegendOther').hidden=!counts.other;
-     $('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=!enabled;canvas.setAttribute('aria-label',`可旋转的附近地形。${$('terrain3dDetail').textContent}`);requestDraw();
+     $('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=!enabled;canvas.setAttribute('aria-label',_t`可旋转的附近地形。${$('terrain3dDetail').textContent}`);requestDraw();
     }
     function choose(c,notify=true){if(!c)return;selected=c;after=false;update();if(notify)onSelect(c.x,c.y);}
     function setCamera(){const focus=target.clone().add(pan),distance=35;camera.position.set(focus.x+distance*Math.cos(pitch)*Math.sin(yaw),focus.y+distance*Math.sin(pitch),focus.z+distance*Math.cos(pitch)*Math.cos(yaw));camera.lookAt(focus);const half=viewHalfSize(data.radius,zoom,width,heightPx);camera.left=-half*width/heightPx;camera.right=half*width/heightPx;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();camera.updateMatrixWorld();}

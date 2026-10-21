@@ -1,6 +1,8 @@
 /* Region selection and exact aggregation. No probability model is modified. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  // OKLab distance balances hue and lightness; avoid near-white / muddy candidates.
  function lab(hex){
   const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
@@ -26,23 +28,29 @@
  const colors=[];for(let i=0;i<12;i++)colors.push(nextColor(colors));
  const revisions=new WeakMap(),revision=r=>revisions.get(r)||0,touch=r=>revisions.set(r,revision(r)+1);
  const key=c=>c.x*1024+c.y;
- const defaults=()=>({version:1,defaultRegionCount:12,selectionBoundsVersion:1,transparency:50,overlap:false,active:'r1',next:13,regions:colors.map((color,i)=>({id:`r${i+1}`,name:`区域 ${i+1}`,color,cells:new Set()}))});
+ function displayName(region){
+  const n=region.id.slice(1);
+  // Legacy generated names had no marker. Keep the stored bytes untouched;
+  // explicit renames are marked so even a custom default-looking name survives.
+  return !region.customName&&['区域 '+n,`Region ${n}`].includes(region.name)?_t`区域 ${n}`:region.name;
+ }
+ const defaults=()=>({version:1,defaultRegionCount:12,selectionBoundsVersion:1,transparency:50,overlap:false,active:'r1',next:13,regions:colors.map((color,i)=>({id:`r${i+1}`,name:_t`区域 ${i+1}`,color,cells:new Set()}))});
  function encode(doc){return JSON.stringify({...doc,regions:doc.regions.map(r=>({...r,cells:[...r.cells].sort((a,b)=>a-b)}))});}
  function decode(raw,valid){
   const data=JSON.parse(raw);
-  if(data?.version!==1||!Array.isArray(data.regions)||!data.regions.length||data.regions.length>64)throw Error('区域记录格式不正确');
+  if(data?.version!==1||!Array.isArray(data.regions)||!data.regions.length||data.regions.length>64)throw Error(_t('区域记录格式不正确'));
   const ids=new Set();
   const regions=data.regions.map((r,i)=>{
-   if(!r||typeof r.id!=='string'||!/^r[1-9]\d{0,6}$/.test(r.id)||ids.has(r.id)||!Array.isArray(r.cells))throw Error('区域记录格式不正确');
+   if(!r||typeof r.id!=='string'||!/^r[1-9]\d{0,6}$/.test(r.id)||ids.has(r.id)||!Array.isArray(r.cells))throw Error(_t('区域记录格式不正确'));
    ids.add(r.id);
-   return {id:r.id,name:String(r.name||`区域 ${i+1}`).slice(0,48),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:colors[i%colors.length],
+   return {id:r.id,name:String(r.name||_t`区域 ${i+1}`).slice(0,48),...(r.customName===true?{customName:true}:{}),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:colors[i%colors.length],
     cells:new Set(r.cells.filter(k=>Number.isInteger(k)&&valid.has(k)))};
   });
   const doc={version:1,defaultRegionCount:12,selectionBoundsVersion:1,transparency:Number.isFinite(data.transparency)?Math.max(0,Math.min(100,data.transparency)):50,overlap:data.overlap===true,active:ids.has(data.active)?data.active:regions[0].id,
    next:Math.max(Math.max(...regions.map(r=>Number(r.id.slice(1))))+1,Number.isInteger(data.next)&&data.next<10000000?data.next:1),regions};
   // One-time migration: preserve customized names/colors/cells. Later manual
   // deletion is respected, even when fewer than twelve regions remain.
-  if(data.defaultRegionCount!==12)while(doc.regions.length<12){const n=doc.next++;doc.regions.push({id:`r${n}`,name:`区域 ${n}`,color:nextColor(doc.regions),cells:new Set()});}
+  if(data.defaultRegionCount!==12)while(doc.regions.length<12){const n=doc.next++;doc.regions.push({id:`r${n}`,name:_t`区域 ${n}`,color:nextColor(doc.regions),cells:new Set()});}
   if(!doc.overlap)exclusive(doc);
   return doc;
  }
@@ -78,7 +86,7 @@
   const [group,field]=metric.split('.');
   return [...regions].sort((a,b)=>{
    let cmp;
-   if(metric==='name')cmp=a.name.localeCompare(b.name,'zh-CN',{numeric:true});
+   if(metric==='name')cmp=displayName(a).localeCompare(displayName(b),_i18n?.language||'zh-CN',{numeric:true});
    else{
     const x=stats.get(a.id)[group],y=stats.get(b.id)[group];
     if(field==='average'&&(!x.count||!y.count))return x.count? -1:y.count?1:0; // Empty averages always last.
@@ -152,6 +160,6 @@
   }
   return Number.isFinite(left)?{x:left,y:top,w:Math.max(1,right-left),h:Math.max(1,bottom-top)}:null;
  }
- const api={colors,nextColor,lab,key,defaults,encode,decode,exclusive,apply,revision,touch,statistics,sorted,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
+ const api={colors,nextColor,lab,key,displayName,defaults,encode,decode,exclusive,apply,revision,touch,statistics,sorted,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
  root.CrateRegionStatistics=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

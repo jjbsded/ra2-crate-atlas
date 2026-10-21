@@ -1,6 +1,8 @@
 /* Exact spatial index for the demo's flat-map NearbyLocation model. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const M=typeof module!=='undefined'?require('./model.js'):root.CrateModel;
  const cache=new Map();
  function signature(world){return JSON.stringify([M.MAP,world]);}
@@ -45,7 +47,7 @@
     if(cx>=1&&cx<=side&&cy>=1&&cy<=side&&mask[id(cx,cy)])candidates.push(id(cx,cy));
     if(candidates.length-offsets[i]===24)break;
    }
-   if(candidates.length===offsets[i])throw Error('距离索引与候选环不一致');
+   if(candidates.length===offsets[i])throw Error(_t('距离索引与候选环不一致'));
   }
   offsets[N]=candidates.length;
   const packed=Uint32Array.from(candidates);

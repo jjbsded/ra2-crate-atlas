@@ -13,6 +13,7 @@ import uuid
 import webbrowser
 from urllib.parse import urlsplit, parse_qs
 import original_resources as resource_store
+import i18n_settings
 from map_jobs import MapJobs, BusyError
 
 ROOT = Path(__file__).resolve().parent
@@ -90,6 +91,15 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         route = urlsplit(self.path)
+        if route.path == '/language-settings.js':
+            data = ('globalThis.CrateLanguageSettings='+json.dumps(i18n_settings.settings(initialize=True))+';').encode('utf8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/javascript; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if route.path == '/':
             self.send_response(302)
             self.send_header('Location', '/maps.html'+('?' + route.query if route.query else ''))
@@ -136,8 +146,8 @@ class Handler(SimpleHTTPRequestHandler):
             except (KeyError, OSError, ValueError):
                 pass
             return self.json(value)
-        if self.path == '/research':
-            research = ROOT/'docs/random-crate-generation.md'
+        if route.path == '/research':
+            research = ROOT/('docs/random-crate-generation.en.md' if parse_qs(route.query).get('language') == ['en'] else 'docs/random-crate-generation.md')
             if not research.exists():
                 research = ROOT.parent.parent/'docs/random-crate-generation.md'
             data = research.read_bytes()
@@ -151,6 +161,20 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path)
+        if route.path == '/api/preferences/language':
+            expected = f'http://{self.headers.get("Host", "")}'
+            if self.headers.get('Origin', expected) != expected:
+                return self.json({'error': 'Cross-origin preference requests are not accepted'}, 403)
+            try:
+                size = int(self.headers.get('Content-Length', 0))
+                if not 0 < size <= 128:
+                    raise ValueError('Invalid preference request length')
+                payload = json.loads(self.rfile.read(size))
+                if not isinstance(payload, dict) or not isinstance(payload.get('language'), str):
+                    raise ValueError('Invalid language preference')
+                return self.json(i18n_settings.save(payload['language']))
+            except (OSError, ValueError) as error:
+                return self.json({'error': str(error)}, 400)
         if route.path == '/api/maps/minerals':
             expected = f'http://{self.headers.get("Host", "")}'
             if self.headers.get('Origin', expected) != expected:
@@ -273,8 +297,12 @@ class Handler(SimpleHTTPRequestHandler):
             palette, minimum = heatmap.get('palette', 'warm'), heatmap.get('minMultiplier', 0)
             if palette not in ['multi', 'warm', 'cool'] or type(minimum) not in [int, float] or not math.isfinite(minimum) or not 0 <= minimum <= 169:
                 raise ValueError('配色无效，或最低倍率不在 0～169 之间')
+            language = config.get('language', i18n_settings.language())
+            if language not in i18n_settings.LANGUAGES:
+                raise ValueError('Unsupported export language')
             timing = clean_timing(config.get('timing', {}))
             clean = {'all': config.get('all') is True, 'options': {'start': start, 'frame': frame, 'preset': preset}, 'timing': timing, 'heatmap': {'enabled': enabled, 'opacity': opacity, 'filter': area, 'palette': palette, 'minMultiplier': minimum, 'showBaselineValues': heatmap.get('showBaselineValues') is True, 'showBlocked': heatmap.get('showBlocked') is not False}, 'coords': config.get('coords') is True, 'heatmapValues': config.get('heatmapValues') is not False}
+            clean['language'] = language
             with LOCK:
                 if any(not j.get('done') and not j.get('error') for j in JOBS.values()):
                     return self.json({'error': '已有视频正在导出，请稍后再试'}, 409)
@@ -304,9 +332,9 @@ def main():
             with urlopen(url+'/api/maps/health', timeout=2) as response:
                 existing = json.load(response)
                 if existing.get('feature') != 'real-maps-v1':
-                    raise RuntimeError('该端口已被其他程序占用，请用 --port 选择其他端口。')
+                    raise RuntimeError('This port is occupied by another application. Choose another port with --port.' if i18n_settings.language() == 'en' else '该端口已被其他程序占用，请用 --port 选择其他端口。')
                 if existing.get('instance') != INSTANCE_ID:
-                    raise RuntimeError('该端口运行的是另一个目录或旧版本的工具。请关闭旧启动窗口，或用 --port 8777 启动此版本。')
+                    raise RuntimeError('This port serves another installation or older code. Close its launcher, or start this version with --port 8777.' if i18n_settings.language() == 'en' else '该端口运行的是另一个目录或旧版本的工具。请关闭旧启动窗口，或用 --port 8777 启动此版本。')
             if args.open:
                 webbrowser.open(url+('/maps.html' if args.page == 'maps' else '/index.html'))
             print(f'Existing crate demo: {url}', flush=True)

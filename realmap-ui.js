@@ -3,6 +3,8 @@
  */
 (() => {
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const $=id=>document.getElementById(id), canvas=$('map'), ctx=canvas.getContext('2d');
  const area={x:24,y:70,w:1552,h:820}, W=1600,H=1050;
  const occupancy=CrateOccupancyOverlay;
@@ -51,20 +53,21 @@
  const regions=CrateRegionStatisticsUI.create({getState:()=>state,getDisplay:()=>display,schedule,pick,area,onMode:enabled=>{if(enabled){deselect();$('heatmap').checked=$('values').checked=false;}syncProbabilityToggle();}});
  function syncProbabilityToggle(){
   const heat=!$('heatmap').disabled&&$('heatmap').checked,values=!$('values').disabled&&$('values').checked,mixed=heat!==values;
-  $('probabilityToggle').textContent='概率:'+(mixed?'混合':heat?'开':'关');
+  $('probabilityToggle').textContent=_t('概率:')+(mixed?_t('混合'):heat?_t('开'):_t('关'));
   $('probabilityToggle').setAttribute('aria-pressed',mixed?'mixed':String(heat));
   $('probabilityToggle').disabled=$('heatmap').disabled;
  }
  $('probabilityToggle').onclick=()=>{const enabled=!($('heatmap').checked&&$('values').checked);$('heatmap').checked=$('values').checked=enabled;syncProbabilityToggle();schedule();};
  function syncMineralToggle(){
   const enabled=state.data?.metadata.mineralsEnabled!==false;
-  $('mineralToggle').textContent='矿石:'+(enabled?'开':'关');
+  $('mineralToggle').textContent=_t('矿石:')+(enabled?_t('开'):_t('关'));
   $('mineralToggle').setAttribute('aria-pressed',String(enabled));
   $('mineralToggle').disabled=!state.data||state.busy;
-  $('mineralStatus').textContent=enabled?'':state.data?.metadata.previewOnly?'矿石已关闭：矿石／宝石已从当前预览布局移除，3D 和导出同步；概率仍未计算。矿石钻井保留，不模拟后续生长。':'矿石已关闭：矿石／宝石已从当前布局移除，概率、区域统计、3D 和导出均使用此布局；矿石钻井保留，不模拟后续生长。';
+  $('mineralStatus').textContent=enabled?'':state.data?.metadata.previewOnly?_t('矿石已关闭：矿石／宝石已从当前预览布局移除，3D 和导出同步；概率仍未计算。矿石钻井保留，不模拟后续生长。'):_t('矿石已关闭：矿石／宝石已从当前布局移除，概率、区域统计、3D 和导出均使用此布局；矿石钻井保留，不模拟后续生长。');
   $('mineralStatus').hidden=enabled;
  }
  function setBusy(value){
+  _i18n?.setBusy('analysis',value);
   if(value)cancelMineralPreload();
   state.busy=value;$('loadHeck').disabled=$('mapFile').disabled=value;$('progress').hidden=!value;
   CrateResourceUI.setAnalyzing(value);
@@ -80,19 +83,19 @@
  $('mineralToggle').onclick=async()=>{
   if(state.busy||!state.data)return;
   const enabled=state.data.metadata.mineralsEnabled===false;
-  const label=enabled?'有矿石':'无矿石';
-  setBusy(true);message('',true);message(`正在切换为${enabled?'有矿石':'无矿石'}布局，完成后同步更新${state.data.metadata.previewOnly?'预览画面':'画面与概率'}…`);
-  mineralToast(`正在切换为${label}布局…`,'正在加载，当前画面暂时保留');
+  const label=enabled?_t('有矿石'):_t('无矿石');
+  setBusy(true);message('',true);message(_t`正在切换为${enabled?_t('有矿石'):_t('无矿石')}布局，完成后同步更新${state.data.metadata.previewOnly?_t('预览画面'):_t('画面与概率')}…`);
+  mineralToast(_t`正在切换为${label}布局…`,_t('正在加载，当前画面暂时保留'));
   try{
    // Let the toast paint even when an already-decoded result is ready.
    await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
    const prepared=await mineralLayouts.get(enabled,status=>{
     $('progress').value=status.progress||0;
-    mineralToast(`正在切换为${label}布局…`,status.message+(status.progress>0&&status.progress<100?` · ${status.progress}%`:''));
+    mineralToast(_t`正在切换为${label}布局…`,status.message+(status.progress>0&&status.progress<100?` · ${status.progress}%`:''));
    });
    await loadResult(prepared.url,true,{preserveView:true,prepared});
-   mineralToast(`已切换为${label}布局`,state.data.metadata.previewOnly?'地图预览已同步':'地图与概率已同步','success');
-  }catch(error){message(error.message,true);message('矿石状态未切换；保留原布局和概率，可重试。');mineralToast('切换未完成，已保留原布局',error.message,'error');}
+   mineralToast(_t`已切换为${label}布局`,state.data.metadata.previewOnly?_t('地图预览已同步'):_t('地图与概率已同步'),'success');
+  }catch(error){message(error.message,true);message(_t('矿石状态未切换；保留原布局和概率，可重试。'));mineralToast(_t('切换未完成，已保留原布局'),error.message,'error');}
   finally{setBusy(false);}
  };
  for(const id of ['heatmap','values'])$(id).addEventListener('change',syncProbabilityToggle);
@@ -100,7 +103,7 @@
  function message(text,error=false){$(error?'error':'status').textContent=text;}
  function schedule(){if(!state.scheduled){state.scheduled=true;requestAnimationFrame(()=>{state.scheduled=false;draw();});}}
  function diamond(x,y,rx,ry){ctx.beginPath();ctx.moveTo(x,y-ry);ctx.lineTo(x+rx,y);ctx.lineTo(x,y+ry);ctx.lineTo(x-rx,y);ctx.closePath();}
- function text(value,x,y,color='#dce9f1',size=16,align='left'){ctx.font=`${size}px "Microsoft YaHei",sans-serif`;ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(value,x,y);}
+ function text(value,x,y,color='#dce9f1',size=16,align='left',maxWidth){ctx.font=`${size}px "Microsoft YaHei",sans-serif`;ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(value,x,y,maxWidth??(align==='right'?x-26:align==='left'?W-x-26:W));}
  function numerator(c){return display.get(c).numerator;}
  function thresholdPass(c){return display.meetsThreshold(c,Number($('threshold').value)||0);}
  const multiplier=c=>display.get(c).multiplier;
@@ -122,7 +125,7 @@
  function canvasButton(box,label,active=false,disabled=false){
   ctx.fillStyle=disabled?'#11212b':active?'#2b4351':'#192c38';ctx.strokeStyle=disabled?'#293d4b':active?'#d8b66d':'#567184';ctx.lineWidth=1;
   ctx.beginPath();ctx.roundRect(box.x,box.y,box.w,box.h,5);ctx.fill();ctx.stroke();
-  text(label,box.x+box.w/2,box.y+box.h/2+5,disabled?'#49606e':active?'#f5ce80':'#dce9f1',label==='地图导航'?15:18,'center');
+  text(label,box.x+box.w/2,box.y+box.h/2+5,disabled?'#49606e':active?'#f5ce80':'#dce9f1',label===_t('地图导航')?15:18,'center',box.w-12);
  }
  function syncCanvasControls(m){
   const rect=canvas.getBoundingClientRect(),host=$('canvasHost'),hr=host.getBoundingClientRect();
@@ -134,15 +137,15 @@
    const button=$(id);button.hidden=!box;if(box)Object.assign(button.style,{left:x+box.x*scale+'px',top:y+box.y*scale+'px',width:box.w*scale+'px',height:box.h*scale+'px'});
   }
   $('minimapToggle').setAttribute('aria-pressed',String($('minimap').checked));
-  const action=miniState.minimized?'还原地图导航':'最小化地图导航';$('minimapMinimize').setAttribute('aria-label',action);$('minimapMinimize').title=action;
+  const action=miniState.minimized?_t('还原地图导航'):_t('最小化地图导航');$('minimapMinimize').setAttribute('aria-label',action);$('minimapMinimize').title=action;
   $('navCenter').disabled=!state.selected;
-  for(const d of minimap.directions){const c=minimap.neighbor(state.lookup,state.selected,d),button=$('nav'+d.id);button.disabled=!c;button.title=c?`${d.name}：(${c.x}, ${c.y})`:(state.selected?'该方向已到地图边缘':'请先选择格子');}
+  for(const d of minimap.directions){const c=minimap.neighbor(state.lookup,state.selected,d),button=$('nav'+d.id);button.disabled=!c;button.title=c?`${d.name}：(${c.x}, ${c.y})`:(state.selected?_t('该方向已到地图边缘'):_t('请先选择格子'));}
  }
  function miniPan(p){Object.assign(state,minimap.pan(miniLayout(),p,area,state.scale,state.data.rendering));schedule();}
  function drawMinimap(){
   const m=miniLayout();syncCanvasControls(m);if(!m)return;
   const r=state.data.rendering,im=m.image;ctx.save();ctx.beginPath();ctx.roundRect(m.x,m.y,m.w,m.h,9);ctx.fillStyle='rgba(10,24,34,.96)';ctx.fill();ctx.strokeStyle='#567180';ctx.lineWidth=1;ctx.stroke();
-  if(!m.minimized)text('地图导航 · 拖动移动',m.x+10,m.y+23,'#dbe9f2',13);
+  if(!m.minimized)text(_t('地图导航 · 拖动移动'),m.x+10,m.y+23,'#dbe9f2',13);
   canvasButton(m.buttons.minimize,m.minimized?'□':'−');canvasButton(m.buttons.close,'×');
   if(m.minimized){ctx.restore();return;}
   const artwork=$('objects').checked&&state.objectImage?state.objectImage:state.image;
@@ -154,11 +157,11 @@
   if(state.selected){ctx.beginPath();ctx.arc(im.x+state.selected.px*im.scale,im.y+state.selected.py*im.scale,3,0,Math.PI*2);ctx.fillStyle='#ffe18f';ctx.fill();ctx.strokeStyle='#332916';ctx.lineWidth=1;ctx.stroke();}
   if($('players').checked)CratePlayerStarts.draw(ctx,state,im,{radius:8,clip:im});
   ctx.beginPath();ctx.moveTo(m.x+12,m.y+195);ctx.lineTo(m.x+m.w-12,m.y+195);ctx.strokeStyle='#2c4453';ctx.lineWidth=1;ctx.stroke();
-  text('移动选中格',m.x+14,m.y+225,'#c9dbe7',13);
-  text(state.selected?`(${state.selected.x}, ${state.selected.y})`:'未选择',m.x+14,m.y+251,state.selected?'#ffe0a0':'#849eae',15);
-  text('方向键：可组合',m.x+14,m.y+279,'#91a9b9',11);
-  text('◎：居中查看',m.x+14,m.y+298,'#91a9b9',11);
-  text('长按连续移动',m.x+14,m.y+316,'#708c9e',10);
+  text(_t('移动选中格'),m.x+14,m.y+225,'#c9dbe7',13);
+  text(state.selected?`(${state.selected.x}, ${state.selected.y})`:_t('未选择'),m.x+14,m.y+251,state.selected?'#ffe0a0':'#849eae',15);
+  text(_t('方向键：可组合'),m.x+14,m.y+279,'#91a9b9',11);
+  text(_t('◎：居中查看'),m.x+14,m.y+298,'#91a9b9',11);
+  text(_t('长按连续移动'),m.x+14,m.y+316,'#708c9e',10);
   for(const d of m.navigation)canvasButton(d.box,d.label,false,!minimap.neighbor(state.lookup,state.selected,d));
   canvasButton(m.buttons.center,'◎',!!state.selected,!state.selected);
   ctx.restore();
@@ -173,10 +176,10 @@
  }
  function drawRegionHover(){
   const info=regions.hoverInfo(),cell=info?.cell;
-  if(!cell){text(info?'未指向地图格子':'区域统计 · 指向格子查看区域',1574,1028,'#9bb2c2',14,'right');return;}
-  if(!info.regions.length){text(`指向 (${cell.x}, ${cell.y}) · ${info.selectable?'未划分区域':'不可选区域'}`,1574,1028,'#b2c7d6',14,'right');return;}
+  if(!cell){text(info?_t('未指向地图格子'):_t('区域统计 · 指向格子查看区域'),1574,1028,'#9bb2c2',14,'right');return;}
+  if(!info.regions.length){text(_t`指向 (${cell.x}, ${cell.y}) · ${info.selectable?_t('未划分区域'):_t('不可选区域')}`,1574,1028,'#b2c7d6',14,'right');return;}
   ctx.save();ctx.font='14px "Microsoft YaHei",sans-serif';
-  const tokens=[{label:`指向 (${cell.x}, ${cell.y}) · 区域`,color:null},...info.regions.map(r=>({label:r.id.slice(1),color:r.color}))];
+  const tokens=[{label:_t`指向 (${cell.x}, ${cell.y}) · 区域`,color:null},...info.regions.map(r=>({label:r.id.slice(1),color:r.color}))];
   const rows=[[]];let width=0;
   for(const token of tokens){
    token.width=ctx.measureText(token.label).width+(token.color?23:0)+12;
@@ -196,36 +199,36 @@
  function draw(){
   ctx.clearRect(0,0,W,H);ctx.fillStyle='#101c25';ctx.fillRect(0,0,W,H);if(!state.data)return;
   const d=state.data,p=d.probability,r=d.rendering;
-  const metadataText=`${d.metadata.size[2]} × ${d.metadata.size[3]} · ${d.metadata.theater} · ${d.metadata.previewOnly?previewLabel(d.metadata):d.metadata.approximate?'近似概率 · 不保证准确':'随机帧精确平均'}`;
-  ctx.font='16px "Microsoft YaHei",sans-serif';miniToggleBox={x:1574-ctx.measureText(metadataText).width-118,y:13,w:96,h:32};
-  ctx.save();ctx.beginPath();ctx.rect(24,0,miniToggleBox.x-42,60);ctx.clip();text((d.metadata.displayName||d.metadata.filename)+(d.metadata.previewOnly?' · 地图外观':' · 工具箱落点概率')+(d.metadata.mineralsEnabled===false?' · 无矿石':''),26,34,'#edf3f7',23);ctx.restore();
-  canvasButton(miniToggleBox,'地图导航',$('minimap').checked);
+  const metadataText=`${d.metadata.size[2]} × ${d.metadata.size[3]} · ${d.metadata.theater} · ${d.metadata.previewOnly?previewLabel(d.metadata):d.metadata.approximate?_t('近似概率 · 不保证准确'):_t('随机帧精确平均')}`;
+  ctx.font='16px "Microsoft YaHei",sans-serif';const toggleWidth=_i18n?.language==='en'?132:96;miniToggleBox={x:1574-ctx.measureText(metadataText).width-toggleWidth-22,y:13,w:toggleWidth,h:32};
+  ctx.save();ctx.beginPath();ctx.rect(24,0,miniToggleBox.x-42,60);ctx.clip();text((_i18n?.mapName(d.metadata)||d.metadata.displayName||d.metadata.filename)+(d.metadata.previewOnly?_t(' · 地图外观'):_t(' · 工具箱落点概率'))+(d.metadata.mineralsEnabled===false?_t(' · 无矿石'):''),26,34,'#edf3f7',23);ctx.restore();
+  canvasButton(miniToggleBox,_t('地图导航'),$('minimap').checked);
   text(metadataText,1574,34,'#9fb6c7',16,'right');
   const options=mapOptions(),minimum=options.threshold;
   const {colored}=mapViewCache.render(ctx,state,area,display,options);
   ctx.strokeStyle='#294151';ctx.lineWidth=1;ctx.strokeRect(area.x,area.y,area.w,area.h);
   drawMinimap();
-  if(d.metadata.previewOnly){text(previewLabel(d.metadata)+' · 未计算概率和放箱禁行风险',26,936,'#f1cf88',20);text('已保留可读取的地形与对象；加载告警见地图上方。',26,978,'#bacfdd',16);$('thresholdInfo').textContent='外观预览，不计算概率';return;}
-  text(`本图 1× 基准：${pct(display.baselineProbability)} · 单次放箱调用`,26,928,'#d8e6f0',16);
-  text(`落箱 ${pct(p.finalSuccess)} · 未生成实体 ${pct(p.finalGhost)} · 重试耗尽 ${failurePercent(p)}`,1574,928,'#cbdbe6',15,'right');
+  if(d.metadata.previewOnly){text(previewLabel(d.metadata)+_t(' · 未计算概率和放箱禁行风险'),26,936,'#f1cf88',20);text(_t('已保留可读取的地形与对象；加载告警见地图上方。'),26,978,'#bacfdd',16);$('thresholdInfo').textContent=_t('外观预览，不计算概率');return;}
+  text(_t`本图 1× 基准：${pct(display.baselineProbability)} · 单次放箱调用`,26,928,'#d8e6f0',16);
+  text(_t`落箱 ${pct(p.finalSuccess)} · 未生成实体 ${pct(p.finalGhost)} · 重试耗尽 ${failurePercent(p)}`,1574,928,'#cbdbe6',15,'right');
   const legendX=26,legendY=952,legendWidth=740;
   const legendKey=display.maxMultiplier+options.palette;
   if(legendCache?.key!==legendKey){const image=document.createElement('canvas');image.width=legendWidth;image.height=15;const target=image.getContext('2d');
    for(let i=0;i<legendWidth;i++){const value=Math.expm1(Math.log1p(display.maxMultiplier)*i/legendWidth);target.fillStyle=CrateProbability.color(value,options.palette,display.maxMultiplier);target.fillRect(i,0,1,15);}legendCache={key:legendKey,image};}
   ctx.drawImage(legendCache.image,legendX,legendY);
   for(let i=0;i<=4;i++){const v=Math.expm1(Math.log1p(display.maxMultiplier)*i/4);text(fixed(v)+'×',legendX+legendWidth*i/4,987,'#a9becd',13,i===0?'left':i===4?'right':'center');}
-  text('红：地图 · 蓝：镜头可视 · 琥珀：可视禁区 · 绿：占用标识',808,956,'#bacfdd',14);
-  if(d.metadata.approximate){text('近似：未知格选中后重抽 · 禁行风险未验证',808,982,'#f1cf88',14);}else{
-  ctx.strokeStyle='#ff77c6';ctx.lineWidth=2;ctx.strokeRect(808,970,14,12);text('粉：当前可出箱，放箱后禁行',830,982,'#ffc3e4',13);
-  ctx.fillStyle='rgba(241,156,206,.20)';ctx.fillRect(1115,970,14,12);ctx.strokeStyle='#ed9dca';ctx.strokeRect(1115,970,14,12);ctx.beginPath();ctx.moveTo(1115,980);ctx.lineTo(1125,970);ctx.moveTo(1121,982);ctx.lineTo(1129,974);ctx.stroke();text('斜纹粉：清空对象后潜在禁行',1138,982,'#edb6d5',13);
+  text(_t('红：地图 · 蓝：镜头可视 · 琥珀：可视禁区 · 绿：占用标识'),808,956,'#bacfdd',14);
+  if(d.metadata.approximate){text(_t('近似：未知格选中后重抽 · 禁行风险未验证'),808,982,'#f1cf88',14);}else{
+  ctx.strokeStyle='#ff77c6';ctx.lineWidth=2;ctx.strokeRect(808,970,14,12);text(_t('粉：当前可出箱，放箱后禁行'),830,982,'#ffc3e4',13);
+  ctx.fillStyle='rgba(241,156,206,.20)';ctx.fillRect(1115,970,14,12);ctx.strokeStyle='#ed9dca';ctx.strokeRect(1115,970,14,12);ctx.beginPath();ctx.moveTo(1115,980);ctx.lineTo(1125,970);ctx.moveTo(1121,982);ctx.lineTo(1129,974);ctx.stroke();text(_t('斜纹粉：清空对象后潜在禁行'),1138,982,'#edb6d5',13);
   }
   const transparency=Number($('opacity').value)||0;
-  const opacityText=`0% 不透明 · 100% 全透明；1× 基准格自动淡化，当前透明度 ${fixed(Math.sqrt(transparency/100)*100)}%。`;if($('opacityInfo').textContent!==opacityText)$('opacityInfo').textContent=opacityText;
-  text(`≥ ${fixed(minimum)}× · 透明度 ${fixed(transparency)}% / 1× 格 ${fixed(Math.sqrt(transparency/100)*100)}% · ${$('heatmap').checked?'开启':'关闭'}`,808,1005,'#a2b8c9',14);
-  text(state.incoming?`青蓝：${state.incoming.sources.length} 个转入起点 · ${state.scale<28/30?'放大查看：从该格出发 → 选中格的概率':'从该格出发 → 选中格的概率'} · 深色概率更高`:'灰暗：镜头不可视 · 金色：选中格（实线可见 / 虚线遮挡）',26,1028,state.incoming?'#8deafa':'#819aab',14);
-  if(regions.active)drawRegionHover();else text(state.selected?`选中 (${state.selected.x},${state.selected.y})  高度 ${state.selected.level}  ${fixed(multiplier(state.selected))}×${state.selected.marked?'  放箱后不可通行':state.selected.potentialMarked?'  清空对象后潜在禁行':''}`:'滚轮缩放 / 拖动平移',1574,1028,'#b2c7d6',14,'right');
+  const opacityText=_t`0% 不透明 · 100% 全透明；1× 基准格自动淡化，当前透明度 ${fixed(Math.sqrt(transparency/100)*100)}%。`;if($('opacityInfo').textContent!==opacityText)$('opacityInfo').textContent=opacityText;
+  text(_t`≥ ${fixed(minimum)}× · 透明度 ${fixed(transparency)}% / 1× 格 ${fixed(Math.sqrt(transparency/100)*100)}% · ${$('heatmap').checked?_t('开'):_t('关')}`,808,1005,'#a2b8c9',14);
+  text(state.incoming?_t`青蓝：${state.incoming.sources.length} 个转入起点 · ${state.scale<28/30?_t('放大查看：从该格出发 → 选中格的概率'):_t('从该格出发 → 选中格的概率')} · 深色概率更高`:_t('灰暗：镜头不可视 · 金色：选中格（实线可见 / 虚线遮挡）'),26,1028,state.incoming?'#8deafa':'#819aab',14);
+  if(regions.active)drawRegionHover();else text(state.selected?_t`选中 (${state.selected.x},${state.selected.y})  高度 ${state.selected.level}  ${fixed(multiplier(state.selected))}×${state.selected.marked?_t('  放箱后不可通行'):state.selected.potentialMarked?_t('  清空对象后潜在禁行'):''}`:_t('滚轮缩放 / 拖动平移'),1574,1028,'#b2c7d6',14,'right');
   state.visible=colored;
-  const thresholdText=`≥ ${fixed(minimum)}×（最终概率 ${pct(minimum*display.baselineProbability)}）；当前视窗着色 ${colored} 格。仅影响显示。`;if($('thresholdInfo').textContent!==thresholdText)$('thresholdInfo').textContent=thresholdText;
+  const thresholdText=_t`≥ ${fixed(minimum)}×（最终概率 ${pct(minimum*display.baselineProbability)}）；当前视窗着色 ${colored} 格。仅影响显示。`;if($('thresholdInfo').textContent!==thresholdText)$('thresholdInfo').textContent=thresholdText;
  }
  async function showSources(c){
   const revision=++selectionRevision,data=state.data;
@@ -247,14 +250,14 @@
  }
  function deselect(){
   selectionKeyboard?.cancel();
-  terrain3d.close();$('terrain3dOpen').disabled=true;$('terrain3dOpen').title='先在地图上选择一个格子';
+  terrain3d.close();$('terrain3dOpen').disabled=true;$('terrain3dOpen').title=_t('先在地图上选择一个格子');
   ++selectionRevision;state.selected=null;state.incoming=null;
   details.clear();
   schedule();
  }
  function select(c){
   state.selected=c;$('gotoX').value=c.x;$('gotoY').value=c.y;$('selectedCoord').textContent=`${c.x}, ${c.y}`;
-  $('terrain3dOpen').disabled=false;$('terrain3dOpen').title=`以 (${c.x}, ${c.y}) 为中心查看附近地形`;terrain3d.select(c);
+  $('terrain3dOpen').disabled=false;$('terrain3dOpen').title=_t`以 (${c.x}, ${c.y}) 为中心查看附近地形`;terrain3d.select(c);
   showSources(c);
   details.cell(c,state.data,display);schedule();
  }
@@ -312,7 +315,7 @@
  document.addEventListener('visibilitychange',()=>{if(document.hidden)selectionKeyboard.cancel();});
  new ResizeObserver(schedule).observe(canvas);
  $('fit').onclick=frame;$('zoomIn').onclick=()=>zoom(1.5);$('zoomOut').onclick=()=>zoom(1/1.5);
- $('goto').onclick=()=>{const c=state.lookup.get(`${Number($('gotoX').value)},${Number($('gotoY').value)}`);if(c){message('',true);if(regions.active){state.scale=Math.max(state.scale,2.5);centerCell(c);}else focus(c);}else message('该坐标不在完整地图内。',true);};
+ $('goto').onclick=()=>{const c=state.lookup.get(`${Number($('gotoX').value)},${Number($('gotoY').value)}`);if(c){message('',true);if(regions.active){state.scale=Math.max(state.scale,2.5);centerCell(c);}else focus(c);}else message(_t('该坐标不在完整地图内。'),true);};
  for(const id of ['heatmap','palette','filter','markers','potentialMarkers','blocked','objects','coords','values','baselineValues','grid','players'])$(id).addEventListener('change',schedule);
  function sync(range,input,max){
   $(range).addEventListener('input',()=>{$(input).value=fixed(Number($(range).value));schedule();});
@@ -350,11 +353,11 @@
   mineralLayouts.use(prepared,{reset:!previous});scheduleMineralPreload();
  }
  async function analyze(file,official=null){
-  if(state.busy)return;resultLoader.invalidate();setBusy(true);message('',true);message('准备读取地图');
-  try{const choice=official?.version||$('version').value;if(official){$('version').value=choice;$('version').dispatchEvent(new Event('change'));}const version=await CrateResourceUI.resolve(choice);if(!version){message('请检查资源提示后重新开始分析。');return;}const endpoint=official?'/api/maps/official?'+new URLSearchParams({version,id:official.id}):file?'/api/maps/analyze?version='+version+'&filename='+encodeURIComponent(file.name):'/api/maps/heck?version='+version;
+  if(state.busy)return;resultLoader.invalidate();setBusy(true);message('',true);message(_t('准备读取地图'));
+  try{const choice=official?.version||$('version').value;if(official){$('version').value=choice;$('version').dispatchEvent(new Event('change'));}const version=await CrateResourceUI.resolve(choice);if(!version){message(_t('请检查资源提示后重新开始分析。'));return;}const endpoint=official?'/api/maps/official?'+new URLSearchParams({version,id:official.id}):file?'/api/maps/analyze?version='+version+'&filename='+encodeURIComponent(file.name):'/api/maps/heck?version='+version;
    const job=await CrateLocalAPI.json(endpoint+'&minerals='+(state.data?.metadata.mineralsEnabled===false?'0':'1'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file||null});
    await loadResult(await jobResult(job),true);
-  }catch(e){message(e.message,true);message('分析未完成；之前的结果保留。');}
+  }catch(e){message(e.message,true);message(_t('分析未完成；之前的结果保留。'));}
   finally{setBusy(false);$('mapFile').value='';}
  }
  CrateOfficialMaps.create({onAnalyze:official=>analyze(null,official)});
@@ -362,7 +365,7 @@
   if(state.busy||!state.data)return;
   setBusy(true);message('',true);
   try{
-   const response=await fetch(state.baseUrl+'source.map');if(!response.ok)throw Error('原地图记录无法读取，请重新导入地图。');
+   const response=await fetch(state.baseUrl+'source.map');if(!response.ok)throw Error(_t('原地图记录无法读取，请重新导入地图。'));
    const file=new File([await response.blob()],state.data.metadata.filename);
    $('version').value=version==='shikong'?'directory':version;$('version').dispatchEvent(new Event('change'));
    setBusy(false);await analyze(file);
@@ -376,5 +379,5 @@
  const drop=$('dropzone');drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragging');});drop.addEventListener('dragleave',()=>drop.classList.remove('dragging'));drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('dragging');const file=e.dataTransfer.files[0];if(file)analyze(file);});
  const existing=new URLSearchParams(location.search).get('result');
  if(existing&&/^\/output\/[a-zA-Z0-9_-]+\/result\.json$/.test(existing))loadResult(existing).catch(e=>message(e.message,true));
- fetch('/api/maps/health').then(r=>{if(!r.ok)throw Error();return r.json();}).then(v=>{if(v.feature!=='real-maps-v1')throw Error();}).catch(()=>message('当前服务尚未加载真实地图接口。请关闭旧演示服务，再运行“启动演示.cmd”。已有结果仍可查看。',true));
+ fetch('/api/maps/health').then(r=>{if(!r.ok)throw Error();return r.json();}).then(v=>{if(v.feature!=='real-maps-v1')throw Error();}).catch(()=>message(_t('当前服务尚未加载真实地图接口。请关闭旧演示服务，再运行“启动演示.cmd”。已有结果仍可查看。'),true));
 })();

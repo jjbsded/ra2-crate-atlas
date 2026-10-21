@@ -1,14 +1,17 @@
 /* Offline rendering: shared Canvas2D scene -> ffmpeg H.264. No screen capture. */
 'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
 const fs=require('fs'),path=require('path'),os=require('os'),{spawn}=require('child_process');
 const bundledDeps=path.join(__dirname,'runtime/node/node_modules');
 const deps=process.env.CODEX_NODE_MODULES||(fs.existsSync(bundledDeps)?bundledDeps:path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'));
 function runtimeRequire(name){try{return require(name);}catch{return require(path.join(deps,name));}}
 const {createCanvas,GlobalFonts,loadImage}=runtimeRequire('@napi-rs/canvas');
 for(const font of ['msyh.ttc','msyhbd.ttc']){const p=path.join(process.env.WINDIR||'C:/Windows','Fonts',font);if(fs.existsSync(p))GlobalFonts.registerFromPath(p,'Microsoft YaHei');}
+const args=process.argv.slice(2),config=args[0]?JSON.parse(fs.readFileSync(args[0],'utf8')):{all:true};
+_i18n.setLanguage(config.language||'zh-CN');
 const M=require('./model.js'),S=require('./scene.js'),H=require('./probability.js'),T=require('./timing.js'),D=require('./probability-display.js');
 require('./asset-data.js');
-const args=process.argv.slice(2),config=args[0]?JSON.parse(fs.readFileSync(args[0],'utf8')):{all:true};
 const out=path.resolve(args[1]||path.join(__dirname,'output/crate-generation-demo.mp4'));
 const progressFile=args[2];
 const timing=T.settings(config.timing),heatmap=H.settings(config.heatmap),traces=(config.all?M.CORE_PRESETS.map(p=>M.buildTrace({preset:p,frame:config.options?.frame??600})):[M.buildTrace(config.options||{})]).map(trace=>T.apply(H.decorate(trace),timing));
@@ -32,7 +35,7 @@ async function writeFrame(buffer){if(!video.stdin.write(buffer))await new Promis
   const trace=traces[chapter],state=M.atTime(trace,absolute-base);
   const scan=state.step.phase==='search'?Math.ceil(state.progress*state.step.visits.length):0;
   const cacheKey=`${chapter}/${state.step.i}/${scan}`;
-  if(cacheKey!==lastKey){S.render(ctx,trace,state.step,state.progress,{chapter:`场景 ${chapter+1} / ${traces.length}`,coords:config.coords===true,heatmap:state.step.phase==='heatmap'?heatmap:{...heatmap,enabled:false,filter:'all'},heatmapValues:config.heatmapValues!==false});buffer=Buffer.from(ctx.getImageData(0,0,S.WIDTH,S.HEIGHT).data);lastKey=cacheKey;
+  if(cacheKey!==lastKey){S.render(ctx,trace,state.step,state.progress,{chapter:_t`场景 ${chapter+1} / ${traces.length}`,coords:config.coords===true,heatmap:state.step.phase==='heatmap'?heatmap:{...heatmap,enabled:false,filter:'all'},heatmapValues:config.heatmapValues!==false});buffer=Buffer.from(ctx.getImageData(0,0,S.WIDTH,S.HEIGHT).data);lastKey=cacheKey;
    if(state.step.phase==='done')fs.writeFileSync(path.join(path.dirname(out),`scene-${trace.preset.id}.png`),canvas.toBuffer('image/png'));
    if(state.step.phase==='heatmap')fs.writeFileSync(path.join(path.dirname(out),`heatmap-${trace.preset.id}.png`),canvas.toBuffer('image/png'));
   }
@@ -40,7 +43,7 @@ async function writeFrame(buffer){if(!video.stdin.write(buffer))await new Promis
  }
  video.stdin.end();await finished;report(100);
  const annotatedTraces=traces.map(t=>({...t,probability:{...t.probability,display:D.demo(t.probability).metadata,cells:Object.fromEntries(Object.entries(t.probability.cells).map(([k,c])=>[k,{...c,...D.demo(t.probability).exportCell(c)}]))}}));
- fs.writeFileSync(out.replace(/\.mp4$/i,'.json'),JSON.stringify({resolution:[S.WIDTH,S.HEIGHT],fps,duration,frames:count,timing,heatmap,coords:config.coords===true,heatmapValues:config.heatmapValues!==false,scope:'指定起点的平地机制演示；热力图按全部起点计算；不是游戏 RNG 或实机录像',traces:annotatedTraces},null,2));
+ fs.writeFileSync(out.replace(/\.mp4$/i,'.json'),JSON.stringify({resolution:[S.WIDTH,S.HEIGHT],fps,duration,frames:count,timing,heatmap,coords:config.coords===true,heatmapValues:config.heatmapValues!==false,scope:_t('指定起点的平地机制演示；热力图按全部起点计算；不是游戏 RNG 或实机录像'),traces:annotatedTraces},null,2));
  const stamp=t=>{const ms=Math.round(t*1000),h=Math.floor(ms/3600000),m=Math.floor(ms/60000)%60,s=Math.floor(ms/1000)%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms%1000).padStart(3,'0')}`;};
  let subtitleIndex=0,offset=0,subtitles=[];
  for(const trace of traces){for(const s of trace.steps)subtitles.push(`${++subtitleIndex}\n${stamp(offset+s.start)} --> ${stamp(offset+s.end)}\n${s.title}\n${s.text}\n`);offset+=trace.duration;}

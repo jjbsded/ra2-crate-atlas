@@ -1,3 +1,5 @@
+[English](stock-map-loading.en.md) | **简体中文**
+
 # 官方地图加载边界
 
 本轮补齐原先剩余的 10 份官方地图文件。结论针对内置 RA2 1.006 / YR 1.001
@@ -14,7 +16,7 @@
 OverlayPack 先创建覆盖物，OverlayDataPack 随后写入密度数据（`5FD2E0`）。
 因此这些格子应保留矿石覆盖物，已有 Overlay 会令放箱重试。
 
-`SlopeIndex > 4` 的预放矿石仍拒绝分析：Mark 会拒绝覆盖物，而工具尚未建模
+`SlopeIndex > 4` 的预放矿石仍不属于精确加载模型，进入近似分析时会显示假设告警：Mark 会拒绝覆盖物，而工具尚未建模
 整个后续加载阶段。不能简单把全部斜坡矿石放行。
 
 同时修复 `TIB2_* → Image=TIBxx` 的渲染解析：气候后缀、调色盘等 art 属性
@@ -48,7 +50,7 @@ YR BuildingType 构造函数 `45DD90` 将 FoundationData（偏移 `0xDFC`）置�
 工具为这些对象记录空基础、无贴图状态，并将其写入
 `metadata.emptyFoundationObjects` 和对象绘制审计。原始对象记录仍保留。
 该例外仅适用于尤复、已在原版注册表登记、且地图／rules／art 均完全没有定义
-的建筑；其他缺失定义仍报错。
+的建筑；其他缺失定义保留告警并使用已说明的近似处理。
 
 ## 重复的 Sight
 

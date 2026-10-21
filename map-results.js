@@ -2,13 +2,16 @@
  * foreground load may commit; each layout owns its reusable source index. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  function createReader({fetch=(...args)=>root.fetch(...args),Image=root.Image,
   createSources=(...args)=>root.CrateTransferOrigins.create(...args)}={}){
   return async function read(url,{signal}={}){
    const response=await fetch(url,{cache:'no-store',signal});
-   if(!response.ok)throw Error('分析结果无法读取，请重新分析地图');
+   if(!response.ok)throw Error(_t('分析结果无法读取，请重新分析地图'));
    const data=await response.json(),base=url.slice(0,url.lastIndexOf('/')+1);
-   if(!data.metadata||!Array.isArray(data.cells)||!data.rendering?.image)throw Error('地图分析结果不完整，请重新分析地图');
+   _i18n?.diagnostics(data);
+   if(!data.metadata||!Array.isArray(data.cells)||!data.rendering?.image)throw Error(_t('地图分析结果不完整，请重新分析地图'));
    async function picture(name){
     if(!name)return null;
     const image=new Image();image.src=base+name+'?v='+(data.rendering.version||1);
@@ -19,7 +22,7 @@
    let sourceIndex=null;
    function getSources(){
     if(!sourceIndex)sourceIndex=fetch(base+'search.bin').then(async response=>{
-     if(!response.ok)throw Error('来源记录无法读取，请重新分析地图。');
+     if(!response.ok)throw Error(_t('来源记录无法读取，请重新分析地图。'));
      return createSources(data,await response.arrayBuffer());
     }).catch(error=>{sourceIndex=null;throw error;});
     return sourceIndex;

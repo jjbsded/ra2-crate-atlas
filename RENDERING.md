@@ -1,3 +1,5 @@
+[English](RENDERING.en.md) | **简体中文**
+
 # 真实地图渲染修正（2026-10-13）
 
 本次仅修改画面和点击几何，不修改随机坐标、搜索顺序、可用格判定、精确概率分数或 Rock 检测。当前浏览器中的 `map-690d23bccea0` 已按原地图 SHA-256 核对后原位重绘。
@@ -66,95 +68,42 @@ bottom = top + 30 × VH + 135
 `python verify-realmap.py`：原有 20 项精确计算／地图解析／六气候回归继续通过。`python verify-realmap-render.py`：检查调色盘、锚点、TMP 透明坡面、轮廓孔洞／分片、镜头范围与逐格概率不变。结果位于 `output/realmap-verification/`。
 
 新分析保存上传的原始字节为结果目录内 `source.map`，方便复现。`python realmap_render.py output/<结果目录>/result.json` 仅升级绘图，并严格要求源地图哈希匹配；旧结果缺少原文件时需重新导入，不能使用同名地图代替修改过的地图。`render-audit.json` 记录每种实际绘制素材的文件、帧、调色盘、偏移和遮挡计数。
-# Static object layer, version 4
+## 静态建筑与单位图层
 
-`realmap_objects.py` preserves map object identity, house, health, facing and infantry subcell independently of the probability cells. Frame conventions and anchors were checked against the local FA2SPHE HE_1.5.3 `Body.LoadObjects.cpp` and `RendererTypes.cpp`. The implementation uses the existing SHP decoder; the bundled voxel library in `runtime/voxel` is called through a separate bounded x86 worker, with cached frames keyed by VXL/HVA bytes, facing and offsets. House colors tint the unit palette's remap ramp; no game lighting simulation is claimed.
+`realmap_objects.py` 将对象类型、所属方、生命值、朝向、步兵子格与概率格子分别保存。帧布局和锚点参考本机 FA2SPHE HE_1.5.3 的 `Body.LoadObjects.cpp` 与 `RendererTypes.cpp`。SHP 共用已有解码器；随包体素库经独立、受控的 x86 辅助进程调用，按 VXL/HVA 字节、朝向和偏移缓存。所属方颜色替换单位调色盘中的重映射色带，不模拟完整游戏光照。
 
-The renderer composites a second scene alongside the unchanged original terrain. Terrain and objects use painter ordering, original paired SHP / voxel shadows are clipped against same-level ground and visible solid bodies. Ground ownership and picking polygons exclude objects deliberately. This static painter implementation is not the game's per-pixel Z-buffer. The same two scene rasters feed the main view, minimap and full-map image export, beneath probability text.
+地形底图之外另合成带对象的画面，两者均保留。地面与对象按前后顺序绘制，原始 SHP／体素阴影裁切到同高度地面并受实体遮挡。地形归属和点击多边形故意不包含建筑／单位外观。这是静态绘图顺序，不是游戏的逐像素 Z-buffer。两份底图同时供主图、小地图和完整地图导出使用，概率文字始终在上层。
 
-Directory resources use the local ra2yr-map read-only MIX/INI parser (preserved in `resource_context/`), including resource provenance, bounded includes and nested archive reads. Only the selected directory is saved; no named Mod profile or Mod artwork is bundled. Readable rules support approximate probabilities with explicit warnings; unknown objects use the documented retry assumption.
+目录资源共用 `resource_context/` 内的只读 MIX/INI 解析器，记录来源，限制 include 深度并读取嵌套包。只保存所选目录，不内置具名 Mod 配置或美术。可读规则使用明确告警的近似概率，不明对象沿用重抽假设。
 
-### Object layout, renderer version 9
+### 对象布局（绘图版本 9）
 
-Custom foundations read `Foundation.X/Y` and the enumerated `Foundation.N` cells for visual depth sorting and aircraft roof ordering. This does not change their separately assessed probability/occupancy support. OnBridge raises a sprite and its shadow receiver only when its cell actually has a high bridge; low bridges and stray OnBridge fields on land keep ground height.
+自定义基础读取 `Foundation.X/Y` 和编号 `Foundation.N`，用于视觉前后排序及屋顶飞机顺序；概率／占用是否受支持由独立模型判定。只有格子实际有高桥时，OnBridge 才抬高对象和阴影接收面；低桥、陆地上孤立的 OnBridge 字段保持地面高度。
 
-SHP vehicles rotate their direction index by `Facings/8`, following FA2SPHE's frame-list rotation. Infantry sequences and voxels retain their own conventions. SHP turrets use 32 direction frames from `<image>tur.shp`, or from the body SHP after `Facings × WalkFrames` (independent of `StartWalkFrame`). Body and turret retain their own full-canvas anchors and crop origins; `TurretOffset` and `UseTurretShadow` apply generically. No unit-specific frame numbers or pixel offsets are substituted.
+SHP 车辆按 `Facings/8` 旋转方向索引，遵循编辑器帧列表约定。步兵序列和体素保留各自约定。SHP 炮塔使用 `<image>tur.shp` 的 32 向帧，或车身 SHP 中 `Facings × WalkFrames` 之后的帧（不依赖 `StartWalkFrame`）。车身、炮塔保留自己的完整画布锚点和裁切原点，通用应用 `TurretOffset` 与 `UseTurretShadow`；没有对某个单位硬编码帧号或像素偏移。
 
-An object-only depth stencil prevents later same-level ground tiles from erasing feet and other opaque sprite pixels outside the anchor cell. Higher foreground terrain can still occlude them. Ground rasters, surface ownership, picking and probability overlays are unaffected. This remains a static preview rather than the full engine's per-pixel Z-buffer and animation system.
+仅用于对象的深度保护蒙版，防止后画的同高地块擦掉锚点格之外的脚部等不透明像素。前景高地仍可遮挡对象。地面底图、地形归属、点击和概率 Overlay 不受影响；仍不模拟完整动画和逐像素游戏深度。
 
-`python verify-object-layout.py` uses generated SHPs (no Mod data) to check facing layouts, both turret layouts, original canvas/crop positioning, offsets, valid/stray bridge flags, custom foundation ordering and foreground occlusion.
+`verify-object-layout.py` 用生成的 SHP（不含 Mod 数据）验证朝向、两种炮塔布局、画布／裁切位置、偏移、有效及孤立桥标志、自定义基础排序和前景遮挡。
 
-Renderer version 10 also corrects `NewTheater` terrain/overlay names. Only an A/T in the second character of an alphabetic-prefix image is treated as a climate placeholder; other names are tried unchanged first. For eligible names the search is current climate, generic climate, then the declared filename. Both Rules.Image and Art.Image are resolved before this search. This follows the editor's Ares-compatible overlay fallback and is shared by 2D and 3D; wall connection/damage frames, palettes, occupation and probabilities are unchanged. `python verify-sprite-resolution.py` checks precedence, all six climates, non-placeholder names, aliases, suffixes and genuinely missing resources using synthetic names only.
+绘图版本 10 修正 `NewTheater` 地形／覆盖物命名。只有字母前缀图像名第二个字符的 A/T 才视为气候占位符；其他名称先原样查找。符合条件时按当前气候、通用气候、声明文件名回退。先解析 Rules.Image 与 Art.Image，再执行这一搜索；2D 和 3D 共用编辑器的 Ares 兼容回退。墙连接／损伤帧、调色盘、占用和概率不变。`verify-sprite-resolution.py` 用合成名称验证优先级、六种气候、非占位名称、别名、后缀和真正缺失资源。
 
-## 3D terrain inspection
+## 3D 地形查看
 
-The “3D查看” button loads a bounded patch around the selected cell through
-`realmap_3d.py`. It reads the existing result without rerunning or modifying the
-probability calculation. The frontend is `terrain3d.js` with locally bundled
-Three.js r160; the portable build includes both the extractor and library.
-The initial range is 21×21 cells; 31×31 is the largest selectable patch.
-“概率:关” starts off whenever the inspector is opened. Enabling it displays
-surface colors and multiplier labels from the main map's exact display model,
-with the same palette, filter, threshold, transparency and 1× label settings.
-Its on/off state is independent of the main map and survives a range change.
-Labels appear at readable zoom levels and use depth testing; geometry and
-shared label textures are built once per patch and reused during selection and
-rotation. No probability is recomputed or renormalized to the patch.
+“3D查看”通过 `realmap_3d.py` 读取选中格附近的有限范围，不重新计算或修改概率。前端 `terrain3d.js` 使用随包 Three.js r160，无外部 CDN；默认 21×21，最大 31×31。
 
-Original TMP sub-blocks are unprojected onto their own surfaces, preserving
-palette colors and theater-specific roads, snow, sand and rock. Ramp corner
-heights use the top/right/bottom/left offsets documented in FA2SPHE HE_1.5.3
-`FA2sp/Ext/CMapData/Body.h::RampTypes`; bilinear interpolation is a visual
-reconstruction, not engine collision geometry. Multi-block cliff artwork is
-often stored on the lower neighboring cell. Vertical faces first sample that
-cell's actual extended image, then the upper cell, with nearby original cliff
-art as a fallback.
+每次打开默认“概率:关”。开启后使用主图的精确显示模型、配色、海陆筛选、阈值、透明度和 1× 标签设置；开关独立于主图，切换范围时保留。倍率在适当缩放时出现并进行深度测试。几何和共用文字纹理按补丁构建一次，旋转／选格复用，不按局部范围重新归一化概率。
 
-“精细崖壁” is on by default. `terrain_depth.py` reads each flat TMP's base and
-extended Z bytes and unprojects its painted pixels into a shared indexed mesh.
-The original alpha silhouette, cliff tips and texture coordinates are retained
-at pixel resolution; meshes and materials are shared by repeated sub-blocks.
-These depth bytes describe rendering order, not an original solid model: the
-result is a visual relief reconstruction. From the original camera, every
-vertex projects back to the original texel. Slightly recessed ground and wall
-backings close surfaces not painted for that camera. Missing or invalid depth
-data falls back to the existing simplified terrain; slopes keep their actual
-ramp corner reconstruction. The checkbox switches locally without reloading
-the patch. Mesh picking, overlays and relations continue to refer to the
-original cell and its integer level; relief heights never enter probability or
-passability calculations. The depth layout follows the primary
-[CNCMaps TMP reader](https://github.com/zzattack/ccmaps-net/blob/56712d7c9c5048afbfe9bddb01c0ec43f6fc008a/CNCMaps.FileFormats/TmpFile.cs)
-and [TMP renderer](https://github.com/zzattack/ccmaps-net/blob/main/CNCMaps.Engine/Rendering/TmpRenderer.cs).
+原始 TMP 子块反投影到各自表面，保留原调色盘、气候道路、雪、沙与岩石。坡面角点参考 FA2SPHE HE_1.5.3 `FA2sp/Ext/CMapData/Body.h::RampTypes` 的上／右／下／左偏移，以双线性插值重建；这不是引擎碰撞模型。跨格悬崖经常将延展图放在低邻格上，因此崖面先取该低格的实际扩展像素，再取高格，最后才回退到邻近原始崖壁图。
 
-Cut boundaries use a neutral material. Mineral overlays
-follow the surface; trees and solid terrain objects use original static SHP
-billboards. Buildings and units are not part of this terrain inspector.
-Cliff faces toward the original +X/+Z game camera preserve the artwork's
-original brightness with an unlit textured material, avoiding a second layer
-of shading over the painted cliff art. Rear faces and cut boundaries retain
-their existing Lambert lighting. This choice follows world orientation and
-does not move with the inspection camera.
+“精细崖壁”默认开启。`terrain_depth.py` 读取平格 TMP 的底面及延展深度字节，把着色像素反投影为共享索引网格，在像素分辨率保留透明轮廓、崖尖和纹理坐标；重复子块共用网格／材质。深度字节描述绘图顺序，并非原始实体模型，因此这是视觉浮雕重建。从游戏原视角，每个顶点投影回原像素；略后移的底面和墙面补齐该视角未画出的背部。缺失／损坏深度数据退回简化模型，斜坡继续使用角点重建。开关只在本地切换，不重载补丁。点击、Overlay 和高差关系仍对应原格及整数高度，浮雕高度绝不参与通行／概率判定。格式依据见 [CNCMaps TMP 读取器](https://github.com/zzattack/ccmaps-net/blob/56712d7c9c5048afbfe9bddb01c0ec43f6fc008a/CNCMaps.FileFormats/TmpFile.cs) 与 [TMP 绘制器](https://github.com/zzattack/ccmaps-net/blob/main/CNCMaps.Engine/Rendering/TmpRenderer.cs)。
 
-Cliff relations use the full saved map, including neighbors outside the patch,
-the six original offsets and an integer Cell.Level difference of at least 4.
-They are shown only when the original-model result enables
-CliffBackImpassability=2. Rough exceptions remain distinct from existing Rock.
-Risk colors reuse the saved main-map flags: solid pink for `marked`, hatched
-pink for `potentialMarked`. Remaining Rough cells with a cliff relation and
-zero probability use amber dots and a dashed border; they are not random-crate
-anomalies. Missing/other probabilities are never silently classified as zero.
-Legend counts apply to the displayed patch, and selection details explain
-projection rejection and clearance support when that evidence is available.
-Mod previews show only geometry and original artwork, with no new passability
-or crate claims. The 3D mesh does not reproduce the exact original 2D silhouette,
-hidden backs of sprites or a complete movement/pathfinding model.
+截断边界用中性材质，矿物贴合地表，树木等固体 Terrain 用原始静态 SHP 面片。地形查看器不包含建筑／单位外观。面向原游戏 +X/+Z 相机的崖面使用不受额外光照影响的贴图材质，保留美术本身亮度；背面和切口继续使用原 Lambert 光照。此选择固定于世界方向，不随观察相机转动。
 
-Bridge SHPs are sampled across their actual neighboring cells, including sprite
-owners outside the selected patch. Low decks follow the ground; high decks use
-separate surfaces at the saved `deckLevel`, with water/ground retained below.
-Bridge geometry stays fixed when the camera rotates, and the decorations toggle
-also hides bridges. Railings and piers remain painted artwork, not reconstructed
-volumes. Cliff markers and crate previews still inspect the ground layer.
+高差关系读取整张已保存地图，包括补丁范围外的邻格，使用六个原始偏移及至少四级整数高度差。只有原版结果启用 `CliffBackImpassability=2` 时显示这套关系。Rough 例外与本已是 Rock 的格子区分。实色粉对应主图 `marked`，斜纹粉对应 `potentialMarked`；剩余满足高差条件且概率为零的 Rough 格用琥珀点纹和虚线，不当作可随机落箱异常。缺失／其他概率不默认为零。图例计数只针对当前范围，详情在有证据时解释投影拒绝与清空支持。Mod 预览只展示几何与美术，不新增通行／放箱结论。网格不完整复现原始二维轮廓、素材背面或寻路。
+
+桥梁 SHP 跨实际相邻格采样，包括所有者在补丁之外的情况。低桥贴地，高桥使用独立 `deckLevel` 表面并保留桥下地形／水面。相机旋转不改变桥梁几何；装饰开关也控制桥梁。栏杆和桥墩仍是贴图，不是重建体积；高差标记和放箱预览继续检查地面层。
+
 
 ## 区域编辑与交互渲染缓存
 
@@ -169,4 +118,3 @@ volumes. Cliff markers and crate previews still inspect the ground layer.
 `player-starts.js` 使用结果已有的 `metadata.waypoints`，仅解码 0–7，按 `Y*1000+X` 找到真实格并沿用高度，显示为 1–8。不是出生槽的路径点、负值和不存在的格子不显示；新增结果明确记录 `multiplayerOnly`，单人地图不显示玩家出生标记。主图标记位于区域着色上方、概率文字下方，采用轻微上移及连接线避免占据格子中央；小地图和区域缩略图在实际出生位置显示同款缩小数字。
 
 `node verify-regions.cjs <result.json>` 检查 12 区域默认值、配色、旧数据迁移、索引与遍历选择一致性及真实地图统计守恒。`node verify-map-view-cache.cjs` 对比缓存／直接渲染的图像、标签数量，并检查平移、缩放、筛选和图层切换后的缓存失效。图像测试和 `node benchmark-map-view.cjs <result.json>` 需要 Node 能找到 `@napi-rs/canvas`，便携版可将 `NODE_PATH` 指向 `runtime/node/node_modules`。基准测量离屏 Canvas 工作耗时，不代表浏览器实际呈现帧率。
-

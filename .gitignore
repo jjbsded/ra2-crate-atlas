@@ -119,3 +119,10 @@ Thumbs.db
 !/verify-portable-install.py
 !/map_test_fixtures.py
 !/verify-source-package.py
+!/i18n_settings.py
+!/verify-i18n.py
+!/verify-i18n.cjs
+!/README.zh-CN.md
+!/third-party-notices.zh-CN.md
+!/*.en.md
+!/docs/*.en.md

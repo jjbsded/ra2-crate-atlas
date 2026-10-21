@@ -1,16 +1,19 @@
 /* Searchable, offline official maps. Shared entries retain both original files. */
 (function(root){
  'use strict';
- const versions={ra2:'原版',yr:'尤里'};
- const climates={TEMPERATE:'温和',SNOW:'雪地',URBAN:'城市',NEWURBAN:'新城市',DESERT:'沙漠',LUNAR:'月球'};
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
+ const versions={ra2:_t('原版'),yr:_t('尤里')};
+ const climates={TEMPERATE:_t('温和'),SNOW:_t('雪地'),URBAN:_t('城市'),NEWURBAN:_t('新城市'),DESERT:_t('沙漠'),LUNAR:_t('月球')};
  const normalize=value=>String(value||'').normalize('NFKC').trim().toLocaleLowerCase('zh-CN');
+ const label=entry=>_i18n?.officialLabel(entry)||entry.label;
  const supported=(entry,version='all')=>Object.entries(entry.variants).some(([v,s])=>(!versions[version]||v===version)&&!s.unsupportedReason);
  function searchMaps(maps,{query='',version='all',mode='all',maxPlayers='all',theater='all',onlySupported=false}={}){
   const words=normalize(query).split(/\s+/).filter(Boolean);
   return maps.filter(e=>{
    if(version==='shared'&&!e.shared||versions[version]&&!e.variants[version]||mode!=='all'&&e.mode!==mode||onlySupported&&!supported(e,version))return false;
    if(maxPlayers!=='all'&&e.players[1]!==Number(maxPlayers)||theater!=='all'&&e.theater!==theater)return false;
-   const text=normalize([e.name,e.label,e.modeName,climates[e.theater],...Object.entries(e.variants).flatMap(([v,s])=>[s.file,v,versions[v],v==='yr'?'尤复 尤里的复仇':'红警2'])].join(' '));
+   const text=normalize([e.name,e.label,label(e),_i18n?.messages[e.name],_i18n?.messages[e.modeName],e.modeName,climates[e.theater],...Object.entries(e.variants).flatMap(([v,s])=>[s.file,v,versions[v],v==='yr'?'尤复 尤里的复仇 Yuri Revenge':'原版 红警2 Red Alert 2'])].join(' '));
    return words.every(word=>text.includes(word));
   });
  }
@@ -23,13 +26,13 @@
    $('officialMapAnalyze').disabled=!selected;
    $('officialMapAnalysisVersion').disabled=!selected||Object.keys(selected.variants).length<2;
    for(let i=0;i<buttons.length;i++){const active=visible[i]===selected;buttons[i].setAttribute('aria-selected',String(active));buttons[i].tabIndex=active||!visible.includes(selected)&&i===0?0:-1;}
-   if(!selected){$('officialMapSelected').textContent='选择一张地图';$('officialMapDetails').textContent='';return;}
+   if(!selected){$('officialMapSelected').textContent=_t('选择一张地图');$('officialMapDetails').textContent='';return;}
    const version=$('officialMapAnalysisVersion').value,source=selected.variants[version];
-   $('officialMapSelected').textContent=selected.label;
+   $('officialMapSelected').textContent=label(selected);
    $('officialMapAnalyze').disabled=!!source.unsupportedReason;
    $('officialMapDetails').classList.toggle('unavailable',!!source.unsupportedReason);
-   $('officialMapDetails').textContent=source.unsupportedReason?'暂不能精确分析：'+source.unsupportedReason:
-    `${source.file} · 将使用${versions[version]}规则分析初始布局。${selected.shared?'两版与箱子有关的静态内容相同；预览与 AI 差异不拆分。':''}`;
+   $('officialMapDetails').textContent=source.unsupportedReason?_t('暂不能精确分析：')+(_i18n?.message(source.unsupportedReason)||source.unsupportedReason):
+    _t`${source.file} · 将使用${versions[version]}规则分析初始布局。${selected.shared?_t('两版与箱子有关的静态内容相同；预览与 AI 差异不拆分。'):''}`;
   }
   function choose(entry,focus=false){
    const previous=selected&&$('officialMapAnalysisVersion').value;
@@ -43,43 +46,43 @@
   function render(){
    if(!data)return;
    const modeOrder=data.modes.map(m=>m.id);
-   visible=searchMaps(data.maps,filter()).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN')||modeOrder.indexOf(a.mode)-modeOrder.indexOf(b.mode)||Number(!!b.variants.ra2)-Number(!!a.variants.ra2)||a.label.localeCompare(b.label,'zh-CN'));
+   visible=searchMaps(data.maps,filter()).sort((a,b)=>label(a).localeCompare(label(b),_i18n?.language||'zh-CN')||modeOrder.indexOf(a.mode)-modeOrder.indexOf(b.mode)||Number(!!b.variants.ra2)-Number(!!a.variants.ra2));
    list.replaceChildren();buttons=[];
    if(selected&&!visible.includes(selected))selected=null;
    const fragment=document.createDocumentFragment();
    for(const entry of visible){
     const button=document.createElement('button');button.type='button';button.className='official-map-row';button.setAttribute('role','option');
-    const name=document.createElement('strong');name.textContent=entry.label;
+    const name=document.createElement('strong');name.textContent=label(entry);
     const info=document.createElement('span');info.className='official-map-meta';
     const [minimum,maximum]=entry.players,files=Object.values(entry.variants).map(s=>s.file).join(' / ');
-    info.textContent=`${minimum===maximum?maximum:minimum+'–'+maximum} 人 · ${climates[entry.theater]||entry.theater} · ${entry.size.join(' × ')} · ${files}`;
+    info.textContent=_t`${minimum===maximum?maximum:minimum+'–'+maximum} 人 · ${climates[entry.theater]||entry.theater} · ${entry.size.join(' × ')} · ${files}`;
     const badge=document.createElement('span'),available=supported(entry,$('officialMapVersion').value);
-    badge.className='official-map-badge'+(available?'':' unavailable');badge.textContent=available?(entry.shared?'两版相同':versions[Object.keys(entry.variants)[0]]):'暂不支持概率';
+    badge.className='official-map-badge'+(available?'':' unavailable');badge.textContent=available?(entry.shared?_t('两版相同'):versions[Object.keys(entry.variants)[0]]):_t('暂不支持概率');
     button.append(name,info,badge);button.onclick=()=>choose(entry);buttons.push(button);fragment.append(button);
    }
    list.append(fragment);$('officialMapEmpty').hidden=visible.length>0;
-   $('officialMapCount').textContent=`${visible.length} / ${data.maps.length} 项 · 共 ${data.counts.files} 个官方地图文件`;
+   $('officialMapCount').textContent=_t`${visible.length} / ${data.maps.length} 项 · 共 ${data.counts.files} 个官方地图文件`;
    updateSelection();
   }
   async function open(){
    const ticket=++revision;if(!dialog.open)dialog.showModal();
    $('officialMapSearch').focus();$('officialMapError').textContent='';$('officialMapRetry').hidden=true;
    if(data){render();return;}
-   $('officialMapCount').textContent='正在读取内置地图目录…';
+   $('officialMapCount').textContent=_t('正在读取内置地图目录…');
    try{
     if(!pending)pending=CrateLocalAPI.json('/api/maps/catalog',{cache:'no-store'}).catch(error=>{pending=null;throw error;});
     data=await pending;
-    const mode=$('officialMapMode');mode.replaceChildren();const all=document.createElement('option');all.value='all';all.textContent='全部模式';mode.append(all);
-    for(const entry of data.modes){const option=document.createElement('option');option.value=entry.id;option.textContent=entry.name;mode.append(option);}
+    const mode=$('officialMapMode');mode.replaceChildren();const all=document.createElement('option');all.value='all';all.textContent=_t('全部模式');mode.append(all);
+    for(const entry of data.modes){const option=document.createElement('option');option.value=entry.id;option.textContent=_t(entry.name);mode.append(option);}
     for(const [id,allLabel,entries]of [
-     ['officialMapPlayers','全部人数',[...new Set(data.maps.map(e=>e.players[1]))].sort((a,b)=>a-b).map(n=>[n,n+' 人'])],
-     ['officialMapTheater','全部气候',Object.entries(climates).filter(([value])=>data.maps.some(e=>e.theater===value))]
+     ['officialMapPlayers',_t('全部人数'),[...new Set(data.maps.map(e=>e.players[1]))].sort((a,b)=>a-b).map(n=>[n,n+_t(' 人')])],
+     ['officialMapTheater',_t('全部气候'),Object.entries(climates).filter(([value])=>data.maps.some(e=>e.theater===value))]
     ]){
      const select=$(id);select.replaceChildren();const all=document.createElement('option');all.value='all';all.textContent=allLabel;select.append(all);
      for(const [value,label]of entries){const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);}
     }
     if(ticket===revision&&dialog.open)render();
-   }catch(error){if(ticket!==revision||!dialog.open)return;$('officialMapCount').textContent='目录未载入';$('officialMapError').textContent=error.message;$('officialMapRetry').hidden=false;}
+   }catch(error){if(ticket!==revision||!dialog.open)return;$('officialMapCount').textContent=_t('目录未载入');$('officialMapError').textContent=error.message;$('officialMapRetry').hidden=false;}
   }
   $('loadHeck').onclick=open;$('officialMapClose').onclick=()=>dialog.close();$('officialMapRetry').onclick=open;
   dialog.addEventListener('close',()=>++revision);

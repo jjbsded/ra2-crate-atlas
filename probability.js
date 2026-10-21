@@ -1,11 +1,13 @@
 /* Exact enumeration for the demo's static flat world; no scripted retry points. */
 (function(root){
  'use strict';
+ const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
+ const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const M=typeof module!=='undefined'?require('./model.js'):root.CrateModel;
  const I=typeof module!=='undefined'?require('./probability-index.js'):root.CrateProbabilityIndex;
  const FILTERS=['all','water','land'];
  const PALETTES=['multi','warm','cool'];
- const PALETTE_NAMES={multi:'多色',warm:'暖色',cool:'冷色'};
+ const PALETTE_NAMES={multi:_t('多色'),warm:_t('暖色'),cool:_t('冷色')};
  const MAX_MULTIPLIER=(M.MAP.w+M.MAP.h-1)**2;
  const cache=new Map(),randomCache=new Map(),exactForCell=new WeakMap(),exactCache=new Map();
  const gcd=(a,b)=>b?gcd(b,a%b):a;
@@ -48,8 +50,8 @@
  }
  // JSON stores one shared denominator, not thousands of repeated digit strings.
  function exactFraction(result,key,kind='probability'){
-  if(!['probability','multiplier','oneAttemptProbability'].includes(kind))throw Error('无效概率字段');
-  const cell=result.cells[key];if(!cell)throw Error('无效格子坐标');
+  if(!['probability','multiplier','oneAttemptProbability'].includes(kind))throw Error(_t('无效概率字段'));
+  const cell=result.cells[key];if(!cell)throw Error(_t('无效格子坐标'));
   if(result.frameDistribution){
    if(kind==='oneAttemptProbability')return fraction(BigInt(cell.originFrameHits),BigInt(result.sampleCount)*BigInt(result.frameDistribution.period));
    return fraction(BigInt(cell.exactNumerator)*(kind==='multiplier'?BigInt(result.sampleCount):1n),BigInt(result.exact.denominator));
@@ -59,8 +61,8 @@
   return fraction(hits*BigInt(result.exact.perHitNumerator)*(kind==='multiplier'?BigInt(result.sampleCount):1n),BigInt(result.exact.denominator));
  }
  function compute(world,frame=600,limit=1000){
-  if(!Number.isSafeInteger(frame)||frame<0||frame>999999999)throw Error('无效逻辑帧');
-  if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw Error('无效重试上限');
+  if(!Number.isSafeInteger(frame)||frame<0||frame>999999999)throw Error(_t('无效逻辑帧'));
+  if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw Error(_t('无效重试上限'));
   const signature=JSON.stringify([I.signature(world),frame,limit]);if(cache.has(signature))return cache.get(signature);
   const index=I.prepare(world),N=index.N,cells={};
   const {hits,origins,failures,successCount}=index.resolve(frame),exact=exactWeights(N,successCount,limit);
@@ -81,17 +83,17 @@
    exact:{representation:'shared-denominator',denominator:String(exact.denominator),perHitNumerator:String(exact.perHitNumerator),failureNumerator:String(exact.failureNumerator),
     probability:'cells[key].hits * perHitNumerator / denominator',multiplier:'cells[key].hits * perHitNumerator * sampleCount / denominator',finalFailure:'failureNumerator / denominator',
     note:'Decimal number fields are display approximations. These integer strings and hits define the exact finite-retry probabilities.'},
-   scope:`全部 ${N} 个起点精确枚举；放箱前静态平地地图，固定逻辑帧；均匀独立起点模型；最多 ${limit} 轮；不是固定种子实机 RNG 分布`,cells,origins};
+   scope:_t`全部 ${N} 个起点精确枚举；放箱前静态平地地图，固定逻辑帧；均匀独立起点模型；最多 ${limit} 轮；不是固定种子实机 RNG 分布`,cells,origins};
   if(cache.size>=32)cache.delete(cache.keys().next().value);cache.set(signature,result);return result;
  }
  function computeRandom(world,limit=1000){
-  if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw Error('无效重试上限');
+  if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw Error(_t('无效重试上限'));
   const signature=JSON.stringify([I.signature(world),limit]);if(randomCache.has(signature))return randomCache.get(signature);
   const index=I.prepare(world),N=index.N;
   // Uniform over a complete joint residue cycle, not a finite arbitrary frame
   // interval and not independent candidate choices for each origin/attempt.
   const period=index.candidateCounts.reduce((p,n)=>p/gcd(p,n)*n,1);
-  if(period>100000)throw Error('该布局的联合帧周期过大；需要进一步优化精确平均，不能退化为随机抽样。');
+  if(period>100000)throw Error(_t('该布局的联合帧周期过大；需要进一步优化精确平均，不能退化为随机抽样。'));
   const groups=new Map(),frameSummaries=[],originFrameHits=new Uint32Array(N);
   let totalSuccess=0,totalOverlay=0,totalNoCandidate=0;
   for(let frame=0;frame<period;frame++){
@@ -132,15 +134,15 @@
     probability:'cells[key].exactNumerator / denominator',multiplier:'cells[key].exactNumerator * sampleCount / denominator',
     oneAttemptProbability:'cells[key].originFrameHits / (frameDistribution.period * sampleCount)',finalFailure:'failureNumerator / denominator',
     note:'Average fixed-frame finite-retry probabilities over all joint-period residues. Decimal fields, including hits and successCount, are display approximations / means.'},
-   scope:`全部 ${N} 个起点 × ${period} 个等权帧余数精确平均；每次调用固定同一个帧至最多 ${limit} 轮结束；均匀独立起点、静态平地模型；不是实际游戏的时间或 PRNG 分布`,cells};
+   scope:_t`全部 ${N} 个起点 × ${period} 个等权帧余数精确平均；每次调用固定同一个帧至最多 ${limit} 轮结束；均匀独立起点、静态平地模型；不是实际游戏的时间或 PRNG 分布`,cells};
   if(randomCache.size>=8)randomCache.delete(randomCache.keys().next().value);randomCache.set(signature,result);return result;
  }
  function decorate(trace){
   if(trace.probability)return trace;
   trace.probability=computeRandom(trace.world);
   const duration=10,start=trace.duration;
-  trace.steps.push({i:trace.steps.length,phase:'heatmap',title:'最终落点 · 概率倍率热力图',
-   text:'1× = 仅直接抽中、无邻格转入的基准格。保留随机帧与最多 1000 轮重抽的精确概率，统一归一化倍率；格子之间的最终概率比例不变。',
+  trace.steps.push({i:trace.steps.length,phase:'heatmap',title:_t('最终落点 · 概率倍率热力图'),
+   text:_t('1× = 仅直接抽中、无邻格转入的基准格。保留随机帧与最多 1000 轮重抽的精确概率，统一归一化倍率；格子之间的最终概率比例不变。'),
    candidates:[],visits:[],start,end:start+duration,duration});
   trace.duration+=duration;return trace;
  }
