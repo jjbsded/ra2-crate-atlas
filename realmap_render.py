@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from realmap_bridges import HIGH_NAMES, sprite_frame
 
-VERSION = 10
+VERSION = 12
 # Compatibility exports; shared sprite code lives below both renderers.
 from realmap_sprites import palette, sprite_spec, shadow_frame, SHADOW_ALPHA
 
@@ -104,8 +104,8 @@ def apply_shadow(canvas, mask, x, y, level, owners, levels, bodies, factor=1):
     return count
 
 
-def bridge_terrain_mask(im, x, y, level, stencil):
-    """FA2SPHE bridge stencil: bridge level+3, terrain level+1, GE comparison.
+def bridge_terrain_mask(im, x, y, level, stencil, *, pixel_heights=None, ground_level=None):
+    """Low bridges/objects retain their editor stencil; high decks use TMP Z.
 
     Bridge SHPs span neighboring cells, including transparent Overlay owners.
     Later water/ground must not erase them. Keep this color mask separate from
@@ -117,7 +117,16 @@ def bridge_terrain_mask(im, x, y, level, stencil):
     left, top, right, bottom = max(0, x), max(0, y), min(width, x+w), min(height, y+h)
     if left < right and top < bottom:
         part = alpha[top-y:bottom-y, left-x:right-x]
-        part[stencil[top:bottom, left:right] > min(level+1, 127)] = 0
+        refs = stencil[top:bottom, left:right]
+        high = (refs & 128) != 0
+        depth = refs & 127
+        # With no usable TMP Z, retain the former conservative editor rule.
+        blocked = np.where(high, depth-1, depth) > min(level+1, 127)
+        if pixel_heights is not None:
+            heights = pixel_heights[top-y:bottom-y, left-x:right-x]
+            actual = ground_level*15 + heights
+            blocked[high] = (actual < depth.astype(np.int16)*15)[high]
+        part[blocked] = 0
     return Image.fromarray(alpha)
 
 
@@ -131,8 +140,19 @@ def mark_sprite_stencil(im, x, y, threshold, stencil):
         part[alpha[top-y:bottom-y, left-x:right-x] != 0] = min(threshold, 127)
 
 
-def mark_bridge_stencil(im, x, y, level, stencil):
-    mark_sprite_stencil(im, x, y, level+3, stencil)
+def mark_bridge_stencil(im, x, y, level, stencil, *, high=False):
+    if not high:
+        mark_sprite_stencil(im, x, y, level+3, stencil)
+        return
+    # The high bit distinguishes the actual +4 deck from the low-bridge and
+    # object stencil ranks, without allocating another full-map depth buffer.
+    height, width = stencil.shape
+    left, top = max(0, x), max(0, y)
+    right, bottom = min(width, x+im.width), min(height, y+im.height)
+    if left < right and top < bottom:
+        alpha = np.asarray(im.getchannel('A'))
+        part = stencil[top:bottom, left:right]
+        part[alpha[top-y:bottom-y, left-x:right-x] != 0] = 128 | min(level+4, 127)
 
 
 def render(cells, res, theater, tmps, folder, meta, progress):
@@ -181,6 +201,8 @@ def render(cells, res, theater, tmps, folder, meta, progress):
     shadows = []
     levels = np.array([-32768]+[c['level'] for c in ordered], dtype=np.int16)
     tiles, sprites, missing, audit = {}, {}, set(), {}
+    tile_heights = {}
+    has_high_bridges = any(c['overlayName'] in HIGH_NAMES for c in ordered)
     records = []
     bounds = camera_rect(meta, [-minx, -miny])
     def bridge_overlay(cell):
@@ -214,6 +236,10 @@ def render(cells, res, theater, tmps, folder, meta, progress):
             full = contours(array, bx-30, by-15) if c['slope'] else [[[0, -15], [30, 0], [0, 15], [-30, 0]]]
             tiles[key] = (parts, array, bx-30, by-15, full)
         parts, mask, dx, dy, full = tiles[key]
+        if has_high_bridges and key not in tile_heights:
+            from terrain_depth import tile_pixel_heights
+            tile_heights[key] = ([None]*len(parts) if c.get('terrainError') else
+                                tile_pixel_heights(tmps[c['file']], c['subTile'], parts))
         cx, cy = 30*(c['x']-c['y'])-minx, 15*(c['x']+c['y']-c['level'])-miny
         records.append((ident, c, cx, cy, mask, dx, dy, full))
         for i, (im, px, py) in enumerate(parts):
@@ -226,7 +252,9 @@ def render(cells, res, theater, tmps, folder, meta, progress):
             if bridge_stencil is not None:
                 # Editor DirectXTerrain also raises the comparison height of
                 # short cliff extras whose artwork is entirely above the tile.
-                alpha = bridge_terrain_mask(im, *at, level, bridge_stencil)
+                alpha = bridge_terrain_mask(im, *at, level, bridge_stencil,
+                    pixel_heights=tile_heights[key][i] if has_high_bridges else None,
+                    ground_level=c['level'])
                 im = im.copy()
                 im.putalpha(alpha)
             bodies.paste(0, (*at, at[0]+im.width, at[1]+im.height), alpha)
@@ -258,7 +286,11 @@ def render(cells, res, theater, tmps, folder, meta, progress):
                     raw, pal, offset, spec = sprite_spec(kind, is_overlay, frame, res, theater)
                     cfg = theater['effectiveRules'].get(kind, {})
                     mask, shadow_spec = shadow_frame(raw, frame, cfg, res.art.get(cfg.get('IMAGE', kind).upper(), {}))
-                    solid = (not is_overlay or any(yes(cfg.get(k, 'no')) for k in ('WALL', 'CRATE', 'ISAROCK'))
+                    # High decks sit above the ground receiver. Their artwork
+                    # must block ground shadows from neighboring bridge spans,
+                    # even when their Overlay rules use the default DrawFlat.
+                    solid = (not is_overlay or kind in HIGH_NAMES
+                             or any(yes(cfg.get(k, 'no')) for k in ('WALL', 'CRATE', 'ISAROCK'))
                              or not yes(cfg.get('DRAWFLAT', 'yes')))
                     sprites[skey] = (shp_frame(raw, frame, pal), offset, mask, solid)
                     spec.update(shadow_spec)
@@ -275,7 +307,8 @@ def render(cells, res, theater, tmps, folder, meta, progress):
                 sy = 15*(sc['x']+sc['y']-sc['level'])-miny
                 x, y = sx-im.width//2, sy-im.height//2+offset
                 if is_overlay and bridge_overlay(sc):
-                    mark_bridge_stencil(im, x, y, sc['level'], bridge_stencil)
+                    mark_bridge_stencil(im, x, y, sc['level'], bridge_stencil,
+                                        high=sc['overlayName'] in HIGH_NAMES)
                 drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
                 canvas.paste(drawn, (round(x*factor), round(y*factor)), drawn)
                 scene.paste(drawn, (round(x*factor), round(y*factor)), drawn)

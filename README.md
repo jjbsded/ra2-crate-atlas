@@ -6,7 +6,11 @@ Explore where random crates can appear on real maps, compare regions and inspect
 
 ## Download and run
 
-**[Download the Windows portable package](https://github.com/jjbsded/ra2-crate-atlas/releases/latest)**, extract the entire ZIP, and run **Start Crate Atlas.cmd**. The Chinese launcher `启动工具.cmd` opens the same tool. No Python, Node.js or game installation is required: the package includes its runtimes, official maps and hash-verified stock resources. An optional game directory enables other installations or Mods; no specific Mod configuration or artwork is bundled.
+**[Download v0.3.1 for Windows x64](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.3.1/CrateAtlas-v0.3.1-Windows-x64.zip)**, extract the entire ZIP, and run **Start Crate Atlas.cmd**. The Chinese launcher `启动工具.cmd` opens the same tool. No Python, Node.js or game installation is required: the package includes its runtimes, official maps and hash-verified stock resources. An optional game directory enables other installations or Mods; no specific Mod configuration or artwork is bundled.
+
+[Release notes](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.3.1) · [SHA-256 checksum](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.3.1/CrateAtlas-v0.3.1-Windows-x64.zip.sha256) · [Latest release](https://github.com/jjbsded/ra2-crate-atlas/releases/latest)
+
+v0.3.1 corrects high-bridge pier/deck occlusion and ground shadows, retains both sides of bridge artwork in 3D, and fixes triangular fins on flat terrain corners. The bundled height demo uses the corrected geometry. Probability and movement rules are unchanged.
 
 The repository is **private**. Sign in to a GitHub account with repository access to see or download releases. Choose the **Windows-x64.zip release asset**, not GitHub's automatically generated “Source code” ZIP. Each release includes a SHA-256 file. See [portable use and migration](PORTABLE.en.md) before upgrading.
 
@@ -83,7 +87,7 @@ Canvas tests need `NODE_PATH` pointing to `runtime/node/node_modules`. For actua
 Build a portable package with verified local runtimes:
 
 ```powershell
-.\runtime\python\python.exe -B build-portable.py --output ..\CrateAtlas-Windows-x64 --node .\runtime\node\node.exe --node-license .\runtime\node\LICENSE --ffmpeg .\runtime\ffmpeg\ffmpeg.exe --version v0.3.0
+.\runtime\python\python.exe -B build-portable.py --output ..\CrateAtlas-Windows-x64 --node .\runtime\node\node.exe --node-license .\runtime\node\LICENSE --ffmpeg .\runtime\ffmpeg\ffmpeg.exe --version v0.3.1
 ```
 
 The output folder and corresponding ZIP must not already exist. The builder validates module coverage, browser dependencies, stock archives, native-source digests, voxel provenance, Canvas and FFmpeg before copying files. It creates a file manifest and ZIP checksum. Extract to a separate test directory, then run `python -B verify-portable-install.py --root <extracted-folder>`. Do not repackage that test directory: verification creates analysis and video outputs.

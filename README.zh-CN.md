@@ -10,9 +10,11 @@
 
 ## 直接使用
 
-下载 [v0.3.0 Windows 64 位便携包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.3.0/CrateAtlas-v0.3.0-Windows-x64.zip)，完整解压后双击 **启动工具.cmd**（英文文件名 **Start Crate Atlas.cmd** 也可），默认进入真实地图概率计算。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和经过哈希校验的原版资源。游戏目录为可选项，用于读取其他安装或 Mod；发布包不携带任何具体 Mod 配置或美术素材。
+下载 [v0.3.1 Windows 64 位便携包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.3.1/CrateAtlas-v0.3.1-Windows-x64.zip)，完整解压后双击 **启动工具.cmd**（英文文件名 **Start Crate Atlas.cmd** 也可），默认进入真实地图概率计算。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和经过哈希校验的原版资源。游戏目录为可选项，用于读取其他安装或 Mod；发布包不携带任何具体 Mod 配置或美术素材。
 
-[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.3.0) · [SHA-256 校验文件](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.3.0/CrateAtlas-v0.3.0-Windows-x64.zip.sha256)。仓库为私有仓库，下载时需要登录具有仓库访问权限的 GitHub 账号。升级时请解压到新目录，并先关闭旧版启动窗口；区域划分迁移见 [使用与迁移](PORTABLE.md)。
+[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.3.1) · [SHA-256 校验文件](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.3.1/CrateAtlas-v0.3.1-Windows-x64.zip.sha256)。仓库为私有仓库，下载时需要登录具有仓库访问权限的 GitHub 账号。升级时请解压到新目录，并先关闭旧版启动窗口；区域划分迁移见 [使用与迁移](PORTABLE.md)。
+
+v0.3.1 修复高桥桥墩遮挡桥面、阴影盖住桥面、3D 桥梁侧边美术缺失，以及平面拐角出现尖三角的问题，并更新内置高差演示。概率计算和通行判定规则不变。
 
 “Code → Download ZIP”仅提供源码和小型组件，直接使用请选择上面的便携包。源码运行方式见下文；index.html 的概率演示可直接打开。
 
@@ -84,7 +86,7 @@ cd ra2-crate-atlas
 
 构建前校验内置原版资源；输出目录及同名 ZIP 必须不存在。新包的 Mod 目录默认为空。本机选择保存在被 Git 忽略的 `data/game-directory.json`。
 
-构建可加 `--version v0.3.0` 记录版本；同时生成包内 `release-files.json` 和 ZIP 的 `.sha256` 校验文件。前端依赖、原生程序源码散列、Node Canvas 和 FFmpeg 均在创建输出目录前检查。发布前应在新目录解压，再运行 `python -B verify-portable-install.py --root <解压后的工具目录>`：测试只用包内运行环境，临时生成的分析／视频结果留在这个验收目录，不进入待发布 ZIP。
+构建可加 `--version v0.3.1` 记录版本；同时生成包内 `release-files.json` 和 ZIP 的 `.sha256` 校验文件。前端依赖、原生程序源码散列、Node Canvas 和 FFmpeg 均在创建输出目录前检查。发布前应在新目录解压，再运行 `python -B verify-portable-install.py --root <解压后的工具目录>`：测试只用包内运行环境，临时生成的分析／视频结果留在这个验收目录，不进入待发布 ZIP。
 
 重建官方目录（仅开发时需要 Windows 及原版游戏安装，日常使用无需游戏目录）：
 

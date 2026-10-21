@@ -30,9 +30,13 @@ YR's crate pickup check is coordinate-based and does not compare the unit's Z wi
 
 Bridge SHPs can live in ISO or ordinary theater archives. Rendering uses the proper theater extension and palette, original offsets (including the high-bridge -16 and additional -15 conventions), and the native coordinate-dependent variation for frames 9–17 on a 4×4 pattern. OnBridge unit artwork rises 60 projected pixels, corresponding to four levels.
 
-FA2SPHE's ordering provides the basis for drawing high bridges behind the appropriate diagonal terrain. An object-only protection stencil uses bridge level +3 versus ground level +1 so later same-level ground cannot erase the bridge span. Higher foreground terrain can still occlude it. This is static painter rendering, not the game's complete per-pixel depth buffer.
+FA2SPHE's ordering provides the basis for drawing bridges behind the appropriate diagonal terrain. Low bridges retain the bridge level +3 versus ground level +1 stencil. Since render version 11, high decks compare their actual level +4 against individual terrain-pixel heights decoded from TMP Z data. A descending pier face no longer inherits its entire image's raised occlusion height and erases the deck. Foreground pixels at or above the deck can still occlude it. Missing or invalid depth retains the original conservative fallback. This is static painter rendering, not the game's complete per-pixel depth buffer.
+
+Since render version 12, opaque high-deck artwork also occludes ground shadows. The default DrawFlat rule no longer lets neighboring spans' shadows darken the deck during final compositing. Original shadows remain visible on the ground beneath the bridge. Continuous-span tests cover both orientations and road/wood bridges in RA2 and YR.
 
 The 3D extractor samples a bridge sprite across its actual neighboring cells, including owners outside the patch. Low decks follow ground; high decks get separate surfaces at `deckLevel`, preserving water / TMP below. Geometry stays fixed during rotation. The decorations switch controls bridges too. Rails and piers remain painted artwork, not modeled volumes; cliff markers and crate previews inspect ground land.
+
+Patch format 5 retains rail pixels outside the movement footprint and folds side artwork at the deck edge. Extending the visible artwork does not extend gameplay bridge flags or change cell heights.
 
 ### Transparent frames versus missing spans
 

@@ -11,11 +11,72 @@ import zipfile
 import numpy as np
 from PIL import Image
 from realmap_3d import (CLIFF, ROOT, RAMPS, corner_heights, relation_data, result_path,
-                       surface_height, top_texture, patch, overlay_pixels, build_patch, sample_filled)
-from terrain_depth import relief_mesh
+                       surface_height, top_texture, patch, overlay_pixels, build_patch, sample_filled,
+                       add_bridge_layers)
+from terrain_depth import relief_mesh, tile_surfaces, fit_relief_surfaces
 
 
 class TerrainChecks(unittest.TestCase):
+    def test_sort_depth_fits_flat_caps_without_flattening_walls(self):
+        raw = bytearray(128)
+        struct.pack_into('<4I',raw,0,2,1,60,30)
+        struct.pack_into('<2I',raw,16,24,76)
+        struct.pack_into('<2i',raw,24,0,0)
+        struct.pack_into('<2i',raw,76,30,15)
+        raw[24+40]=0;raw[76+40]=4
+        self.assertEqual(tile_surfaces(raw,0),{(0,0):0,(1,0):4})
+        self.assertEqual(tile_surfaces(raw,1),{(-1,0):-4,(0,0):0})
+        raw[76+42]=1
+        self.assertIsNone(tile_surfaces(raw,0),'A ramp stamp cannot be fitted to horizontal planes')
+        raw[76+42]=0
+        # A clipped sort position above a flat road must not grow a fin.
+        # A visible cap in the next block returns to that plane, while the
+        # vertical face below the edge retains its reconstructed height.
+        for planes,u,h,v,expected in [
+            ({(0,0):0},.4,1.43,.6,1/30),
+            ({(0,0):0,(1,0):4},.75,3,.25,4),
+            ({(0,0):0,(1,0):4},.75,2,.75,2),
+        ]:
+            u,h,v = np.array([u]),np.array([h]),np.array([v])
+            a,b,c = fit_relief_surfaces(u,h,v,planes)
+            np.testing.assert_allclose(b,expected)
+            np.testing.assert_allclose(a-c,u-v,atol=1e-6)
+            np.testing.assert_allclose(a+c-b,u+v-h,atol=1e-6)
+        # Corrupt/unsupported header geometry leaves the depth-only fallback.
+        struct.pack_into('<i',raw,76,31)
+        self.assertIsNone(tile_surfaces(raw,0))
+
+    def test_high_bridge_art_outside_movement_flags_is_retained(self):
+        from realmap_bridges import initialize,sprite_frame
+        from realmap_resources import resources
+        res=resources('yr');theater=res.theater('URBAN');theater['effectiveRules']=res.rules
+        for name,index,frame in [('BRIDGE1',24,0),('BRIDGE2',25,9),('BRIDGEB1',237,0),('BRIDGEB2',238,9)]:
+            lookup={(x,y):dict(x=x,y=y,level=0,slope=0,overlay=255,overlayName=None,overlayData=0)
+                    for x in range(16,25) for y in range(16,25)}
+            source=lookup[20,20];source.update(overlay=index,overlayName=name,overlayData=frame)
+            initialize(lookup)
+            before=repr(lookup)
+            records=[dict(c,corners=RAMPS[0],decorations=[]) for c in lookup.values()]
+            images=[]
+            def put(image):images.append(image);return len(images)-1
+            missing=set();add_bridge_layers(records,lookup,res,theater,put,missing)
+            self.assertFalse(missing)
+            from realmap_sprites import sprite_spec,shp_frame
+            raw,pal,offset,_=sprite_spec(name,True,sprite_frame(source),res,theater)
+            sprite=shp_frame(raw,sprite_frame(source),pal)
+            outside=0
+            for c in records:
+                expected=overlay_pixels(sprite,offset,source,c,4,RAMPS[0])
+                expected[expected[:,:,3]==0]=0
+                layers=[d for d in c['decorations'] if d.get('bridge')=='high']
+                if expected[:,:,3].any():
+                    self.assertEqual(len(layers),1,(name,c['x'],c['y']))
+                    np.testing.assert_array_equal(np.asarray(images[layers[0]['texture']]),expected)
+                    outside+=not bool(c['bridge'])
+                else:self.assertFalse(layers)
+            self.assertGreater(outside,0,'Rail art must extend past the movement footprint')
+            self.assertEqual(repr(lookup),before,'Art footprint must not extend gameplay bridge flags')
+
     def test_nearest_texel_matches_exhaustive_search(self):
         rng = np.random.default_rng(713)
         for density in (0, .02, .4, 1):

@@ -20,7 +20,7 @@ from realmap_bridges import HIGH_NAMES, sprite_frame
 from terrain_depth import relief_mesh
 
 LOCK = threading.Lock()
-VERSION = 4
+VERSION = 5
 # Top/right/bottom/left height deltas, as documented by FA2SPHE's RampTypes.
 # These are visual vertex offsets only; Cell.Level still drives the cliff test.
 RAMPS = [(0,0,0,0), (0,1,1,0), (0,0,1,1), (1,0,0,1), (1,1,0,0),
@@ -186,6 +186,7 @@ def add_bridge_layers(records, lookup, res, theater, put_texture, missing):
         if not bbox: continue
         deck = 4 if kind=='high' else 0
         level = source['level']+deck
+        cross = (('x',source['x']) if name.endswith('2') else ('y',source['y'])) if kind=='high' else None
         # Inverse the original isometric projection at the bridge's own level.
         xs = [(p-image.width//2)/60 for p in (bbox[0],bbox[2])]
         ys = [(p+offset-image.height//2+15*deck)/30 for p in (bbox[1],bbox[3])]
@@ -197,9 +198,12 @@ def add_bridge_layers(records, lookup, res, theater, put_texture, missing):
             for cx in range(left,right+1):
                 c = region.get((cx,cy))
                 if not c: continue
-                bridge = c.get('bridge') or {}
                 if kind=='high':
-                    if bridge.get('kind')!='high' or bridge.get('deckLevel')!=level: continue
+                    # Engine deck flags cover movement cells, not the SHP's
+                    # complete silhouette. Rail pixels extend beyond them.
+                    # Keep the full original footprint at its owner's deck
+                    # height, while higher terrain still hides that surface.
+                    if c['level']>level: continue
                     corners = RAMPS[0]
                 else:
                     if c['level']!=level: continue
@@ -207,14 +211,15 @@ def add_bridge_layers(records, lookup, res, theater, put_texture, missing):
                 pixels = overlay_pixels(image,offset,source,c,level,corners)
                 visible = pixels[:,:,3]!=0
                 if not visible.any(): continue
-                layer = layers.setdefault((cx,cy,kind,level),
+                layer = layers.setdefault((cx,cy,kind,level,cross),
                     dict(pixels=np.zeros((64,64,4),dtype=np.uint8),sources=[]))
                 layer['pixels'][visible] = pixels[visible]
                 layer['sources'].append(dict(x=source['x'],y=source['y'],name=name,frame=frame))
-    for (cx,cy,kind,level),layer in layers.items():
+    for (cx,cy,kind,level,cross),layer in layers.items():
         region[cx,cy]['decorations'].append(dict(
             texture=put_texture(Image.fromarray(layer['pixels'])),flat=True,
-            bridge=kind,level=level,sources=layer['sources']))
+            bridge=kind,level=level,sources=layer['sources'],
+            **(dict(span=dict(axis=cross[0],origin=cross[1],minimum=-2,maximum=2)) if cross else {})))
 
 
 def build_patch(report, lookup, path, x, y, radius):

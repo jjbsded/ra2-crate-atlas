@@ -7,6 +7,11 @@
  function viewHalfSize(radius,zoom,width,heightPx){const size=radius*1.15+2,horizontal=(2*radius+1)*Math.SQRT2/2+1;return Math.max(size*.68,horizontal/(Math.max(1,width)/Math.max(1,heightPx)))/zoom;}
  function height(c,u,v){const[a,b,d,e]=c.corners||[0,0,0,0];return c.level+a*(1-u)*(1-v)+b*u*(1-v)+d*u*v+e*(1-u)*v;}
  function decorationSurface(c,d){return d.bridge==='high'?{...c,level:d.level,slope:0,corners:[0,0,0,0]}:c;}
+ function bridgeFold(c,d,u,v){
+  if(d.bridge!=='high'||!d.span)return 0;
+  const s=d.span,p=(s.axis==='x'?c.x+u:c.y+v)-s.origin;
+  return Math.max(s.minimum,Math.min(s.maximum,p))-p;
+ }
  function relationships(c,lookup){return {higher:(c.higher||[]).map(([x,y])=>lookup.get(`${x},${y}`)).filter(Boolean),affected:(c.affected||[]).map(([x,y])=>lookup.get(`${x},${y}`)).filter(Boolean)};}
  function probabilityCells(cells,{display,lookup,options}){
   return cells.flatMap(c=>{
@@ -114,9 +119,9 @@
    try{
     await Promise.all(Object.entries(data.textures).map(([id,url])=>new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>{if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();};im.onerror=()=>reject(Error(_t('部分地形贴图无法解码')));im.src=url;})));
     if(ticket!==revision){dispose();return null;}
-    function surface(c,mat,offset=0,inset=0){
+    function surface(c,mat,offset=0,inset=0,warp=null){
      const positions=[],uv=[],indices=[],n=c.slope?6:1;
-     for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){const u=inset+(1-2*inset)*i/n,v=inset+(1-2*inset)*j/n;positions.push(...point(c,u,v,offset).toArray());uv.push(u,1-v);}
+     for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){const u=inset+(1-2*inset)*i/n,v=inset+(1-2*inset)*j/n,p=point(c,u,v,offset);if(warp)warp(p,u,v);positions.push(...p.toArray());uv.push(u,1-v);}
      for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=j*(n+1)+i,b=a+1,d=a+n+1,e=d+1;indices.push(a,d,b,b,d,e);}
      const g=geometry(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();return new T.Mesh(g,mat);
     }
@@ -163,7 +168,11 @@
      }
      for(const d of c.decorations){
       if(d.flat){
-       const mesh=surface(decorationSurface(c,d),material({map:textures[d.texture],transparent:true,alphaTest:.05,depthWrite:!!d.bridge,side:T.DoubleSide}),d.bridge ? .018 : .012);
+       // Fold art beyond the deck's lateral edge down its side instead of
+       // stretching the fascia flat over the water. Move along the original
+       // camera ray so its game-view projection and texture anchor stay fixed.
+       const warp=d.bridge==='high'&&d.span?(p,u,v)=>{const delta=bridgeFold(c,d,u,v);p.x+=delta;p.z+=delta;p.y+=2*delta*H;}:null;
+       const mesh=surface(decorationSurface(c,d),material({map:textures[d.texture],transparent:true,alphaTest:.05,depthWrite:!!d.bridge,side:T.DoubleSide}),d.bridge ? .018 : .012,0,warp);
        decor.add(mesh);
        if(d.bridge==='high'){mesh.userData.cell=c;pickables.push(mesh);}
       }
@@ -267,5 +276,5 @@
   }
   return {open:show,select(c){if(dialog.open)view?.select(c);},close(){if(dialog.open)dialog.close();},dispose:close};
  }
- const api={create,height,decorationSurface,viewHalfSize,relationships,riskCategory,description,probabilityCells};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.CrateTerrain3D=api;
+ const api={create,height,decorationSurface,bridgeFold,viewHalfSize,relationships,riskCategory,description,probabilityCells};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.CrateTerrain3D=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

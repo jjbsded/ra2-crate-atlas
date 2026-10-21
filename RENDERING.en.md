@@ -52,6 +52,12 @@ Void transfer origins with no actual terrain borrow the nearest real edge cell's
 
 ## Auditing and refreshing results
 
+Render version 11 fixes bridge piers covering high decks. Previously, a TMP extension's road, parapet and descending face shared one raised occlusion height. Terrain pixels now compare against the actual `level+4` deck using the original TMP Z data and image offset: `tile level + (29 - Z - local pixel Y) / 15`. Faces below the deck cannot erase it; foreground pixels at or above deck level still occlude it. Only opaque pixels participate. Missing or corrupt depth retains the conservative fallback; low bridges and object ordering remain separate.
+
+Depth decoding is shared with the 3D relief and cached per tile, without another full-map depth buffer. Main view, minimap and image exports share the corrected raster. These visual depths never change probability, movement, saved cell levels or picking contours. `verify-bridge-render.py` covers RA2 and YR, urban/snow/temperate theaters, road/wood bridges in both directions, raised foreground, transparency, clipping and invalid-depth fallback.
+
+Render version 12 makes high decks occlude ground shadows. With no explicit `DrawFlat=no`, their rules previously classified them as flat overlays, allowing neighboring spans' ground shadows to darken a deck during final compositing. Opaque high-bridge artwork now writes the solid shadow-occlusion mask; original shadows remain on the ground underneath. Continuous-span regressions verify both an undarkened deck and retained ground shadows for both directions, road/wood bridges, and RA2/YR.
+
 New analyses preserve the uploaded bytes as `source.map`. `python realmap_render.py output/<result>/result.json` upgrades drawing only with a matching source hash; reimport old reports lacking the source. A same-named but modified map is not an acceptable substitute. `render-audit.json` records files, frames, palettes, offsets and clipping counts. Current synthetic and native rendering checks are described in [architecture](ARCHITECTURE.en.md); older `verify-realmap-render` / shadow reports referenced in research notes are local historical evidence.
 
 # Static object layer, version 4
@@ -143,6 +149,15 @@ separate surfaces at the saved `deckLevel`, with water/ground retained below.
 Bridge geometry stays fixed when the camera rotates, and the decorations toggle
 also hides bridges. Railings and piers remain painted artwork, not reconstructed
 volumes. Cliff markers and crate previews still inspect the ground layer.
+
+Patch format 5 separates the high-bridge artwork footprint from movement flags.
+Rail and side pixels outside those cells are retained without adding gameplay
+bridge flags. Side artwork folds down at the deck's lateral edge along the
+original camera ray, preserving its game-view projection. TMP relief uses the
+whole stamp's declared block positions and heights to recover visible flat caps
+instead of turning clipped sorting Z values into triangular fins. Transparent
+contours and original projected pixels are retained; walls and ramps keep their
+own reconstruction. The bundled elevation demo is regenerated with this model.
 
 ## Region editing and rendering caches
 

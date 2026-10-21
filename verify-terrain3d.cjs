@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {height,decorationSurface,viewHalfSize,relationships,riskCategory,description,probabilityCells}=require('./terrain3d.js');
+const {height,decorationSurface,bridgeFold,viewHalfSize,relationships,riskCategory,description,probabilityCells}=require('./terrain3d.js');
 const low={x:99,y:105,level:2,corners:[0,0,0,0],land:7,postLand:3,marked:true,higher:[[98,106,6]],affected:[]};
 const high={x:98,y:106,level:6,corners:[0,0,0,0],land:3,higher:[],affected:[[99,105,2]]};
 const lookup=new Map([['99,105',low],['98,106',high]]),original=JSON.stringify([...lookup]);
@@ -9,6 +9,16 @@ assert.equal(height(low,.5,.5),2,'bridge geometry must not raise the underlying 
 assert.deepEqual(deck.corners,[0,0,0,0]);
 assert.equal(decorationSurface(low,{bridge:'low',level:2}),low);
 assert.equal(decorationSurface(low,{flat:true}),low);
+for(const axis of ['x','y']){
+ const c={x:23,y:23},d={bridge:'high',span:{axis,origin:20,minimum:-2,maximum:2}};
+ const delta=bridgeFold(c,d,.5,.5);
+ assert.equal(delta,-1.5);
+ const u=.5,v=.5,h=4;
+ assert.equal(u+delta-(v+delta),u-v,'side fold preserves projected X');
+ assert.equal(u+delta+v+delta-(h+2*delta),u+v-h,'side fold preserves projected Y');
+ assert.equal(bridgeFold({x:20,y:20},d,.5,.5),0,'road deck remains planar');
+}
+assert.equal(bridgeFold(low,{bridge:'high'},.5,.5),0,'older static teaching data stays readable');
 assert.deepEqual(relationships(low,lookup),{higher:[high],affected:[]});
 assert.deepEqual(relationships(high,lookup),{higher:[],affected:[low]});
 assert.deepEqual(relationships(low,new Map()),{higher:[],affected:[]});
