@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),{create}=require('./mineral-layouts.js');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
-const entry=(url,enabled,source='map-a')=>({url,data:{metadata:{mineralsEnabled:enabled,sourceSha256:source,version:'yr'}},im:{decoded:true}});
+const entry=(url,enabled,source='map-a')=>({url,data:{metadata:{mineralsEnabled:enabled,treesEnabled:enabled,terrainRemovalVersion:1,sourceSha256:source,version:'yr'}},im:{decoded:true}});
 function harness(){
  const requests=[],reads=[];
  const cache=create({request:(url,options)=>{const d=deferred();requests.push({...d,url,options});return d.promise;},
@@ -48,5 +48,10 @@ async function main(){
  requests.shift().resolve({url:'/c/off'});await settle();reads.shift().resolve(entry('/c/off',false,'map-c'));await c;
  assert.equal(cache.has(false),true);
  console.log('PASS: changing map isolates late completions and releases the old layout pair.');
+ const legacy=entry('/legacy/off',false);delete legacy.data.metadata.treesEnabled;delete legacy.data.metadata.terrainRemovalVersion;
+ cache.use(legacy,{reset:true});assert.equal(cache.has(false),false,'Legacy ore-only results cannot enter the combined cache');
+ const upgrade=cache.get(false),legacyRejected=assert.rejects(upgrade,/不匹配/);
+ requests.shift().resolve({url:legacy.url});await settle();reads.shift().resolve(legacy);await legacyRejected;
+ console.log('PASS: old ore-only OFF results are rejected, including direct legacy links.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

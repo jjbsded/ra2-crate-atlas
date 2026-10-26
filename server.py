@@ -113,6 +113,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json({**resource_store.status(), 'mod': mod_status()})
             except ValueError as error:
                 return self.json({'error': str(error)}, 400)
+        if route.path == '/api/maps/region-navigation':
+            try:
+                from region_navigation import get
+                return self.json(get(parse_qs(route.query).get('result', [''])[0]))
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                return self.json({'error': str(error)}, 400)
         if route.path == '/api/maps/terrain3d':
             try:
                 from realmap_3d import patch

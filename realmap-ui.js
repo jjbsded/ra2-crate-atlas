@@ -6,18 +6,19 @@
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const $=id=>document.getElementById(id), canvas=$('map'), ctx=canvas.getContext('2d');
- const area={x:24,y:70,w:1552,h:820}, W=1600,H=1050;
+ const platform=globalThis.CrateMapPlatform;
+ const area={x:24,y:70,w:1552,h:820};let W=1600,H=1050,pixelRatio=1,compact=false;
  const occupancy=CrateOccupancyOverlay;
  const minimap=CrateMinimap;
  let selectionRevision=0,selectionKeyboard=null;
  const state={data:null,image:null,cells:[],lookup:new Map(),selected:null,scale:1,x:0,y:0,drag:null,baseUrl:'',busy:false,visible:0,scheduled:false};
- const readResult=CrateMapResults.createReader(),resultLoader=CrateMapResults.createLoader(readResult);
- const mineralLayouts=CrateMineralLayouts.create({request:(...args)=>CrateLocalAPI.json(...args),read:readResult});
+ const readResult=CrateMapResults.createReader(platform?{readJSON:platform.readJSON,readBinary:platform.readBinary}:{}),resultLoader=CrateMapResults.createLoader(readResult);
+ const mineralLayouts=CrateMineralLayouts.create({request:(...args)=>CrateLocalAPI.json(...args),read:readResult,load:platform?.minerals});
  let mineralIdleTimer=null,mineralIdleCallback=null,mineralToastTimer=null;
  function cancelMineralPreload(){clearTimeout(mineralIdleTimer);if(mineralIdleCallback!==null)window.cancelIdleCallback?.(mineralIdleCallback);mineralIdleCallback=null;}
  function scheduleMineralPreload(delay=2200){
   cancelMineralPreload();
-  if(!state.data||state.busy||document.hidden)return;
+  if(platform?.preload===false||!state.data||state.busy||document.hidden)return;
   const data=state.data,target=data.metadata.mineralsEnabled===false;
   if(mineralLayouts.has(target)||mineralLayouts.pending(target))return;
   mineralIdleTimer=setTimeout(()=>{
@@ -42,7 +43,7 @@
   if($('mineralToastDetail').textContent!==detail)$('mineralToastDetail').textContent=detail;
   if(kind!=='loading')mineralToastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:1800);
  }
- const terrain3d=CrateTerrain3D.create({getContext:()=>state.selected?{cell:state.selected,result:state.baseUrl+'result.json',probability:state.data.metadata.previewOnly?null:{display,lookup:state.lookup,options:mapOptions()}}:null,onSelect:(x,y)=>{const c=state.lookup.get(`${x},${y}`);if(c)select(c);}});
+ const terrain3d=platform?.terrain3d===false?{open(){},close(){},select(){}}:CrateTerrain3D.create({loadPatch:platform?.terrain3dPatch,getContext:()=>state.selected?{cell:state.selected,data:state.data,result:state.baseUrl+'result.json',probability:state.data.metadata.previewOnly?null:{display,lookup:state.lookup,options:mapOptions()}}:null,onSelect:(x,y)=>{const c=state.lookup.get(`${x},${y}`);if(c)select(c);}});
  $('terrain3dOpen').onclick=()=>terrain3d.open();
  const details=CrateMapDetails.create();
  const {previewLabel,failurePercent}=CrateMapDetails;
@@ -50,7 +51,11 @@
  const miniState={position:null,minimized:false};let miniToggleBox=null;
  const mapViewCache=CrateMapRenderer.createViewCache(),miniArtwork=new WeakMap();
  let controlsKey='',legendCache=null;
- const regions=CrateRegionStatisticsUI.create({getState:()=>state,getDisplay:()=>display,schedule,pick,area,onMode:enabled=>{if(enabled){deselect();$('heatmap').checked=$('values').checked=false;}syncProbabilityToggle();}});
+ const regions=CrateRegionStatisticsUI.create({getState:()=>state,getDisplay:()=>display,schedule,pick,area,onMode:enabled=>{
+  if(enabled)deselect();
+  $('heatmap').checked=$('values').checked=!enabled&&!state.data?.metadata.previewOnly;
+  syncProbabilityToggle();
+ }});
  function syncProbabilityToggle(){
   const heat=!$('heatmap').disabled&&$('heatmap').checked,values=!$('values').disabled&&$('values').checked,mixed=heat!==values;
   $('probabilityToggle').textContent=_t('概率:')+(mixed?_t('混合'):heat?_t('开'):_t('关'));
@@ -60,17 +65,20 @@
  $('probabilityToggle').onclick=()=>{const enabled=!($('heatmap').checked&&$('values').checked);$('heatmap').checked=$('values').checked=enabled;syncProbabilityToggle();schedule();};
  function syncMineralToggle(){
   const enabled=state.data?.metadata.mineralsEnabled!==false;
-  $('mineralToggle').textContent=_t('矿石:')+(enabled?_t('开'):_t('关'));
-  $('mineralToggle').setAttribute('aria-pressed',String(enabled));
+  const mixed=!enabled&&state.data?.metadata.treesEnabled!==false;
+  $('mineralToggle').textContent=_t('矿石/树木:')+(mixed?_t('混合'):enabled?_t('开'):_t('关'));
+  $('mineralToggle').setAttribute('aria-pressed',mixed?'mixed':String(enabled));
   $('mineralToggle').disabled=!state.data||state.busy;
-  $('mineralStatus').textContent=enabled?'':state.data?.metadata.previewOnly?_t('矿石已关闭：矿石／宝石已从当前预览布局移除，3D 和导出同步；概率仍未计算。矿石钻井保留，不模拟后续生长。'):_t('矿石已关闭：矿石／宝石已从当前布局移除，概率、区域统计、3D 和导出均使用此布局；矿石钻井保留，不模拟后续生长。');
+  $('mineralStatus').textContent=enabled?'':state.data?.metadata.previewOnly?_t('矿石/树木已关闭：预置矿石／宝石和树木已移除，3D 和导出同步；概率仍未计算。矿石钻井及其他地形物保留，不模拟后续生长。'):_t('矿石/树木已关闭：预置矿石／宝石和树木已移除，概率、来源、区域统计、3D 和导出均使用此布局；矿石钻井及其他地形物保留，不模拟后续生长。');
   $('mineralStatus').hidden=enabled;
+  if(platform&&!enabled)$('mineralStatus').textContent=_t('矿石/树木已关闭：已载入无矿石、无树木布局，来源、区域统计及图片导出均使用对应概率。');
+  if(mixed)$('mineralStatus').textContent=_t('旧版布局仅移除了矿石，树木仍保留；点击“矿石/树木”可重新计算完整关闭状态。');
  }
  function setBusy(value){
   _i18n?.setBusy('analysis',value);
   if(value)cancelMineralPreload();
   state.busy=value;$('loadHeck').disabled=$('mapFile').disabled=value;$('progress').hidden=!value;
-  CrateResourceUI.setAnalyzing(value);
+  globalThis.CrateResourceUI?.setAnalyzing(value);
   $('retryMod').disabled=value;
   $('resourcesOpen').disabled=$('version').disabled=value;
   $('reanalyzeResources').disabled=value||!state.data;
@@ -82,9 +90,9 @@
  const jobResult=job=>CrateLocalAPI.waitForMapJob(job,{onProgress:status=>{message(status.message);$('progress').value=status.progress;}});
  $('mineralToggle').onclick=async()=>{
   if(state.busy||!state.data)return;
-  const enabled=state.data.metadata.mineralsEnabled===false;
-  const label=enabled?_t('有矿石'):_t('无矿石');
-  setBusy(true);message('',true);message(_t`正在切换为${enabled?_t('有矿石'):_t('无矿石')}布局，完成后同步更新${state.data.metadata.previewOnly?_t('预览画面'):_t('画面与概率')}…`);
+  const enabled=state.data.metadata.mineralsEnabled===false&&state.data.metadata.treesEnabled===false;
+  const label=enabled?_t('有矿石和树木'):_t('无矿石、无树木');
+  setBusy(true);message('',true);message(_t`正在切换为${enabled?_t('有矿石和树木'):_t('无矿石、无树木')}布局，完成后同步更新${state.data.metadata.previewOnly?_t('预览画面'):_t('画面与概率')}…`);
   mineralToast(_t`正在切换为${label}布局…`,_t('正在加载，当前画面暂时保留'));
   try{
    // Let the toast paint even when an already-decoded result is ready.
@@ -95,7 +103,7 @@
    });
    await loadResult(prepared.url,true,{preserveView:true,prepared});
    mineralToast(_t`已切换为${label}布局`,state.data.metadata.previewOnly?_t('地图预览已同步'):_t('地图与概率已同步'),'success');
-  }catch(error){message(error.message,true);message(_t('矿石状态未切换；保留原布局和概率，可重试。'));mineralToast(_t('切换未完成，已保留原布局'),error.message,'error');}
+  }catch(error){message(error.message,true);message(_t('矿石/树木状态未切换；保留原布局和概率，可重试。'));mineralToast(_t('切换未完成，已保留原布局'),error.message,'error');}
   finally{setBusy(false);}
  };
  for(const id of ['heatmap','values'])$(id).addEventListener('change',syncProbabilityToggle);
@@ -120,8 +128,8 @@
  function pointInRing(x,y,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){
   const[a,b]=ring[i],[u,v]=ring[j];if((b>y)!==(v>y)&&x<(u-a)*(y-b)/(v-b)+a)inside=!inside;}return inside;}
  function pointOnSurface(c,x,y){let inside=false;for(const ring of surface(c))if(pointInRing(x-c.px,y-c.py,ring))inside=!inside;return inside;}
- function miniLayout(){return state.data&&$('minimap').checked?minimap.layout(state.data.rendering,area,miniState):null;}
- function setMinimap(enabled){$('minimap').checked=enabled;if(enabled){miniState.position=null;miniState.minimized=false;}schedule();}
+ function miniLayout(){return state.data&&$('minimap').checked?minimap.layout(state.data.rendering,area,{...miniState,compact}):null;}
+ function setMinimap(enabled){$('minimap').checked=enabled;$('webNavigator')?.setAttribute('aria-pressed',String(enabled));if(enabled){miniState.position=null;miniState.minimized=false;}schedule();}
  function canvasButton(box,label,active=false,disabled=false){
   ctx.fillStyle=disabled?'#11212b':active?'#2b4351':'#192c38';ctx.strokeStyle=disabled?'#293d4b':active?'#d8b66d':'#567184';ctx.lineWidth=1;
   ctx.beginPath();ctx.roundRect(box.x,box.y,box.w,box.h,5);ctx.fill();ctx.stroke();
@@ -132,7 +140,7 @@
   const scale=Math.min(rect.width/W,rect.height/H),x=rect.left-hr.left-host.clientLeft+(rect.width-W*scale)/2,y=rect.top-hr.top-host.clientTop+(rect.height-H*scale)/2;
   const key=JSON.stringify([x,y,scale,m?.x,m?.y,m?.w,m?.h,m?.minimized,miniToggleBox,state.selected?.x,state.selected?.y,state.baseUrl]);
   if(key===controlsKey)return;controlsKey=key;
-  const controls=[['minimapToggle',miniToggleBox],['minimapMinimize',m?.buttons.minimize],['minimapClose',m?.buttons.close],['navCenter',m?.buttons.center],...minimap.directions.map(d=>['nav'+d.id,m?.navigation?.find(n=>n.id===d.id).box])];
+  const controls=[['minimapToggle',miniToggleBox],['minimapMinimize',m?.buttons.minimize],['minimapClose',m?.buttons.close],['navCenter',m?.buttons.center],...minimap.directions.map(d=>['nav'+d.id,m?.navigation?.find(n=>n.id===d.id)?.box])];
   for(const[id,box]of controls){
    const button=$(id);button.hidden=!box;if(box)Object.assign(button.style,{left:x+box.x*scale+'px',top:y+box.y*scale+'px',width:box.w*scale+'px',height:box.h*scale+'px'});
   }
@@ -145,17 +153,18 @@
  function drawMinimap(){
   const m=miniLayout();syncCanvasControls(m);if(!m)return;
   const r=state.data.rendering,im=m.image;ctx.save();ctx.beginPath();ctx.roundRect(m.x,m.y,m.w,m.h,9);ctx.fillStyle='rgba(10,24,34,.96)';ctx.fill();ctx.strokeStyle='#567180';ctx.lineWidth=1;ctx.stroke();
-  if(!m.minimized)text(_t('地图导航 · 拖动移动'),m.x+10,m.y+23,'#dbe9f2',13);
+  if(!m.minimized)text(compact?_t('地图导航'):_t('地图导航 · 拖动移动'),m.x+10,m.y+(compact?29:23),'#dbe9f2',13,'left',m.w-(compact?96:20));
   canvasButton(m.buttons.minimize,m.minimized?'□':'−');canvasButton(m.buttons.close,'×');
   if(m.minimized){ctx.restore();return;}
   const artwork=$('objects').checked&&state.objectImage?state.objectImage:state.image;
-  let small=miniArtwork.get(artwork);if(!small){small=document.createElement('canvas');small.width=Math.ceil(im.w);small.height=Math.ceil(im.h);small.getContext('2d').drawImage(artwork,0,0,small.width,small.height);miniArtwork.set(artwork,small);}
+  let small=miniArtwork.get(artwork);if(!small){small=document.createElement('canvas');small.width=Math.ceil(im.w);small.height=Math.ceil(im.h);CrateMapArtwork.draw(small.getContext('2d'),artwork,0,0,small.width,small.height);miniArtwork.set(artwork,small);}
   ctx.drawImage(small,im.x,im.y,im.w,im.h);
   regions.minimap(ctx,im);
   for(const [coords,enabled,color]of [[state.data.markers,$('markers').checked,'#ff77c6'],[state.data.potentialMarkers||[],$('potentialMarkers').checked,'#ed9dca']])if(enabled){ctx.fillStyle=color;for(const p of coords){const c=state.lookup.get(p.join(','));ctx.fillRect(im.x+c.px*im.scale-1.5,im.y+c.py*im.scale-1.5,3,3);}}
   const v=minimap.viewport(m,area,state,r);if(v){ctx.fillStyle='rgba(255,255,255,.12)';ctx.fillRect(v.x,v.y,v.w,v.h);ctx.strokeStyle='#0b1720';ctx.lineWidth=4;ctx.strokeRect(v.x,v.y,v.w,v.h);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(v.x,v.y,v.w,v.h);}
   if(state.selected){ctx.beginPath();ctx.arc(im.x+state.selected.px*im.scale,im.y+state.selected.py*im.scale,3,0,Math.PI*2);ctx.fillStyle='#ffe18f';ctx.fill();ctx.strokeStyle='#332916';ctx.lineWidth=1;ctx.stroke();}
-  if($('players').checked)CratePlayerStarts.draw(ctx,state,im,{radius:8,clip:im});
+  if($('players').checked)CratePlayerStarts.draw(ctx,state,im,{radius:8,clip:im,regionStyles:regions.playerStyles()});
+  if(compact){ctx.restore();return;}
   ctx.beginPath();ctx.moveTo(m.x+12,m.y+195);ctx.lineTo(m.x+m.w-12,m.y+195);ctx.strokeStyle='#2c4453';ctx.lineWidth=1;ctx.stroke();
   text(_t('移动选中格'),m.x+14,m.y+225,'#c9dbe7',13);
   text(state.selected?`(${state.selected.x}, ${state.selected.y})`:_t('未选择'),m.x+14,m.y+251,state.selected?'#ffe0a0':'#849eae',15);
@@ -171,7 +180,7 @@
   for(const key of ['heatmap','blocked','objects','grid','potentialMarkers','markers','coords','values','baselineValues','players'])options[key]=$(key).checked;
   if(state.data?.metadata.previewOnly)for(const key of ['heatmap','values','baselineValues','markers','potentialMarkers'])options[key]=false;
   if(state.data?.metadata.approximate)options.markers=options.potentialMarkers=false;
-  if(regions.active)options.regionLayer=snapshotRegions?regions.snapshotLayer():(ctx,view,cells)=>regions.render(ctx,view,cells);
+  if(regions.active){options.regionLayer=snapshotRegions?regions.snapshotLayer():(ctx,view,cells)=>regions.render(ctx,view,cells);options.regionLabels=snapshotRegions?options.regionLayer.labels:regions.labels;options.playerRegionStyles=regions.playerStyles();}
   return options;
  }
  function drawRegionHover(){
@@ -197,11 +206,20 @@
   });ctx.restore();
  }
  function draw(){
+  ctx.setTransform(pixelRatio,0,0,pixelRatio,0,0);
   ctx.clearRect(0,0,W,H);ctx.fillStyle='#101c25';ctx.fillRect(0,0,W,H);if(!state.data)return;
+  if(compact){
+   const result=mapViewCache.render(ctx,state,area,display,mapOptions());miniToggleBox=null;drawMinimap();state.visible=result.colored;
+   const info=$('mobileMapInfo');
+   if(info){const c=state.selected,name=_i18n?.mapName(state.data.metadata)||state.data.metadata.displayName||state.data.metadata.filename;
+    const value=name+(c?` · (${c.x}, ${c.y}) · ${fixed(multiplier(c))}×`:'')+(state.incoming?_t` · ${state.incoming.sources.length} 个转入起点`:'');
+    if(info.textContent!==value)info.textContent=value;}
+   return;
+  }
   const d=state.data,p=d.probability,r=d.rendering;
   const metadataText=`${d.metadata.size[2]} × ${d.metadata.size[3]} · ${d.metadata.theater} · ${d.metadata.previewOnly?previewLabel(d.metadata):d.metadata.approximate?_t('近似概率 · 不保证准确'):_t('随机帧精确平均')}`;
   ctx.font='16px "Microsoft YaHei",sans-serif';const toggleWidth=_i18n?.language==='en'?132:96;miniToggleBox={x:1574-ctx.measureText(metadataText).width-toggleWidth-22,y:13,w:toggleWidth,h:32};
-  ctx.save();ctx.beginPath();ctx.rect(24,0,miniToggleBox.x-42,60);ctx.clip();text((_i18n?.mapName(d.metadata)||d.metadata.displayName||d.metadata.filename)+(d.metadata.previewOnly?_t(' · 地图外观'):_t(' · 工具箱落点概率'))+(d.metadata.mineralsEnabled===false?_t(' · 无矿石'):''),26,34,'#edf3f7',23);ctx.restore();
+  ctx.save();ctx.beginPath();ctx.rect(24,0,miniToggleBox.x-42,60);ctx.clip();text((_i18n?.mapName(d.metadata)||d.metadata.displayName||d.metadata.filename)+(d.metadata.previewOnly?_t(' · 地图外观'):_t(' · 工具箱落点概率'))+(d.metadata.mineralsEnabled===false?_t(d.metadata.treesEnabled===false?' · 无矿石、无树木':' · 仅无矿石（旧版）'):''),26,34,'#edf3f7',23);ctx.restore();
   canvasButton(miniToggleBox,_t('地图导航'),$('minimap').checked);
   text(metadataText,1574,34,'#9fb6c7',16,'right');
   const options=mapOptions(),minimum=options.threshold;
@@ -257,25 +275,42 @@
  }
  function select(c){
   state.selected=c;$('gotoX').value=c.x;$('gotoY').value=c.y;$('selectedCoord').textContent=`${c.x}, ${c.y}`;
-  $('terrain3dOpen').disabled=false;$('terrain3dOpen').title=_t`以 (${c.x}, ${c.y}) 为中心查看附近地形`;terrain3d.select(c);
+  $('terrain3dOpen').disabled=platform?.terrain3d===false;$('terrain3dOpen').title=_t`以 (${c.x}, ${c.y}) 为中心查看附近地形`;terrain3d.select(c);
   showSources(c);
   details.cell(c,state.data,display);schedule();
  }
  function pointer(e){const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/W,r.height/H);return{x:(e.clientX-r.left-(r.width-W*scale)/2)/scale,y:(e.clientY-r.top-(r.height-H*scale)/2)/scale};}
+ let touchBrush=true,touchGesture=null,touchSuppressed=false;const touches=new Map();
+ function touchPair(){const [a,b]=[...touches.values()].slice(0,2);return a&&b?{x:(a.x+b.x)/2,y:(a.y+b.y)/2,distance:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y))}:null;}
+ function startPinch(){const p=touchPair();if(!p)return;regions.cancel();regions.leave();state.drag=null;touchSuppressed=true;touchGesture={...p,scale:state.scale,mapX:(p.x-state.x)/state.scale,mapY:(p.y-state.y)/state.scale};}
+ if(platform){
+  const button=document.createElement('button');button.id='touchMode';button.type='button';button.textContent=_t('触控：画笔');button.setAttribute('aria-pressed','true');
+  button.onclick=()=>{touchBrush=!touchBrush;regions.cancel();button.textContent=_t(touchBrush?'触控：画笔':'触控：移动');button.setAttribute('aria-pressed',String(touchBrush));};$('regionToolbar').prepend(button);
+  const info=document.createElement('div');info.id='mobileMapInfo';info.setAttribute('role','status');info.setAttribute('aria-live','polite');$('canvasHost').append(info);
+ }
  function pick(pos){const x=(pos.x-state.x)/state.scale,y=(pos.y-state.y)/state.scale;
   const cells=state.spatialIndex?state.spatialIndex.query(x-65,y-130,x+65,y+130):state.cells;
   for(let i=cells.length-1;i>=0;i--){const c=cells[i];if(Math.abs(x-c.px)<=65&&Math.abs(y-c.py)<=130&&pointOnSurface(c,x,y))return c;}return null;}
  canvas.addEventListener('wheel',e=>{if(!state.data)return;e.preventDefault();if(regions.dragging)return;regions.leave();const p=pointer(e),m=miniLayout();if(m&&minimap.contains(m,p)||miniToggleBox&&minimap.contains(miniToggleBox,p))return;zoom(Math.exp(-e.deltaY*.0015),p.x,p.y);},{passive:false});
  canvas.addEventListener('contextmenu',e=>{if(state.data)e.preventDefault();});
  canvas.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch'&&state.data){
+   e.preventDefault();touches.set(e.pointerId,pointer(e));canvas.setPointerCapture(e.pointerId);
+   if(touches.size>=2){startPinch();return;}if(touchSuppressed)return;
+  }
   if(!state.data||state.drag||(e.button!==0&&e.button!==2))return;const p=pointer(e),m=miniLayout();let mode='map';
   if(m&&minimap.contains(m,p))mode=m.minimized||p.y<m.y+34?'panel':minimap.contains(m.image,p)?'overview':'chrome';
   else if(!minimap.contains(area,p))return;
-  if(mode==='map'){if(e.button===2)mode='pan';else if(regions.active){if(!e.altKey&&regions.down(p,e))mode='region';else mode='pan';}}
+  if(mode==='map'){if(e.button===2)mode='pan';else if(regions.active){if(!e.altKey&&!(e.pointerType==='touch'&&!touchBrush)&&regions.down(p,e))mode='region';else mode='pan';}}
   state.drag={...p,pointerId:e.pointerId,clientX:e.clientX,clientY:e.clientY,startX:state.x,startY:state.y,startMini:m,moved:false,mode};
   if(e.button===2)e.preventDefault();if(mode==='overview')miniPan(p);if(mode==='panel'||mode==='pan')canvas.style.cursor='grabbing';canvas.setPointerCapture(e.pointerId);
  });
  canvas.addEventListener('pointermove',e=>{
+  if(e.pointerType==='touch'&&touches.has(e.pointerId)){
+   touches.set(e.pointerId,pointer(e));
+   if(touchGesture){const p=touchPair();if(p){const scale=Math.max(.06,Math.min(6,touchGesture.scale*p.distance/touchGesture.distance));state.scale=scale;state.x=p.x-touchGesture.mapX*scale;state.y=p.y-touchGesture.mapY*scale;schedule();}return;}
+   if(touchSuppressed)return;
+  }
   const p=pointer(e),d=state.drag,m=miniLayout();if(d&&d.pointerId!==e.pointerId)return;
   if(!d){if(m&&minimap.contains(m,p))regions.leave();else regions.move(p,false,e);canvas.style.cursor=m&&minimap.contains(m,p)&&(m.minimized||p.y<m.y+34)?'grab':'crosshair';return;}
   if(d.mode==='region'){regions.move(p,!!m&&minimap.contains(m,p),e);return;}
@@ -283,11 +318,15 @@
   if(d.moved&&d.mode==='panel'){miniState.position=minimap.position(area,{x:d.startMini.x+p.x-d.x,y:d.startMini.y+p.y-d.y},m.w,m.h);schedule();}
   else if(d.moved&&(d.mode==='map'||d.mode==='pan')){regions.leave();state.x=d.startX+p.x-d.x;state.y=d.startY+p.y-d.y;schedule();}
  });
- canvas.addEventListener('pointerup',e=>{const d=state.drag;if(d&&d.pointerId!==e.pointerId)return;if(d?.mode==='region'){const p=pointer(e),m=miniLayout();regions.move(p,!!m&&minimap.contains(m,p),e);regions.up();}else if(e.button===0&&d?.mode==='map'&&!d.moved&&Math.hypot(e.clientX-d.clientX,e.clientY-d.clientY)<=4){const c=pick(pointer(e));if(c){if(c===state.selected)deselect();else select(c);}}state.drag=null;canvas.style.cursor='crosshair';if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
- canvas.addEventListener('pointercancel',()=>{regions.cancel();state.drag=null;canvas.style.cursor='crosshair';});
+ canvas.addEventListener('pointerup',e=>{
+  touches.delete(e.pointerId);
+  if(e.pointerType==='touch'&&touchSuppressed){touchGesture=null;if(!touches.size)touchSuppressed=false;state.drag=null;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);return;}
+  const d=state.drag;if(d&&d.pointerId!==e.pointerId)return;if(d?.mode==='region'){const p=pointer(e),m=miniLayout();regions.move(p,!!m&&minimap.contains(m,p),e);regions.up();}else if(e.button===0&&d?.mode==='map'&&!d.moved&&Math.hypot(e.clientX-d.clientX,e.clientY-d.clientY)<=4){const c=pick(pointer(e));if(c){if(c===state.selected)deselect();else select(c);}}state.drag=null;canvas.style.cursor='crosshair';if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+ });
+ canvas.addEventListener('pointercancel',()=>{touches.clear();touchGesture=null;touchSuppressed=false;regions.cancel();state.drag=null;canvas.style.cursor='crosshair';});
  canvas.addEventListener('lostpointercapture',()=>{regions.cancel();state.drag=null;});
  canvas.addEventListener('pointerleave',()=>regions.leave());
- window.addEventListener('blur',()=>{state.drag=null;});
+ window.addEventListener('blur',()=>{state.drag=null;touches.clear();touchGesture=null;touchSuppressed=false;});
  canvas.addEventListener('dblclick',e=>{if(regions.active)return;const p=pointer(e),m=miniLayout();if(!minimap.contains(area,p)||m&&minimap.contains(m,p))return;const c=pick(p);if(c)zoom(1.5,p.x,p.y);});
  $('minimapToggle').onclick=()=>setMinimap(!$('minimap').checked);
  $('minimapMinimize').onclick=()=>{miniState.minimized=!miniState.minimized;schedule();};
@@ -313,7 +352,25 @@
  document.addEventListener('focusin',e=>{if(!keyboardEnabled(e.target))selectionKeyboard.cancel();});
  window.addEventListener('blur',()=>selectionKeyboard.cancel());
  document.addEventListener('visibilitychange',()=>{if(document.hidden)selectionKeyboard.cancel();});
- new ResizeObserver(schedule).observe(canvas);
+ function resizeViewport(){
+  if(!platform){schedule();return;}
+  const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
+  const nextCompact=matchMedia('(max-width:760px), (pointer: coarse) and (max-width:1100px), (orientation:landscape) and (max-height:600px) and (max-width:1200px)').matches,nextW=nextCompact?Math.round(rect.width):1600,nextH=nextCompact?Math.round(rect.height):1050,ratio=nextCompact?Math.min(2,devicePixelRatio||1):1;
+  if(nextW===W&&nextH===H&&compact===nextCompact&&pixelRatio===ratio){schedule();return;}
+  const center=state.data?{x:(area.x+area.w/2-state.x)/state.scale,y:(area.y+area.h/2-state.y)/state.scale}:null;
+  const oldFit=state.data?Math.min(area.w/state.data.rendering.width,area.h/state.data.rendering.height):0;
+  const fitted=oldFit>0&&Math.abs(state.scale/oldFit-1)<.01;
+  W=nextW;H=nextH;compact=nextCompact;pixelRatio=ratio;canvas.width=Math.round(W*ratio);canvas.height=Math.round(H*ratio);
+  Object.assign(area,compact?{x:8,y:8,w:W-16,h:H-16}:{x:24,y:70,w:1552,h:820});miniState.position=null;controlsKey='';
+  if(center){
+   // A fitted overview follows the new viewport. Deliberately zoomed views keep
+   // their scale and center when rotating or opening/closing full-screen view.
+   if(fitted)state.scale=Math.min(area.w/state.data.rendering.width,area.h/state.data.rendering.height);
+   state.x=area.x+area.w/2-center.x*state.scale;state.y=area.y+area.h/2-center.y*state.scale;
+  }
+  schedule();
+ }
+ new ResizeObserver(resizeViewport).observe(canvas);
  $('fit').onclick=frame;$('zoomIn').onclick=()=>zoom(1.5);$('zoomOut').onclick=()=>zoom(1/1.5);
  $('goto').onclick=()=>{const c=state.lookup.get(`${Number($('gotoX').value)},${Number($('gotoY').value)}`);if(c){message('',true);if(regions.active){state.scale=Math.max(state.scale,2.5);centerCell(c);}else focus(c);}else message(_t('该坐标不在完整地图内。'),true);};
  for(const id of ['heatmap','palette','filter','markers','potentialMarkers','blocked','objects','coords','values','baselineValues','grid','players'])$(id).addEventListener('change',schedule);
@@ -346,21 +403,26 @@
    Object.assign(state,{x:previous.x,y:previous.y,scale:previous.scale});miniState.position=previous.position;miniState.minimized=previous.minimized;
    const c=previous.selected&&state.lookup.get(previous.selected.join(','));if(c)select(c);else deselect();schedule();
    if(previous.threeD&&c)terrain3d.open();
-  }else{frame();const c=state.lookup.get('99,105')||state.cells.find(c=>c.marked)||state.cells[Math.floor(state.cells.length/2)];select(c);}
+  }else{resizeViewport();frame();const c=state.lookup.get('99,105')||state.cells.find(c=>c.marked)||state.cells[Math.floor(state.cells.length/2)];select(c);}
   history.replaceState(null,'','maps.html?result='+encodeURIComponent(url));
-  if(data.metadata.previewOnly||data.metadata.approximate||!state.busy||fromJob)message(CrateMapDetails.completion(data));
-  window.CrateMapViewer={state,draw,focus,frame,loadResult,numerator,thresholdPass,display};
+  if(data.metadata.previewOnly||data.metadata.approximate||!state.busy||fromJob)message(platform?_t('预计算地图已加载')+' · '+(_i18n?.mapName(data.metadata)||data.metadata.displayName||data.metadata.filename)+' · '+(data.metadata.version==='ra2'?_t('原版'):_t('尤里')):CrateMapDetails.completion(data));
+  window.CrateMapViewer={state,draw,focus,frame,loadResult,numerator,thresholdPass,display,get area(){return area;}};
   mineralLayouts.use(prepared,{reset:!previous});scheduleMineralPreload();
  }
  async function analyze(file,official=null){
   if(state.busy)return;resultLoader.invalidate();setBusy(true);message('',true);message(_t('准备读取地图'));
-  try{const choice=official?.version||$('version').value;if(official){$('version').value=choice;$('version').dispatchEvent(new Event('change'));}const version=await CrateResourceUI.resolve(choice);if(!version){message(_t('请检查资源提示后重新开始分析。'));return;}const endpoint=official?'/api/maps/official?'+new URLSearchParams({version,id:official.id}):file?'/api/maps/analyze?version='+version+'&filename='+encodeURIComponent(file.name):'/api/maps/heck?version='+version;
+  try{if(platform){
+    if(!official)throw Error(_t('此地图版本不在当前预计算列表中。'));
+    message(_t('正在加载预计算地图…'));
+    await loadResult(await platform.official(official.id,official.version,state.data?.metadata.mineralsEnabled!==false),true);return;
+   }
+   const choice=official?.version||$('version').value;if(official){$('version').value=choice;$('version').dispatchEvent(new Event('change'));}const version=await CrateResourceUI.resolve(choice);if(!version){message(_t('请检查资源提示后重新开始分析。'));return;}const endpoint=official?'/api/maps/official?'+new URLSearchParams({version,id:official.id}):file?'/api/maps/analyze?version='+version+'&filename='+encodeURIComponent(file.name):'/api/maps/heck?version='+version;
    const job=await CrateLocalAPI.json(endpoint+'&minerals='+(state.data?.metadata.mineralsEnabled===false?'0':'1'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file||null});
    await loadResult(await jobResult(job),true);
   }catch(e){message(e.message,true);message(_t('分析未完成；之前的结果保留。'));}
   finally{setBusy(false);$('mapFile').value='';}
  }
- CrateOfficialMaps.create({onAnalyze:official=>analyze(null,official)});
+ CrateOfficialMaps.create({onAnalyze:official=>analyze(null,official),...(platform?{loadCatalog:platform.catalog,precomputed:true}:{})});
  async function analyzeSaved(version){
   if(state.busy||!state.data)return;
   setBusy(true);message('',true);
@@ -373,11 +435,16 @@
  }
  $('retryMod').onclick=()=>analyzeSaved('directory');
  $('reanalyzeResources').onclick=()=>analyzeSaved($('version').value);
- CrateResourceUI.onApplied=version=>analyzeSaved(version);
+ if(globalThis.CrateResourceUI)CrateResourceUI.onApplied=version=>analyzeSaved(version);
  $('retryApprox').onclick=()=>analyzeSaved(state.data.metadata.version);
  $('mapFile').onchange=()=>{const file=$('mapFile').files[0];if(file)analyze(file);};
  const drop=$('dropzone');drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragging');});drop.addEventListener('dragleave',()=>drop.classList.remove('dragging'));drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('dragging');const file=e.dataTransfer.files[0];if(file)analyze(file);});
  const existing=new URLSearchParams(location.search).get('result');
- if(existing&&/^\/output\/[a-zA-Z0-9_-]+\/result\.json$/.test(existing))loadResult(existing).catch(e=>message(e.message,true));
- fetch('/api/maps/health').then(r=>{if(!r.ok)throw Error();return r.json();}).then(v=>{if(v.feature!=='real-maps-v1')throw Error();}).catch(()=>message(_t('当前服务尚未加载真实地图接口。请关闭旧演示服务，再运行“启动演示.cmd”。已有结果仍可查看。'),true));
+ if(platform){
+  setBusy(true);message(_t('正在加载预计算地图…'));
+  platform.initial(location.search).then(url=>loadResult(url,true)).catch(error=>message(error.message,true)).finally(()=>setBusy(false));
+ }else{
+  if(existing&&/^\/output\/[a-zA-Z0-9_-]+\/result\.json$/.test(existing))loadResult(existing).catch(e=>message(e.message,true));
+  fetch('/api/maps/health').then(r=>{if(!r.ok)throw Error();return r.json();}).then(v=>{if(v.feature!=='real-maps-v1')throw Error();}).catch(()=>message(_t('当前服务尚未加载真实地图接口。请关闭旧演示服务，再运行“启动演示.cmd”。已有结果仍可查看。'),true));
+ }
 })();

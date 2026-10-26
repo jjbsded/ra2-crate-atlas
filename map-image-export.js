@@ -6,11 +6,11 @@
  const renderer=typeof module!=='undefined'?require('./map-renderer.js'):root.CrateMapRenderer;
  const probability=typeof module!=='undefined'?require('./probability.js'):root.CrateProbability;
  const CrateProbabilityDisplay=typeof module!=='undefined'?require('./probability-display.js'):root.CrateProbabilityDisplay;
- function layout(r){
+ function layout(r,{maxScale=1.5}={}){
   if(!Number.isFinite(r.width)||!Number.isFinite(r.height)||r.width<=0||r.height<=0)throw Error(_t('地图图片尺寸无效'));
   // Keep at least native detail (60 × 30 pixels per flat cell). Limit optional
   // enlargement on large maps instead of shrinking multiplier text to fit.
-  const scale=Math.max(1,Math.min(1.5,16300/r.width,16000/r.height,Math.sqrt(96000000/(r.width*r.height))));
+  const scale=Math.max(1,Math.min(maxScale,16300/r.width,16000/r.height,Math.sqrt(96000000/(r.width*r.height))));
   const area={x:24,y:82,w:Math.ceil(r.width*scale),h:Math.ceil(r.height*scale)};
   return{width:area.w+48,height:area.y+area.h+194,area,scale,labelSize:Math.min(16,12*scale)};
  }

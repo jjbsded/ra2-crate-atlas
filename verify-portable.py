@@ -44,9 +44,11 @@ class PackageChecks(unittest.TestCase):
         for name, page in (('启动工具.cmd', 'maps'), ('启动演示.cmd', 'demo')):
             text = (builder.ROOT/name).read_text('utf8')
             commands = [s for s in text.splitlines() if 'server.py' in s]
-            self.assertEqual(len(commands), 2)
+            self.assertEqual(len(commands), 1)
             self.assertTrue(all('--page '+page in s for s in commands))
+            self.assertIn('run-python.cmd', text)
             self.assertNotIn('codex', text.casefold())
+        self.assertIn(builder.ROOT/'run-python.cmd', builder.frontend_files())
 
     def test_runtime_dependency_closure(self):
         builder.validate_sources()

@@ -84,14 +84,14 @@
    const ticket=++revision;controller?.abort();controller=new AbortController();view?.dispose();view=null;
    loading(true);$('terrain3dError').textContent='';$('terrain3dLabels').replaceChildren();$('terrain3dRelations').replaceChildren();$('terrain3dSource').textContent='';$('terrain3dWarnings').hidden=true;$('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=true;canvas.setAttribute('aria-label',_t('正在读取选中格附近地形'));$('terrain3dCrate').textContent=_t('预览放箱后');$('terrain3dCrate').setAttribute('aria-pressed','false');
    $('terrain3dProbabilityNote').hidden=true;$('terrain3dTitle').textContent=_t`3D 地形 · (${context.cell.x}, ${context.cell.y})`;
-   $('terrain3dDetail').textContent=_t('正在读取选中格附近的原始地块…');
+   $('terrain3dDetail').textContent=context.data?.rendering?.simplified?_t('正在生成附近的简化 3D 地形…'):_t('正在读取选中格附近的原始地块…');
    try{
     const [T,data]=await Promise.all([loadLibrary(),loadPatch(context,{radius:$('terrain3dRadius').value,signal:controller.signal})]);
     if(ticket!==revision||!dialog.open)return;
     const next=await makeView(T,data,context,ticket);
     if(ticket!==revision||!dialog.open){next?.dispose();return;}
     view=next;loading(false);view.update();
-   }catch(error){if(ticket!==revision||error.name==='AbortError')return;loading(false);$('terrain3dError').textContent=error.message;$('terrain3dDetail').textContent=embedded?_t('地形未能载入，可点击“重新加载演示”重试。'):_t('地形未能载入。关闭后可重新打开重试。');for(const id of controls)$(id).disabled=true;}
+   }catch(error){if(ticket!==revision||error.name==='AbortError')return;loading(false);$('terrain3dError').textContent=/WebGL/i.test(error.message)?_t('3D 查看需要支持 WebGL 的浏览器。'):error.message;$('terrain3dDetail').textContent=embedded?_t('地形未能载入，可点击“重新加载演示”重试。'):_t('地形未能载入。关闭后可重新打开重试。');for(const id of controls)$(id).disabled=true;}
   }
   function close(){++revision;controller?.abort();view?.dispose();view=null;busy=false;$('terrain3dLabels').replaceChildren();document.body.classList.remove('terrain3d-open');}
   $('terrain3dClose').onclick=()=>dialog.close();dialog.addEventListener('close',close);
@@ -117,7 +117,11 @@
    function dispose(){if(disposed)return;disposed=true;cancelAnimationFrame(frame);observer?.disconnect();events.abort();for(const g of geometries)g.dispose();for(const m of materials)m.dispose();for(const t of Object.values(textures))t.dispose();renderer.dispose();for(const l of labels)l.node.remove();}
    const events=new AbortController();let observer=null;
    try{
-    await Promise.all(Object.entries(data.textures).map(([id,url])=>new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>{if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();};im.onerror=()=>reject(Error(_t('部分地形贴图无法解码')));im.src=url;})));
+    await Promise.all(Object.entries(data.textures).map(([id,source])=>new Promise((resolve,reject)=>{
+     function ready(im){if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();}
+     if(typeof source!=='string'){ready(source);return;}
+     const im=new Image();im.onload=()=>ready(im);im.onerror=()=>reject(Error(_t('部分地形贴图无法解码')));im.src=source;
+    })));
     if(ticket!==revision){dispose();return null;}
     function surface(c,mat,offset=0,inset=0,warp=null){
      const positions=[],uv=[],indices=[],n=c.slope?6:1;
@@ -126,7 +130,18 @@
      const g=geometry(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();return new T.Mesh(g,mat);
     }
     const corners=[[0,0],[1,0],[1,1],[0,1]],steps=[[0,-1],[1,0],[0,1],[-1,0]];
-    const topMats=new Map(),wallMats=new Map(),reliefAssets=new Map();
+    const topMats=new Map(),wallMats=new Map(),reliefAssets=new Map(),decorMats=new Map();
+    const decorMaterial=(d)=>{if(!decorMats.has(d.texture))decorMats.set(d.texture,material({map:textures[d.texture],transparent:true,alphaTest:.05,depthWrite:!!d.bridge,side:T.DoubleSide}));return decorMats.get(d.texture);};
+    let railMaterial;
+    function addRails(c,d){
+     if(!d.rails?.length)return;
+     railMaterial||=material({color:0xcad4ca});
+     const surface=decorationSurface(c,d);
+     const bar=(a,b,width,height)=>{const g=geometry(new T.BoxGeometry(Math.abs(b.x-a.x)+width,height,Math.abs(b.z-a.z)+width)),mesh=new T.Mesh(g,railMaterial);mesh.position.copy(a).add(b).multiplyScalar(.5);decor.add(mesh);};
+     for(const edge of d.rails){const a=point(surface,...corners[edge],.2),b=point(surface,...corners[(edge+1)%4],.2);bar(a,b,.035,.045);
+      for(const t of [.1,.9]){const p=a.clone().lerp(b,t);p.y-=.09;bar(p,p,.035,.18);}
+     }
+    }
     function decode(encoded,Type){const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));return new Type(bytes.buffer);}
     for(const[id,detail]of Object.entries(data.reliefs||{})){
      const raw=decode(detail.vertices,Float32Array),positions=new Float32Array(detail.vertexCount*3),uv=new Float32Array(detail.vertexCount*2);
@@ -172,12 +187,40 @@
        // stretching the fascia flat over the water. Move along the original
        // camera ray so its game-view projection and texture anchor stay fixed.
        const warp=d.bridge==='high'&&d.span?(p,u,v)=>{const delta=bridgeFold(c,d,u,v);p.x+=delta;p.z+=delta;p.y+=2*delta*H;}:null;
-       const mesh=surface(decorationSurface(c,d),material({map:textures[d.texture],transparent:true,alphaTest:.05,depthWrite:!!d.bridge,side:T.DoubleSide}),d.bridge ? .018 : .012,0,warp);
+       const mesh=surface(decorationSurface(c,d),decorMaterial(d),d.bridge ? .018 : .012,0,warp);
        decor.add(mesh);
        if(d.bridge==='high'){mesh.userData.cell=c;pickables.push(mesh);}
+       addRails(c,d);
       }
-      else {const m=new T.SpriteMaterial({map:textures[d.texture],transparent:true,alphaTest:.12});materials.add(m);const sprite=new T.Sprite(m),pixels=30*Math.sqrt(2);sprite.position.copy(point(c,.5,.5,.02));sprite.scale.set(d.width/pixels,d.height/pixels,1);sprite.center.set(.5-d.offset[0]/d.width,.5+d.offset[1]/d.height);decor.add(sprite);}
+      else {const id='sprite:'+d.texture;if(!decorMats.has(id)){const m=new T.SpriteMaterial({map:textures[d.texture],transparent:true,alphaTest:.12});materials.add(m);decorMats.set(id,m);}const sprite=new T.Sprite(decorMats.get(id)),pixels=30*Math.sqrt(2);sprite.position.copy(d.anchor?point({...c,level:d.anchor.level,corners:[0,0,0,0]},d.anchor.u,d.anchor.v,.02):point(c,.5,.5,.02));sprite.scale.set(d.width/pixels,d.height/pixels,1);sprite.center.set(.5-d.offset[0]/d.width,.5+d.offset[1]/d.height);decor.add(sprite);}
      }
+    }
+    // Toy uses a small shared palette. Batch static meshes by material while
+    // retaining a face-to-cell table for picking, including elevated decks.
+    // Original-art relief meshes retain their separate visibility groups.
+    if(data.simplified)for(const group of [terrain,decor]){
+     const batches=new Map(),oldPickables=new Set(pickables),removed=new Set();
+     for(const mesh of group.children){
+      if(!mesh.isMesh)continue;
+      const id=mesh.material.uuid+':'+oldPickables.has(mesh);
+      if(!batches.has(id))batches.set(id,[]);batches.get(id).push(mesh);
+     }
+     for(const meshes of batches.values()){
+      if(meshes.length<2)continue;
+      const positions=[],normals=[],uv=[],faceCells=[];
+      for(const mesh of meshes){
+       mesh.updateMatrix();const g=mesh.geometry.index?mesh.geometry.toNonIndexed():mesh.geometry.clone();g.applyMatrix4(mesh.matrix);
+       for(const value of g.attributes.position.array)positions.push(value);
+       for(const value of g.attributes.normal.array)normals.push(value);
+       for(const value of g.attributes.uv.array)uv.push(value);
+       if(oldPickables.has(mesh))for(let i=0;i<g.attributes.position.count/3;i++)faceCells.push(mesh.userData.cell);
+       g.dispose();mesh.geometry.dispose();geometries.delete(mesh.geometry);group.remove(mesh);removed.add(mesh);
+      }
+      const g=geometry(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('normal',new T.Float32BufferAttribute(normals,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.computeBoundingSphere();
+      const mesh=new T.Mesh(g,meshes[0].material);group.add(mesh);
+      if(faceCells.length){mesh.userData.faceCells=faceCells;pickables.push(mesh);}
+     }
+     for(let i=pickables.length-1;i>=0;i--)if(removed.has(pickables[i]))pickables.splice(i,1);
     }
     let probabilityBuilt=false;
     function buildProbability(){
@@ -239,7 +282,7 @@
      const refs=selected.higher.length?selected.higher:selected.affected;
      const prefix=document.createElement('span');prefix.textContent=!enabled?'':selected.higher.length?_t('相关高格：'):selected.affected.length?_t('受此高格影响：'):_t('附近没有与此格关联的高差判定。');$('terrain3dRelations').append(prefix);
      for(const[x,y,l]of refs){const button=document.createElement('button');button.textContent=`(${x}, ${y}) L${l}`;button.disabled=!lookup.has(`${x},${y}`);button.title=button.disabled?_t('位于当前局部范围外，居中或扩大范围后查看'):_t('选中此格');button.onclick=()=>choose(lookup.get(`${x},${y}`));$('terrain3dRelations').append(button);}
-     $('terrain3dSource').textContent=data.metadata.sourceDescription||_t`${data.metadata.filename} · ${data.metadata.theater} · 矿石${data.metadata.mineralsEnabled===false?_t('关（无矿石布局）'):_t('开')} · ${cells.length} 格 / ${data.metadata.uniqueTiles} 种实际地块 · ${fine?_t('崖壁按原图轮廓与深度细分重建，未绘制的背面使用补面'):_t('崖壁使用简化模型')}；坡面与树木为贴图重建。${data.metadata.missing.length?' '+data.metadata.missing.length+_t(' 项资源缺失，使用占位或省略外观。'):''}${data.metadata.bridgeNote?' '+data.metadata.bridgeNote:''}`;
+     $('terrain3dSource').textContent=data.simplified?_t('简化 3D：沿用原地图高度、坡形和桥面高度；方块崖壁与对象符号仅作示意，概率和判定标识与主图一致。'):data.metadata.sourceDescription||_t`${data.metadata.filename} · ${data.metadata.theater} · 矿石/树木${data.metadata.mineralsEnabled===false&&data.metadata.treesEnabled!==false?_t('混合'):data.metadata.mineralsEnabled===false?_t('关（无矿石、无树木布局）'):_t('开')} · ${cells.length} 格 / ${data.metadata.uniqueTiles} 种实际地块 · ${fine?_t('崖壁按原图轮廓与深度细分重建，未绘制的背面使用补面'):_t('崖壁使用简化模型')}；坡面与树木为贴图重建。${data.metadata.missing.length?' '+data.metadata.missing.length+_t(' 项资源缺失，使用占位或省略外观。'):''}${data.metadata.bridgeNote?' '+data.metadata.bridgeNote:''}`;
      const warnings=data.metadata.missing;
      $('terrain3dWarnings').hidden=!warnings.length;$('terrain3dWarningsText').textContent=warnings.join('\n');
      const counts={current:0,potential:0,zero:0,other:0};for(const c of cells){const category=riskCategory(c);if(category)counts[category]++;}
@@ -265,8 +308,8 @@
     const listen=(name,fn,options={})=>canvas.addEventListener(name,fn,{...options,signal:events.signal});
     listen('contextmenu',e=>e.preventDefault());
     listen('pointerdown',e=>{if(![0,2].includes(e.button))return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});canvas.setPointerCapture(e.pointerId);previous=gesture();travel=pointers.size>1?100:0;canvas.classList.add('dragging');});
-    listen('pointermove',e=>{if(!pointers.has(e.pointerId))return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});const next=gesture();if(previous&&next.n===previous.n){const dx=next.x-previous.x,dy=next.y-previous.y;travel+=Math.abs(dx)+Math.abs(dy);if(e.shiftKey||e.buttons===2){const speed=(camera.right-camera.left)/width;pan.x-=dx*Math.cos(yaw)*speed;pan.z+=dx*Math.sin(yaw)*speed;pan.y+=dy*speed;}else {yaw-=dx*.008;pitch=Math.max(.16,Math.min(1.45,pitch+dy*.006));}if(next.n===2&&previous.d)zoom=Math.max(.45,Math.min(4,zoom*next.d/previous.d));requestDraw();}previous=next;});
-    function release(e,cancel=false){if(!pointers.has(e.pointerId))return;pointers.delete(e.pointerId);previous=gesture();if(!pointers.size){canvas.classList.remove('dragging');if(!cancel&&e.button===0&&travel<6){const r=canvas.getBoundingClientRect(),p=new T.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);setCamera();ray.setFromCamera(p,camera);const hit=ray.intersectObjects(pickables.filter(o=>o.parent.visible),false)[0];if(hit)choose(hit.object.userData.cell);}if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}}
+    listen('pointermove',e=>{if(!pointers.has(e.pointerId))return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});const next=gesture();if(previous&&next.n===previous.n){const dx=next.x-previous.x,dy=next.y-previous.y;travel+=Math.abs(dx)+Math.abs(dy);if(next.n===2||e.shiftKey||e.buttons===2){const speed=(camera.right-camera.left)/width;pan.x-=dx*Math.cos(yaw)*speed;pan.z+=dx*Math.sin(yaw)*speed;pan.y+=dy*speed;}else {yaw-=dx*.008;pitch=Math.max(.16,Math.min(1.45,pitch+dy*.006));}if(next.n===2&&previous.d)zoom=Math.max(.45,Math.min(4,zoom*next.d/previous.d));requestDraw();}previous=next;});
+    function release(e,cancel=false){if(!pointers.has(e.pointerId))return;pointers.delete(e.pointerId);previous=gesture();if(!pointers.size){canvas.classList.remove('dragging');if(!cancel&&e.button===0&&travel<6){const r=canvas.getBoundingClientRect(),p=new T.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);setCamera();ray.setFromCamera(p,camera);const hit=ray.intersectObjects(pickables.filter(o=>o.parent.visible),false)[0];if(hit)choose(hit.object.userData.faceCells?.[hit.faceIndex]||hit.object.userData.cell);}if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}}
     listen('pointerup',e=>release(e));listen('pointercancel',e=>release(e,true));
     listen('wheel',e=>{e.preventDefault();zoom=Math.max(.45,Math.min(4,zoom*Math.exp(-e.deltaY*.001)));requestDraw();},{passive:false});
     listen('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){yaw+=(e.key==='ArrowLeft'?-1:1)*Math.PI/12;e.preventDefault();requestDraw();}else if(['ArrowUp','ArrowDown'].includes(e.key)){pitch=Math.max(.16,Math.min(1.45,pitch+(e.key==='ArrowUp'?.1:-.1)));e.preventDefault();requestDraw();}});

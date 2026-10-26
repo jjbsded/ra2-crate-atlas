@@ -11,6 +11,24 @@ TRANSLATION = [0, 8, 8, 8, 8, 10, 9, 3, 3, 2, 6, 1, 1, 0, 7, 3]
 CLIFF = [(0, -1), (-1, 0), (2, 2), (1, 1), (-1, 1), (1, -1)]
 
 
+def is_tree(kind, cfg):
+    """Identify vegetation conservatively; resource generators are not scenery.
+
+    TerrainClass also contains ice, boxes, traffic lights and ore drills. Stock
+    tree images and descriptive rules names support aliases in directory mods;
+    an ambiguous custom object stays, rather than silently losing occupation.
+    """
+    if any(yes(cfg.get(key, 'no')) for key in ('SPAWNSTIBERIUM', 'ISVEINHOLE', 'WATERBOUND')):
+        return False
+    if kind.upper().startswith(('TIBTRE', 'VEINTREE')):
+        return False
+    image = cfg.get('IMAGE', kind).upper()
+    if re.fullmatch(r'TREE\d+', image):
+        return True
+    name = cfg.get('NAME', '')
+    return bool(re.search(r'\b(tree|trees|palm|palms)\b|树|樹', name, re.I))
+
+
 def object_records(m, on_error=None):
     result = []
     for section in ('STRUCTURES', 'INFANTRY', 'UNITS', 'AIRCRAFT'):
@@ -236,7 +254,7 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
         records[x, y] = (tile, sub, level, ice)
     overlays = [v.upper() for k, v in sorted(rules['OVERLAYTYPES'].items(), key=lambda kv: int(kv[0]))]
     cells, tmp_cache = {}, {}
-    removed_minerals = 0
+    removed_minerals = removed_trees = 0
     for y in range(1, w+h):
         for x in range(1, w+h):
             if not inside(x, y):
@@ -275,8 +293,7 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
                 raise ValueError(f'({x},{y}) 含隧道；隧道路径尚未支持')
             cfg = rules.get(ovname, {}) if ovname else None
             if not minerals_enabled and cfg and yes(cfg.get('TIBERIUM', 'no')):
-                # Remove only resource overlays before rebuilding land/search
-                # state. Terrain objects (including ore drills) stay in place.
+                # Clear resources before rebuilding land and nearby-search state.
                 ov, ovname, cfg = 255, None, None
                 removed_minerals += 1
             if not visual_only and cfg and yes(cfg.get('TIBERIUM', 'no')) and slope > 4:
@@ -305,9 +322,12 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
                 issue(f'Terrain 坐标不在地图内：{p}；跳过此对象。'); continue
             raise ValueError(f'Terrain 坐标不在地图内：{p}')
         kind = kind.upper()
+        cfg = rules.get(kind, {})
+        if not minerals_enabled and is_tree(kind, cfg):
+            removed_trees += 1
+            continue
         if not visual_only and kind not in rules:
             raise ValueError('未找到 Terrain 类型 '+kind)
-        cfg = rules.get(kind, {})
         art = res.art.get(cfg.get('IMAGE', kind).upper(), {})
         if not visual_only and art.get('FOUNDATION', '1x1').lower() != '1x1':
             raise ValueError('尚未验证非 1×1 Terrain 基础：'+kind)
@@ -450,7 +470,7 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
     if not visual_only and any(yes(rules.get(kind, {}).get('GATE', 'no')) for c in cells.values() for kind in c['objects']):
         warnings.append('闸门按地图初始关闭状态的建筑基础占用计算；不推进开门、关门或通行请求。')
     if not minerals_enabled:
-        warnings.append(f'矿石：关。已移除地图预置的矿石／宝石覆盖物（共 {removed_minerals} 格）；保留矿石钻井、建筑、单位、树木及其他覆盖物，不模拟后续矿石生长。')
+        warnings.append(f'矿石/树木：关。已移除地图预置的矿石／宝石（{removed_minerals} 格）和树木（{removed_trees} 棵）；保留矿石钻井、建筑、单位和其他地形物，不模拟后续生长。')
     if not visual_only:
         warnings.extend(['分析下一次放箱调用，假定有空闲箱子槽；未加入游戏自动出生单位、移动单位或后续矿石生长。',
                      '使用原版 MIX 资源；不自动加载 loose INI、Ares／Phobos、expand 包或房间规则。',
@@ -462,7 +482,8 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
     return cells, res, theater, tmp_cache, dict(size=size, localSize=local, visibleRect=rect,
         theater=theater['name'], version=version, cliffBackImpassability=cliff_mode, bridgeModelVersion=2,
         mapLoadingModelVersion=1,
-        mineralsEnabled=bool(minerals_enabled), removedMineralCount=removed_minerals,
+        mineralsEnabled=bool(minerals_enabled), treesEnabled=bool(minerals_enabled), terrainRemovalVersion=1,
+        removedMineralCount=removed_minerals, removedTreeCount=removed_trees,
         decodedRecords=len(records), cellCount=len(cells), warnings=warnings, loadIssues=issues,
         sourceSha256=sha(data), rulesSha256=sha(res.rules_bytes), theaterSha256=theater['configSha256'],
         mapTypeAdditions=additions, initialAircraftCount=len(m.get('AIRCRAFT', {})),

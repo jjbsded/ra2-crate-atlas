@@ -3,6 +3,8 @@
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
+ const A=root.CrateRegionAuto||(typeof require==='function'?require('./region-auto.js'):null);
+ const EMPTY='empty';
  // OKLab distance balances hue and lightness; avoid near-white / muddy candidates.
  function lab(hex){
   const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
@@ -29,24 +31,29 @@
  const revisions=new WeakMap(),revision=r=>revisions.get(r)||0,touch=r=>revisions.set(r,revision(r)+1);
  const key=c=>c.x*1024+c.y;
  function displayName(region){
+  if(region.id===EMPTY)return _t('空');
+  if(!region.customName&&region.generatedName)return region.generatedName.kind==='team'?_t`小队${region.generatedName.team}`:region.generatedName.kind==='player'?_t`玩家${region.generatedName.number}`:region.generatedName.kind==='water'?_t`水域${region.generatedName.number}`:_t`陆地${region.generatedName.number}`;
   const n=region.id.slice(1);
   // Legacy generated names had no marker. Keep the stored bytes untouched;
   // explicit renames are marked so even a custom default-looking name survives.
   return !region.customName&&['区域 '+n,`Region ${n}`].includes(region.name)?_t`区域 ${n}`:region.name;
  }
- const defaults=()=>({version:1,defaultRegionCount:12,selectionBoundsVersion:1,transparency:50,overlap:false,active:'r1',next:13,regions:colors.map((color,i)=>({id:`r${i+1}`,name:_t`区域 ${i+1}`,color,cells:new Set()}))});
+ const defaults=()=>({version:1,defaultRegionCount:12,selectionBoundsVersion:1,autoOptionsVersion:2,transparency:50,overlap:false,showTotals:true,autoHandled:false,autoOptions:A.options(),appliedTeams:{},active:'r1',next:13,regions:colors.map((color,i)=>({id:`r${i+1}`,name:_t`区域 ${i+1}`,color,cells:new Set()}))});
  function encode(doc){return JSON.stringify({...doc,regions:doc.regions.map(r=>({...r,cells:[...r.cells].sort((a,b)=>a-b)}))});}
  function decode(raw,valid){
   const data=JSON.parse(raw);
-  if(data?.version!==1||!Array.isArray(data.regions)||!data.regions.length||data.regions.length>64)throw Error(_t('区域记录格式不正确'));
+  if(data?.version!==1||!Array.isArray(data.regions)||!data.regions.length||data.regions.length>8192)throw Error(_t('区域记录格式不正确'));
   const ids=new Set();
+  const oldDefaults=data.autoOptionsVersion!==2&&data.autoOptions?.maxStraight===50&&data.autoOptions?.maxPath===100;
+  const autoOptions=A.options(oldDefaults?{...data.autoOptions,maxStraight:40,maxPath:70}:data.autoOptions);
   const regions=data.regions.map((r,i)=>{
    if(!r||typeof r.id!=='string'||!/^r[1-9]\d{0,6}$/.test(r.id)||ids.has(r.id)||!Array.isArray(r.cells))throw Error(_t('区域记录格式不正确'));
    ids.add(r.id);
-   return {id:r.id,name:String(r.name||_t`区域 ${i+1}`).slice(0,48),...(r.customName===true?{customName:true}:{}),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:colors[i%colors.length],
+   const generated=r.generatedName,gname=generated?.kind==='team'&&['A','B','C','D'].includes(generated.team)?{kind:'team',team:generated.team}:generated&&['player','land','water'].includes(generated.kind)&&Number.isInteger(generated.number)&&generated.number>0?{kind:generated.kind,number:generated.number}:null;
+   return {id:r.id,name:String(r.name||_t`区域 ${i+1}`).slice(0,48),...(r.customName===true?{customName:true}:{}),...(gname?{generatedName:gname}:{}),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:colors[i%colors.length],
     cells:new Set(r.cells.filter(k=>Number.isInteger(k)&&valid.has(k)))};
   });
-  const doc={version:1,defaultRegionCount:12,selectionBoundsVersion:1,transparency:Number.isFinite(data.transparency)?Math.max(0,Math.min(100,data.transparency)):50,overlap:data.overlap===true,active:ids.has(data.active)?data.active:regions[0].id,
+  const doc={version:1,defaultRegionCount:12,selectionBoundsVersion:1,autoOptionsVersion:2,transparency:Number.isFinite(data.transparency)?Math.max(0,Math.min(100,data.transparency)):50,overlap:data.overlap===true,showTotals:data.showTotals!==false,autoHandled:data.autoHandled===true,autoOptions,appliedTeams:A.teams(data.appliedTeams),active:data.active===EMPTY||ids.has(data.active)?data.active:regions[0].id,
    next:Math.max(Math.max(...regions.map(r=>Number(r.id.slice(1))))+1,Number.isInteger(data.next)&&data.next<10000000?data.next:1),regions};
   // One-time migration: preserve customized names/colors/cells. Later manual
   // deletion is respected, even when fewer than twelve regions remain.
@@ -54,6 +61,14 @@
   if(!doc.overlap)exclusive(doc);
   return doc;
  }
+ function playerStyles(doc,starts){
+  const out={};for(const p of starts){
+   const team=doc.appliedTeams?.[p.number]||'neutral';
+   const region=doc.regions.find(r=>team==='neutral'?r.generatedName?.kind==='player'&&r.generatedName.number===p.number:r.generatedName?.kind==='team'&&r.generatedName.team===team)||[...doc.regions].reverse().find(r=>r.cells.has(key(p)));
+   out[p.number]={empty:team==='empty',team:['A','B','C','D'].includes(team)?team:null,color:region?.color||'#344b59'};
+  }return out;
+ }
+ function labelStrokes(){return {inner:'#050a0b',outer:'#fff'};}
  // When overlap is switched off, the active region wins; remaining ties use list order.
  function exclusive(doc){
   const seen=new Set();let removed=0;
@@ -64,6 +79,10 @@
   return removed;
  }
  function apply(doc,keys,remove=false){
+  if(doc.active===EMPTY){
+   const changed=new Set();for(const k of keys)for(const r of doc.regions)if(r.cells.delete(k))changed.add(r);
+   for(const r of changed)touch(r);return changed.size>0;
+  }
   const r=doc.regions.find(r=>r.id===doc.active);if(!r)return false;const changed=new Set();
   for(const k of keys){
    if(remove){if(r.cells.delete(k))changed.add(r);}
@@ -73,6 +92,19 @@
    }
   }
   for(const r of changed)touch(r);return changed.size>0;
+ }
+ function fillKeys(doc,seed,eligible){
+  if(!seed||!eligible.has(key(seed)))return [];
+  const start=key(seed),members=doc.regions.filter(r=>r.cells.has(start)),source=members.find(r=>r.id===doc.active)||members[members.length-1];
+  const assigned=source?null:new Set(doc.regions.flatMap(r=>[...r.cells]));
+  const sea=seed.land===2,same=k=>{const c=eligible.get(k);return c&&(c.land===2)===sea&&(source?source.cells.has(k):!assigned.has(k));};
+  // Selection connectivity follows the four game-coordinate edges. It is not
+  // unit pathfinding: zero-probability and impassable selectable cells count.
+  const queue=[start],seen=new Set(queue);
+  for(let i=0;i<queue.length;i++)for(const delta of [1024,-1024,1,-1]){
+   const k=queue[i]+delta;if(!seen.has(k)&&same(k)){seen.add(k);queue.push(k);}
+  }
+  return queue;
  }
  const ratio=(n,d)=>d?Number(n*1000000000000n/d)/1e12:0;
  function statistics(region,lookup,display){
@@ -160,6 +192,6 @@
   }
   return Number.isFinite(left)?{x:left,y:top,w:Math.max(1,right-left),h:Math.max(1,bottom-top)}:null;
  }
- const api={colors,nextColor,lab,key,displayName,defaults,encode,decode,exclusive,apply,revision,touch,statistics,sorted,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
+ const api={EMPTY,colors,nextColor,lab,key,displayName,playerStyles,labelStrokes,defaults,encode,decode,exclusive,apply,fillKeys,revision,touch,statistics,sorted,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
  root.CrateRegionStatistics=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

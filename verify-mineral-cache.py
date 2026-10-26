@@ -37,6 +37,8 @@ def main():
             assert release.wait(10), 'Test did not release the background job'
         result = copy.deepcopy(report)
         result['metadata']['mineralsEnabled'] = options['minerals_enabled']
+        result['metadata']['treesEnabled'] = options['minerals_enabled']
+        result['metadata']['terrainRemovalVersion'] = 1
         (destination/'source.map').write_bytes(data)
         (destination/'result.json').write_text(json.dumps(result), 'utf8')
         return result
@@ -86,6 +88,16 @@ def main():
 
             variant_path = server.ROOT/variant.lstrip('/')
             cached = json.loads(variant_path.read_text('utf8'))
+            legacy = copy.deepcopy(cached)
+            legacy['metadata'].pop('treesEnabled')
+            legacy['metadata'].pop('terrainRemovalVersion')
+            variant_path.write_text(json.dumps(legacy), 'utf8')
+            replacement = request('/api/maps/minerals', {'result': variant, 'enabled': False})
+            assert 'id' in replacement, 'Legacy ore-only OFF cannot satisfy combined OFF'
+            complete(replacement)
+            from map_jobs import compatible_variant
+            assert not compatible_variant(report, legacy, False)
+            variant_path.write_text(json.dumps(cached), 'utf8')
             cached['rendering']['version'] = 9
             variant_path.write_text(json.dumps(cached), 'utf8')
             replacement = request('/api/maps/minerals', payload)

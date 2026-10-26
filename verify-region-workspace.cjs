@@ -67,10 +67,27 @@ assert.equal($('regionTool').value,'brush-circle','Successful picker restores th
 assert.deepEqual(members(snapshot()),membership,'Sampling must never paint.');
 clickCell(b,mods(false,true));assert.equal(snapshot().active,'r2');assert.deepEqual(members(snapshot()),membership);
 assert.equal($('regionUndo').disabled,true,'Sampling does not create undo entries.');
-chooseTool('picker');clickCell(c);assert.equal(snapshot().active,'r2');assert.equal($('regionTool').value,'picker','Empty sample allows retry.');
-pointedCell=a;ui.down(point(a),mods());ui.move(point(b),false,mods());ui.up();assert.equal(snapshot().active,'r2','Dragging in picker must not sample.');
+chooseTool('picker');clickCell(c);assert.equal(snapshot().active,R.EMPTY);assert.equal($('regionTool').value,'brush-circle','Sampling Empty restores the previous brush.');
+chooseTool('picker');pointedCell=a;ui.down(point(a),mods());ui.move(point(b),false,mods());ui.up();assert.equal(snapshot().active,R.EMPTY,'Dragging in picker must not sample.');
 assert.deepEqual(members(snapshot()),membership);
 $('regionEyedropper').click();assert.equal($('regionTool').value,'brush-circle');
+// Empty is a persistent erase target, not a thirteenth statistics region.
+assert.equal(snapshot().regions.length,12);assert.equal($('regionOptions').children[0].value,R.EMPTY);
+assert.ok($('regionName').disabled&&$('regionColor').disabled&&$('regionDelete').disabled&&$('regionClear').disabled);
+ui.load();assert.equal(snapshot().active,R.EMPTY,'Empty selection survives reload.');
+for(const brush of ['brush-screen','brush-game','brush-circle','brush-ellipse','box-screen','box-game','fill'])for(const operation of ['add','remove'])for(const shift of [false,true]){
+ const erase=R.decode(R.encode(sample),new Map(cells.map(cell=>[R.key(cell),cell])));erase.active=R.EMPTY;
+ resetSelection(erase);chooseTool(brush);$('regionOperation').value=operation;clickCell(a,mods(shift));
+ const erased=snapshot();assert.ok(erased.regions.every(r=>!r.cells.includes(ka)),`${brush}/${operation}/${shift}: erase every overlapping membership`);
+ assert.ok(erased.regions[1].cells.includes(kb),'Unhit cells are preserved.');
+ $('regionUndo').click();assert.deepEqual(members(snapshot()),members(JSON.parse(R.encode(erase))));
+ $('regionRedo').click();assert.deepEqual(members(snapshot()),members(erased));
+}
+resetSelection({...sample,active:R.EMPTY});chooseTool('brush-game');pointedCell=a;ui.down(point(a),mods());ui.cancel();
+assert.deepEqual(members(snapshot()),membership,'Cancel restores all erased memberships.');
+clickCell(c,mods(false,true));assert.equal(snapshot().active,R.EMPTY);assert.equal($('regionTool').value,'brush-game');
+chooseTool('picker');clickCell(cells[0]);assert.equal(snapshot().active,R.EMPTY);assert.equal($('regionTool').value,'picker','Out-of-bounds cells cannot be sampled.');
+console.log('PASS: Empty picker, persistence, all brushes/boxes/fill, overlapping erasure, both operations/Shift, undo/redo/cancel.');
 resetSelection();chooseTool('brush-game');$('regionOperation').value='add';
 clickCell(a);assert.ok(snapshot().regions[0].cells.includes(ka));
 clickCell(a,mods(true));assert.ok(!snapshot().regions[0].cells.includes(ka));assert.equal($('regionOperation').value,'add');
@@ -95,6 +112,17 @@ assert.notEqual($('regionLive').textContent,oldRegionTotal,'Region totals must u
 $('regionUndo').click();assert.ok(!snapshot().regions[0].cells.includes(ka));
 $('regionRedo').click();assert.deepEqual(snapshot(),beforeLayout,'Redo still works after layout change.');
 display.get=previousGet;
+// Fill is an atomic click tool. Drag/cancel cannot merge, and Ctrl still picks.
+const fillDoc=R.defaults();fillDoc.autoHandled=true;fillDoc.regions[1].cells=new Set([ka,R.key(lookup.get('6,5')),kb]);
+resetSelection(fillDoc);chooseTool('fill');clickCell(a);let filled=snapshot();
+assert.ok(filled.regions[0].cells.includes(ka));assert.ok(filled.regions[0].cells.includes(R.key(lookup.get('6,5'))));assert.ok(!filled.regions[0].cells.includes(kb));
+assert.ok(filled.regions[1].cells.includes(kb));assert.ok(!filled.regions[1].cells.includes(ka));
+$('regionUndo').click();assert.equal(snapshot().regions[0].cells.length,0);$('regionRedo').click();assert.deepEqual(snapshot().regions,filled.regions);
+clickCell(a,mods(true));assert.equal(snapshot().regions[0].cells.length,0,'Shift fill removes only the current connected part');
+resetSelection(fillDoc);chooseTool('fill');pointedCell=a;ui.down(point(a),mods());pointedCell=b;ui.move(point(b),false,mods());ui.up();assert.equal(snapshot().regions[0].cells.length,0,'Dragging cannot fill');
+pointedCell=a;ui.down(point(a),mods());ui.cancel();assert.equal(snapshot().regions[0].cells.length,0,'Cancel cannot fill');
+clickCell(a,mods(false,true));assert.equal(snapshot().active,'r2');assert.equal($('regionTool').value,'fill','Ctrl sampling restores fill');
+console.log('PASS: connected fill, atomic undo/redo, Shift removal, drag/cancel safety and Control picker.');
 // A pending export must keep its region geometry, colors and camera clipping
 // when the user continues editing or loads another map before the next frame.
 ui.leave();const exportView={x:0,y:0,scale:1};
@@ -112,3 +140,56 @@ console.log('PASS: export region snapshots preserve pixels across edits, map cha
 console.log('PASS: layout switch refreshes region statistics and retains selections, undo and redo.');
 console.log('PASS: picker/Control-click, last-tool restore, overlap priority, no-op/drag/cancel sampling, Shift inversion and mid-stroke transitions.');
 console.log('PASS: workspace undo/redo/branching, keyboard redo, transparency persistence, boundary migration/click fallback, start numbering and Canvas drawing.');
+
+// Web artwork is resized, while regions and player starts keep native map pixels.
+// Both thumbnails must agree with a full-resolution source, including different
+// X/Y resize ratios caused by integer image dimensions.
+const pattern=createCanvas(600,330),patternCtx=pattern.getContext('2d');
+patternCtx.fillStyle='#153d6d';patternCtx.fillRect(0,0,600,330);
+patternCtx.fillStyle='#d17628';patternCtx.fillRect(300,0,300,330);
+patternCtx.fillStyle='#2ca86f';patternCtx.fillRect(200,90,200,150);
+const resized=createCanvas(240,99);resized.getContext('2d').drawImage(pattern,0,0,240,99);
+const regionFixture=R.defaults();regionFixture.regions[0].cells=new Set(['5,5','5,6','6,5']);
+$('players').checked=false;$('objects').checked=false;state.image=pattern;
+resetSelection(regionFixture);ui.setMode(true);
+const thumbnailPixels=()=>$('regionRows').children[0].children[1].children.map(button=>{
+ const cv=button.children[0];return cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data;
+});
+const referenceThumbs=thumbnailPixels();
+for(const useObjects of [false,true]){
+ state.image=useObjects?pattern:resized;state.objectImage=useObjects?resized:null;$('objects').checked=useObjects;
+ ui.load({preserve:true});const actualThumbs=thumbnailPixels();
+ for(let i=0;i<2;i++){
+  const delta=actualThumbs[i].reduce((sum,value,j)=>sum+Math.abs(value-referenceThumbs[i][j]),0)/actualThumbs[i].length;
+  assert.ok(delta<1.5,`${i?'Overview':'Terrain crop'} must use native-to-artwork coordinates; mean pixel difference ${delta}`);
+ }
+}
+console.log('PASS: terrain crop / overview align for native and resized ground/object artwork.');
+(async()=>{
+ const A=require('./region-auto.js'),D=require('./probability-display.js');context.CrateRegionAuto=A;context.CrateProbabilityDisplay=D;context.AbortController=AbortController;
+ data.cells=cells;data.probability={exact:{denominator:'100'}};data.regionNavigation={version:2,count:cells.length,flags:Buffer.alloc(cells.length,17).toString('base64')};
+ const empty=R.defaults();empty.autoHandled=true;resetSelection(empty);ui.setMode(true);const colors=snapshot().regions.map(r=>r.color);
+ await ui.autoPartition();let automatic=snapshot();assert.ok(automatic.regions.some(r=>r.cells.length));
+ assert.deepEqual(automatic.regions.slice(0,3).map(r=>r.generatedName.number),[1,2,8]);assert.deepEqual(automatic.regions.map(r=>r.color),colors);
+ $('regionUndo').click();assert.ok(snapshot().regions.every(r=>!r.cells.length));assert.equal(snapshot().autoHandled,true,'Undoing auto partition must not trigger auto again on reload');$('regionRedo').click();
+ const ops=[],measurer=createCanvas(1,1).getContext('2d'),fake={save(){},restore(){},beginPath(){},rect(){},clip(){},measureText(text){measurer.font=this.font;return measurer.measureText(text);},strokeText(text,x,y){ops.push({text,color:this.strokeStyle,width:this.lineWidth,font:this.font});},fillText(){}};
+ ui.labels(fake,{x:0,y:0,scale:1});assert.ok(ops.length>0);assert.equal(ops[0].color,'#fff');assert.equal(ops[1].color,'#050a0b');assert.ok(ops[0].width>ops[1].width);
+ const font=Number(ops[0].font.split(' ')[1].slice(0,-2));ops.length=0;ui.labels(fake,{x:0,y:0,scale:2});assert.equal(Number(ops[0].font.split(' ')[1].slice(0,-2)),font*2);
+ const frozen=ui.snapshotLayer();ops.length=0;frozen.labels(fake,{x:0,y:0,scale:1});const expected=JSON.stringify(ops);
+ $('regionClear').click();ops.length=0;frozen.labels(fake,{x:0,y:0,scale:1});assert.equal(JSON.stringify(ops),expected,'Export labels freeze totals and placement');
+ console.log('PASS: automatic player names/colors, undo/redo, once-only handling, probability labels, double outlines, zoom and immutable export labels.');
+ // A large partition must keep two genuinely unused slots (not blocked player
+ // placeholders); repeated partitioning must not keep growing the list.
+ const partition=A.partition,waterCells=cells.filter(c=>R.canSelect(c,data.rendering)).slice(0,14);
+ try{
+  A.partition=async()=>({regions:waterCells.map((c,i)=>({kind:'water',number:i+1,keys:[R.key(c)]})),players:0,unassigned:0,unreachablePlayers:[],settings:A.options()});
+  resetSelection(empty);await ui.autoPartition();const water=snapshot();
+  assert.equal(water.regions.length,16);assert.equal(water.regions.filter(r=>!r.cells.length&&!r.generatedName).length,2);
+  assert.equal(water.regions[6].name,'水域7');assert.deepEqual(water.regions[6].generatedName,{kind:'water',number:7});
+  assert.deepEqual(water.regions.slice(0,12).map(r=>r.color),colors);assert.equal(new Set(water.regions.map(r=>r.color)).size,16);
+  $('regionUndo').click();assert.equal(snapshot().regions.length,12);$('regionRedo').click();assert.deepEqual(snapshot().regions,water.regions);
+  ui.load();assert.deepEqual(snapshot().regions,water.regions,'Water names and spare regions survive autosave/reload');
+  await ui.autoPartition();assert.equal(snapshot().regions.length,16,'Repartition reuses spare slots');
+ }finally{A.partition=partition;}
+ console.log('PASS: water names, >12 regions, two spare slots, palette preservation, undo/redo and persistence.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

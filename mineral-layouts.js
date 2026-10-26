@@ -5,12 +5,13 @@
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  const localAPI=typeof module!=='undefined'?require('./local-api.js'):root.CrateLocalAPI;
- function create({request,read,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}){
+ function create({request,read,load=null,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}){
   let context=null;
   const enabled=entry=>entry.data.metadata.mineralsEnabled!==false;
+  const matches=(entry,value)=>enabled(entry)===value&&(entry.data.metadata.treesEnabled!==false)===value&&(value||entry.data.metadata.terrainRemovalVersion===1);
   function use(entry,{reset=false}={}){
    if(reset||!context)context={source:entry.url,metadata:entry.data.metadata,ready:new Map(),pending:new Map()};
-   context.ready.set(enabled(entry),entry);
+   if(matches(entry,enabled(entry)))context.ready.set(enabled(entry),entry);
   }
   function get(value,onProgress,{background=false}={}){
    const current=context;
@@ -25,13 +26,15 @@
     current.pending.set(value,pending);
     const update=status=>{pending.status=status;for(const listener of pending.listeners)listener(status);};
     pending.promise=(async()=>{
-     const job=await request('/api/maps/minerals',{method:'POST',headers:{'Content-Type':'application/json'},
+     let url;
+     if(load)url=await load(current.source,value,update);
+     else{const job=await request('/api/maps/minerals',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({result:current.source,enabled:value,background})});
-     const url=await localAPI.waitForMapJob(job,{request,wait,onProgress:update});
+      url=await localAPI.waitForMapJob(job,{request,wait,onProgress:update});}
      update({message:_t('正在加载地图画面'),progress:100});
      const entry=await read(url);
-     if(enabled(entry)!==value||entry.data.metadata.sourceSha256!==current.metadata.sourceSha256||
-        entry.data.metadata.version!==current.metadata.version)throw Error(_t('矿石布局与当前地图不匹配，请重新分析地图'));
+     if(!matches(entry,value)||entry.data.metadata.sourceSha256!==current.metadata.sourceSha256||
+        entry.data.metadata.version!==current.metadata.version)throw Error(_t('矿石/树木布局与当前地图不匹配，请重新分析地图'));
      // A late background result belongs only to its original map context.
      current.ready.set(value,entry);
      return entry;

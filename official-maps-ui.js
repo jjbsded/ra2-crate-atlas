@@ -3,9 +3,22 @@
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
+ const names=typeof module!=='undefined'?require('./official-map-names.js'):root.CrateOfficialMapNames;
+ // Search both languages independently of the currently displayed label.
+ const english=_i18n?.messages||root.CrateEnglish||{};
  const versions={ra2:_t('原版'),yr:_t('尤里')};
- const climates={TEMPERATE:_t('温和'),SNOW:_t('雪地'),URBAN:_t('城市'),NEWURBAN:_t('新城市'),DESERT:_t('沙漠'),LUNAR:_t('月球')};
- const normalize=value=>String(value||'').normalize('NFKC').trim().toLocaleLowerCase('zh-CN');
+ const climateNames={TEMPERATE:'温和',SNOW:'雪地',URBAN:'城市',NEWURBAN:'新城市',DESERT:'沙漠',LUNAR:'月球'};
+ const climates=Object.fromEntries(Object.entries(climateNames).map(([id,name])=>[id,_t(name)]));
+ const normalize=value=>String(value||'').normalize('NFKC').trim().toLocaleLowerCase('zh-CN').normalize('NFD').replace(/u\u0308/g,'v').replace(/\p{M}/gu,'').replace(/[’‘]/g,"'");
+ const compact=value=>value.replace(/[\s'".,，。:：_\-–—]/g,'');
+ const searchIndex=new WeakMap();
+ function index(entry){
+  if(!searchIndex.has(entry)){
+   const text=normalize([entry.name,entry.label,english[entry.name],english[entry.modeName],entry.modeName,climateNames[entry.theater],english[climateNames[entry.theater]],...(names?.aliases.get(entry.name)||[]),...Object.entries(entry.variants).flatMap(([v,s])=>[s.file,v,versions[v],v==='yr'?'尤里 尤复 尤里的复仇 Yuri Revenge':'原版 红警2 Red Alert 2'])].join(' '));
+   searchIndex.set(entry,{text,compact:compact(text)});
+  }
+  return searchIndex.get(entry);
+ }
  const label=entry=>_i18n?.officialLabel(entry)||entry.label;
  const supported=(entry,version='all')=>Object.entries(entry.variants).some(([v,s])=>(!versions[version]||v===version)&&!s.unsupportedReason);
  function searchMaps(maps,{query='',version='all',mode='all',maxPlayers='all',theater='all',onlySupported=false}={}){
@@ -13,12 +26,12 @@
   return maps.filter(e=>{
    if(version==='shared'&&!e.shared||versions[version]&&!e.variants[version]||mode!=='all'&&e.mode!==mode||onlySupported&&!supported(e,version))return false;
    if(maxPlayers!=='all'&&e.players[1]!==Number(maxPlayers)||theater!=='all'&&e.theater!==theater)return false;
-   const text=normalize([e.name,e.label,label(e),_i18n?.messages[e.name],_i18n?.messages[e.modeName],e.modeName,climates[e.theater],...Object.entries(e.variants).flatMap(([v,s])=>[s.file,v,versions[v],v==='yr'?'尤复 尤里的复仇 Yuri Revenge':'原版 红警2 Red Alert 2'])].join(' '));
-   return words.every(word=>text.includes(word));
+   const haystack=index(e);
+   return words.every(word=>haystack.text.includes(word)||compact(word)&&haystack.compact.includes(compact(word)));
   });
  }
  function preferredVersion(entry,preferred){return entry.variants[preferred]?preferred:entry.variants.yr?'yr':'ra2';}
- function create({onAnalyze}){
+ function create({onAnalyze,loadCatalog=()=>CrateLocalAPI.json('/api/maps/catalog',{cache:'no-store'}),precomputed=false}){
   const $=id=>document.getElementById(id),dialog=$('officialMapsDialog'),list=$('officialMapList');
   let data=null,pending=null,selected=null,visible=[],buttons=[],revision=0;
   function filter(){return {query:$('officialMapSearch').value,version:$('officialMapVersion').value,mode:$('officialMapMode').value,maxPlayers:$('officialMapPlayers').value,theater:$('officialMapTheater').value,onlySupported:$('officialMapSupported').checked};}
@@ -31,7 +44,8 @@
    $('officialMapSelected').textContent=label(selected);
    $('officialMapAnalyze').disabled=!!source.unsupportedReason;
    $('officialMapDetails').classList.toggle('unavailable',!!source.unsupportedReason);
-   $('officialMapDetails').textContent=source.unsupportedReason?_t('暂不能精确分析：')+(_i18n?.message(source.unsupportedReason)||source.unsupportedReason):
+   $('officialMapDetails').textContent=precomputed?_t('预计算静态初始布局 · 选择后按需下载，不进行在线分析。'):
+    source.unsupportedReason?_t('暂不能精确分析：')+(_i18n?.message(source.unsupportedReason)||source.unsupportedReason):
     _t`${source.file} · 将使用${versions[version]}规则分析初始布局。${selected.shared?_t('两版与箱子有关的静态内容相同；预览与 AI 差异不拆分。'):''}`;
   }
   function choose(entry,focus=false){
@@ -70,7 +84,7 @@
    if(data){render();return;}
    $('officialMapCount').textContent=_t('正在读取内置地图目录…');
    try{
-    if(!pending)pending=CrateLocalAPI.json('/api/maps/catalog',{cache:'no-store'}).catch(error=>{pending=null;throw error;});
+    if(!pending)pending=loadCatalog().catch(error=>{pending=null;throw error;});
     data=await pending;
     const mode=$('officialMapMode');mode.replaceChildren();const all=document.createElement('option');all.value='all';all.textContent=_t('全部模式');mode.append(all);
     for(const entry of data.modes){const option=document.createElement('option');option.value=entry.id;option.textContent=_t(entry.name);mode.append(option);}

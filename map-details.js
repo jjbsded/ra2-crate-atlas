@@ -14,7 +14,7 @@
 
  function completion(data){
   const {previewOnly:preview,approximate}=data.metadata,objectInfo=data.rendering.objects;
-  if(approximate)return _t`近似计算完成 · ${data.metadata.filename} · 概率不保证准确 · ${data.metadata.approximation.retryCellCount} 格采用重抽假设`;else if(preview)return _t`${previewLabel(data.metadata)}完成 · ${data.metadata.filename} · 矿石${data.metadata.mineralsEnabled===false?_t('关'):_t('开')} · 已绘制 ${objectInfo?.total||0} 个建筑／单位`;else return _t`完成 · ${_i18n?.mapName(data.metadata)||data.metadata.displayName||data.metadata.filename} · ${data.metadata.version==='ra2'?_t('原版'):_t('尤里')}规则 · 矿石${data.metadata.mineralsEnabled===false?_t('关'):_t('开')} · 放箱后禁行 ${data.markers.length} 格 · 清空对象后潜在禁行 ${data.potentialMarkers?.length??_t('未计算')} 格 · ${data.metadata.elapsedSeconds} 秒`;
+  if(approximate)return _t`近似计算完成 · ${data.metadata.filename} · 概率不保证准确 · ${data.metadata.approximation.retryCellCount} 格采用重抽假设`;else if(preview)return _t`${previewLabel(data.metadata)}完成 · ${data.metadata.filename} · 矿石/树木${data.metadata.mineralsEnabled===false&&data.metadata.treesEnabled!==false?_t('混合'):data.metadata.mineralsEnabled===false?_t('关'):_t('开')} · 已绘制 ${objectInfo?.total||0} 个建筑／单位`;else return _t`完成 · ${_i18n?.mapName(data.metadata)||data.metadata.displayName||data.metadata.filename} · ${data.metadata.version==='ra2'?_t('原版'):_t('尤里')}规则 · 矿石/树木${data.metadata.mineralsEnabled===false&&data.metadata.treesEnabled!==false?_t('混合'):data.metadata.mineralsEnabled===false?_t('关'):_t('开')} · 放箱后禁行 ${data.markers.length} 格 · 清空对象后潜在禁行 ${data.potentialMarkers?.length??_t('未计算')} 格 · ${data.metadata.elapsedSeconds} 秒`;
  }
  function create({document=root.document}={}){
   const $=id=>document.getElementById(id);
@@ -72,6 +72,7 @@
   $('objectDetails').hidden=!objectInfo?.missing.length&&!objectInfo?.warnings.length;
   $('objectWarnings').replaceChildren();for(const warning of [...(objectInfo?.warnings||[]),...(objectInfo?.missing||[]).map(o=>`${o.type}：${o.reason}`)]){const el=document.createElement('p');el.textContent=warning;$('objectWarnings').append(el);}
   $('objectAudit').href=base+'object-audit.json';
+  $('objectAudit').hidden=!!data.precomputed;
   const directoryResult=['directory','shikong'].includes(data.metadata.version);
   $('resultResourceSummary').textContent=directoryResult?_t('当前结果使用游戏目录：')+(data.metadata.resourceRoot||_t('旧报告未记录路径，请重新分析')):_t('当前结果使用内置')+(data.metadata.version==='ra2'?_t('原版'):_t('尤复'))+_t('资源。');
   $('reanalyzeResources').disabled=busy;

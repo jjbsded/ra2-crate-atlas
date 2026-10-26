@@ -126,3 +126,27 @@ Thumbs.db
 !/third-party-notices.zh-CN.md
 !/*.en.md
 !/docs/*.en.md
+
+# Static Toy sources are reviewed; generated map packages remain in output/.
+!/toy/
+!/build-toy.py
+!/serve-toy.py
+!/verify-toy.cjs
+!/verify-toy.py
+!/TOY.md
+!/TOY.en.md
+!/toy_codec.py
+!/verify-toy-codec.py
+!/verify-toy-codec.cjs
+!/region-auto.js
+!/region_navigation.py
+!/verify-region-auto.cjs
+!/verify-region-navigation.py
+!/verify-region-auto-ui.cjs
+!/toy_artwork.py
+!/verify-toy-artwork.cjs
+!/verify-toy-3d.cjs
+!/verify-region-teams.cjs
+!/verify-region-teams-ui.cjs
+!/verify-region-fill-ui.cjs
+!/verify-region-empty-ui.cjs

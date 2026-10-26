@@ -17,7 +17,7 @@ import runtime_bootstrap
 
 ROOT = Path(__file__).resolve().parent
 APPLICATION_MODULES = (
-    'server.py', 'map_jobs.py', 'map_results.py',
+    'server.py', 'map_jobs.py', 'map_results.py', 'region_navigation.py',
     'realmap_format.py', 'realmap_resources.py', 'realmap_parser.py', 'realmap_sprites.py',
     'realmap.py', 'realmap_bridges.py', 'realmap_exact.py', 'realmap_render.py', 'realmap_refresh.py',
     'realmap_3d.py', 'terrain_depth.py', 'realmap_objects.py', 'realmap_voxel.py',
@@ -51,7 +51,11 @@ def require_file(path):
 
 
 def frontend_files():
-    return sorted({p for pattern in ('*.js', '*.html', '*.css', '*.md', '*.cmd') for p in ROOT.glob(pattern)})
+    # The Toy launcher needs a separately generated static map package. Do not
+    # expose a non-working entry in the ordinary Windows portable installation.
+    source_only = {'启动Toy网页版.cmd'}
+    return sorted({p for pattern in ('*.js', '*.html', '*.css', '*.md', '*.cmd')
+                   for p in ROOT.glob(pattern) if p.name not in source_only})
 
 
 def validate_sources():

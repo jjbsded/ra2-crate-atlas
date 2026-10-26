@@ -20,6 +20,11 @@
 .region-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-weight:600;font-size:16px}
 #regionEditor label{display:block;color:#b6cbd5;margin:12px 0 6px;font-size:13px}
 #regionEditor select,#regionName{width:100%}.region-name-row{display:flex;gap:8px}.region-name-row #regionName{min-width:0;flex:1}
+.region-active-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:9px 0 12px}
+.region-active-totals>div{display:flex;flex-direction:column}
+.region-active-totals dt{font-size:11px;color:#9db5c4;line-height:1.5}
+.region-active-totals dd{margin:auto 0 0;padding-top:2px;color:#d8e9ef;font-size:13px;font-weight:600;line-height:1.4;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#regionAllTotal{color:#ffe3a4}
 .region-picker{position:relative}
 #regionActive{display:flex;align-items:center;gap:9px;width:100%;text-align:left;min-height:38px}
 #regionActiveText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -33,6 +38,7 @@
 .region-option:hover,.region-option:focus-visible{background:#233e4b;border-color:#f5ce80;outline:none}
 #regionColor{width:43px;height:38px;padding:4px;flex-shrink:0;cursor:pointer}
 #regionEditor .region-overlap{display:flex;align-items:center;gap:6px;color:#daece6}
+.region-auto{margin-top:15px;padding:10px;border:1px solid #3c615a;border-radius:8px}.region-auto summary{cursor:pointer;color:#9de9d5}.region-auto fieldset{border:0;padding:0;margin:0}.region-auto input[type=number]{width:90px;float:right}.region-auto .hint{font-size:12px;line-height:1.7;color:#9eb9b3}.region-auto button{margin-top:10px}#regionAutoStatus{font-size:12px;color:#b2e9d8}
 .region-editor-actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.region-editor-actions button{padding:7px 10px}
 #regionLive{color:#a3e9d6;font-variant-numeric:tabular-nums}
 #regionSave{font-size:12px;color:#9ecbb9}#regionSave.error{color:#ffad9f}
@@ -59,3 +65,12 @@
 .region-preview button+button canvas{width:106px}
 #regionSummary button:disabled,#regionEditor button:disabled{cursor:not-allowed}
 @media(max-width:1000px){#regionEditor{max-height:none}.region-toolbar{gap:8px}#regionSummary{padding:12px}}
+.region-team-settings{border-top:1px solid #304c51;margin-top:12px;padding-top:10px}
+#regionAutoTeams{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,100px),1fr));gap:8px;max-width:300px}
+#regionEditor #regionAutoTeams label{display:grid;gap:4px;margin:0;min-width:0}
+#regionAutoTeams select{width:100%;min-width:0;padding:7px 8px}
+#regionEditor #regionAutoFields>label{display:flex;align-items:center;justify-content:space-between;gap:8px;white-space:normal;min-width:0}
+#regionAutoFields input[type=number]{float:none;flex:0 0 70px;width:70px;min-width:0}
+#regionEditor #regionAutoFields>.region-overlap{justify-content:flex-start}
+#regionAutoFields input[type=checkbox]{flex-shrink:0}
+.region-swatch.empty-region{background-image:conic-gradient(#b2bec5 25%,#4b5c68 0 50%,#b2bec5 0 75%,#4b5c68 0);background-size:8px 8px}

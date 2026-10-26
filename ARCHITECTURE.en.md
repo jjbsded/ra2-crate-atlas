@@ -9,7 +9,7 @@ Crate Atlas combines a local Python HTTP service with plain JavaScript pages. Th
 | Module | Responsibility |
 | --- | --- |
 | `server.py` | HTTP parameters, origin checks, static files, preferences, resource settings and video export |
-| `map_jobs.py` | Submission, serial execution, progress snapshots and ore-layout reuse; no HTTP or 3D dependency |
+| `map_jobs.py` | Submission, serial execution, progress snapshots and ore/tree-layout reuse; no HTTP or 3D dependency |
 | `map_results.py` | Result paths, source-map hashes, bounded shared report cache and resource consistency |
 | `realmap.py` | Analysis orchestration and CLI: parsing, approximation, native search, probability, rendering, output |
 | `realmap_format.py` | INI / numeric syntax and bounded LCW / LZO decoding; no model or rendering dependency |
@@ -20,11 +20,11 @@ Crate Atlas combines a local Python HTTP service with plain JavaScript pages. Th
 | `realmap_approx.py`, `realmap_bridges.py` | Unknown-content assumptions and bridge-layer rules |
 | `realmap_render.py`, `realmap_objects.py`, `realmap_voxel.py` | Ground, buildings and units; do not decide probabilities |
 | `realmap_3d.py`, `terrain_depth.py` | Local 3D patches from analyzed results and original artwork |
-| `realmap_refresh.py` | Explicit rerender / preview upgrades, preserving the report's ore layout |
+| `realmap_refresh.py` | Explicit rerender / preview upgrades, preserving the report's ore/tree layout |
 | `original_resources.py`, `resource_context/` | Stock validation, low-level directory reads and provenance |
 | `i18n_settings.py` | Windows display-language detection and atomic installation-local language preference |
 
-`map_jobs` and `map_results` load only the standard library and lightweight resource entry points at import time. Ore switching, report reads and 2D refresh must not import the entire 3D renderer just for shared utilities. Dependencies flow from orchestration to parser, resource and format layers. Native-tool validation / compilation occurs when entering probability calculation. `parse_map()` works without a compiler, Pillow, NumPy or the solver.
+`map_jobs` and `map_results` load only the standard library and lightweight resource entry points at import time. Ore/tree switching, report reads and 2D refresh must not import the entire 3D renderer just for shared utilities. Dependencies flow from orchestration to parser, resource and format layers. Native-tool validation / compilation occurs when entering probability calculation. `parse_map()` works without a compiler, Pillow, NumPy or the solver.
 
 Stock and directory resources share cell parsing and sprite decoding. `realmap.py` retains old function imports for compatibility. New code should import the owning module directly. The dependency-cycle check includes function-local imports, excluding only the explicit delayed compatibility forwarders `realmap_mod.preview` and `realmap_render.refresh_result`. Business modules must remain acyclic. Shared sprite functions belong in `realmap_sprites`, not reverse imports of the renderer.
 
@@ -70,6 +70,18 @@ The height demo reads bundled `examples/cliff-demo.json` without a map job, game
 The English catalog uses Chinese source text as keys. Dynamic UI templates have numbered placeholders. App modules call the translator explicitly; startup translates static HTML before custom map / region data is inserted. Only known diagnostic fields pass through legacy message matching. Names, filenames, paths, object IDs, map content and numeric probability arrays are never globally replaced. Official names are translated only for catalog display / search; catalog hashes and IDs stay stable. Export jobs capture the language before loading the shared model and renderer. Changing language is disabled while a foreground analysis, resource save or video export is in progress.
 
 ## Builds and verification
+
+The Toy edition uses the explicit static data source in `toy/toy-platform.js`; it does not intercept global `fetch`. The shared result reader accepts JSON/binary readers, the ore/tree cache accepts a layout resolver, and the map selector accepts a catalog reader. Local installations keep their existing HTTP implementation. The shared map workspace retains rendering, origins, regions and exports, with a responsive touch viewport for the static edition.
+
+Toy's `terrain3d-patch.js` injects a patch loader into the shared `terrain3d.js`, reading heights, slopes, risk flags and `higher` relationships directly from the decoded report, with a reverse index for affected lower cells. It reuses the 2D palette and object symbols, without Python APIs. High bridges retain separate decks and two-sided geometric rails. Three.js loads locally on demand. Static simplified meshes are batched by material with per-face cell mappings for picking; textures and geometries are released on close/recenter. `verify-toy-3d.cjs` covers paired layouts, six climates, bridge layers, touch, no API calls and resource disposal.
+
+Region route labels retain source-specific distance/sea states, while coordinate ownership and diagonal clearance use player/team groups. Teammates never block one another or reset distances to a group centroid. Documents persist pending `autoOptions.teams` separately from `appliedTeams`; successful partitioning commits applied teams and memberships together. Cancel/failure preserves markers; undo and backups include both. Optional `regionStyles` in `player-starts.js` unify main-map, minimap, thumbnail and export rendering, and are omitted outside region mode. Names and probabilities are measured separately at a 0.7 font ratio, vertically centered by glyph bounds. Exports retain label and player-style snapshots.
+
+`build-toy.py` computes exact reports at build time and preserves integer fractions, geometry and origins. By default, `toy_artwork.py` adds semantic object descriptors and `toy/terrain-artwork.js` assembles shared colors, simple textures and symbols per cell. Spatial buckets bound drawing work; the existing view cache avoids repainting terrain while editing regions. `map-artwork.js` gives original images and procedural artwork one coordinate contract across thumbnails, minimaps, origin restoration and exports. Optional raster mode still deduplicates WebP images. `serve-toy.py` exposes only static files under a subpath; browser tests forbid analysis API requests. The source-only Toy launcher is excluded from ordinary Windows portable packages. See [TOY.en.md](TOY.en.md).
+
+Static transport is independent of the analysis model: `toy_codec.py` emits shared cell columns, layout differences, finite-retry arithmetic recipes and origin dictionaries. `toy/static-codec.js` restores the original report schema in a Worker or the direct fallback. BigInt restores exact integers; nearest-even IEEE 754 rounding restores floating-point probabilities. Shared rendering and statistics interfaces stay unchanged. Content hashes deduplicate assets and the builder enforces a ZIP budget; only artwork is reduced lossily. Python and JavaScript verification independently compare every restored cell and original search byte.
+
+`region_navigation.py` reads validated rules and emits a routing mask in original report cell order. The desktop API serves it at `/api/maps/region-navigation`; Toy packages the same mask at build time without changing the probability fingerprint. Shared async `region-auto.js` uses separate deck/ground nodes, matching ramp edges, diagonals without corner cutting, and nondominated path/continuous-crossing states. It yields and supports cancellation; map changes, edits or cross-tab updates discard stale jobs. Region documents retain parameters and a once-only marker, with backward-compatible storage and one-step undo. Probability labels are independent of fill raster caches; exports freeze their text, color, size and center.
 
 `build-portable.py::APPLICATION_MODULES` explicitly lists Python runtime modules. Before creating output, the builder checks local imports and fails on unpackaged dependencies. Add split modules there. JS / HTML / CSS remain directly loaded; update references and cache versions as needed. Original archives use a separate hash whitelist.
 

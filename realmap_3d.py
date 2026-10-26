@@ -332,6 +332,7 @@ def build_patch(report, lookup, path, x, y, radius):
                               sourceSha256=meta['sourceSha256'],predictionEnabled=enabled,previewOnly=bool(meta.get('previewOnly')),
                               partialAnalysis=bool(meta.get('partialAnalysis')), approximate=bool(meta.get('approximate')),
                               mineralsEnabled=meta.get('mineralsEnabled',True),
+                              treesEnabled=meta.get('treesEnabled',True),
                               cliffBackImpassability=meta.get('cliffBackImpassability'),uniqueTiles=len(tiles),missing=sorted(missing),
                               bridgeNote=('高桥按桥面高度显示原始贴图，桥下地形保留；禁行标记与放箱预览仍对应地面层。桥墩、栏杆未重建为立体模型。'
                                           if any(c.get('bridge') and c['bridge']['kind']=='high' for c in nearby)

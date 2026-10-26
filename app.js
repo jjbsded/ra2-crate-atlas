@@ -135,6 +135,6 @@ $('exportAll').onclick=()=>exportVideo(true);$('exportCurrent').onclick=()=>expo
 function loop(now){if(playing){time=Math.min(trace.duration,time+(now-last)/1000);forceComplete=false;if(time>=trace.duration){playing=false;forceComplete=true;}draw();}last=now;requestAnimationFrame(loop);}
 build();if(timingStartupError)$('error').textContent=timingStartupError;requestAnimationFrame(loop);
 Promise.all(Object.entries(CrateAssetData).map(([name,asset])=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve([name,image]);image.onerror=()=>reject(Error(_t('素材加载失败：')+name));image.src=asset.data;}))).then(entries=>{S.setAssets(Object.fromEntries(entries),CrateAssetData);draw();$('snapshot').disabled=false;}).catch(e=>{$('error').textContent=e.message;});
-if(location.protocol!=='file:')document.querySelector('a[data-doc-en]').href='/research'+(_i18n?.language==='en'?'?language=en':'');
+if(location.protocol!=='file:'&&!globalThis.CrateWebConfig?.static)document.querySelector('a[data-doc-en]').href='/research'+(_i18n?.language==='en'?'?language=en':'');
 // Local QA and deterministic export use the exact same renderer as the controls.
 window.crateDemo={get trace(){return trace;},get time(){return time;},setTime(t){time=Math.max(0,Math.min(trace.duration,t));playing=false;forceComplete=false;draw();},build,options};

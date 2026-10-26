@@ -1,0 +1,40 @@
+.toy{--touch-accent:#9de0b8}.toy main{max-width:1600px}.toy .import-bar{border-style:solid;gap:12px}.toy #dropzone{padding:12px 16px}.toy #dropzone .primary{min-height:44px}.toy #resourceDialog,.toy #retryMod,.toy #retryApprox{display:none!important}.toy .page-links{display:flex;gap:16px;align-items:center}.toy #touchMode{border-color:#689988;min-height:44px}.toy #touchMode[aria-pressed=true]{color:#b8f8d2;background:#203e35}.toy #mobileMapInfo{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:10px 12px;min-height:44px;font-size:13px;color:#c8dedb;border-top:1px solid #294151}.toy #map{touch-action:none}.toy #canvasHost{min-width:0}.toy #mobileMapInfo:empty{display:none}.toy #officialMapList{overscroll-behavior:contain}.toy .region-summary-wrap{max-width:100%;overflow:auto}.toy a,.toy button,.toy input,.toy select{touch-action:manipulation}
+@media(max-width:760px),(pointer:coarse) and (max-width:1100px),(orientation:landscape) and (max-height:600px) and (max-width:1200px){
+ .toy main{padding:12px 10px}.toy .app-header{gap:12px;margin-bottom:16px;align-items:stretch}.toy .app-header>div{min-width:0}.toy h1{font-size:22px;line-height:1.4}.toy .page-switch{min-width:0;max-width:none;padding:12px 16px;min-height:64px}.toy .page-switch-wrap{width:100%}.toy .page-switch strong{font-size:18px}.toy .page-links{flex-wrap:wrap;gap:10px}.toy button,.toy select,.toy input:not([type=checkbox]):not([type=range]):not([type=color]){min-height:44px;font-size:16px}.toy input[type=checkbox]{width:20px;height:20px}.toy label{max-width:100%;white-space:normal}.toy .view-controls{gap:12px;font-size:13px}.toy .view-controls label{min-height:32px}.toy .canvas-tools{gap:8px;position:relative}.toy .canvas-tools button{flex-grow:1}.toy .canvas-tools input{width:62px}.toy .canvas-tools .spacer{display:none}.toy .map-layout{display:flex;flex-direction:column}.toy #map{display:block;width:100%;height:58svh;min-height:350px;max-height:650px;object-fit:contain}.toy #canvasHost.preview #map{height:100%;max-height:none}.toy .canvas-control{min-height:0!important;min-width:0!important}.toy .sliders{grid-template-columns:1fr;gap:8px}.toy .slider-card{padding:10px 12px}.toy aside{position:static!important;max-height:none;width:100%;min-width:0}.toy #regionToolbar{position:static;max-width:100%;gap:8px}.toy #regionToolbar label{flex-wrap:wrap}.toy #regionTool{width:100%;max-width:100%}.toy .region-tools{flex-wrap:wrap}.toy .region-picker{max-width:100%}.toy #regionSummary{overflow-x:auto}.toy #regionSummary table{min-width:920px}.toy #officialMapsDialog{width:calc(100vw - 16px);max-height:94svh;padding:14px}.toy .official-map-row{min-height:76px}.toy .official-maps-filters{display:flex;flex-wrap:wrap;gap:8px}.toy .official-maps-filters input{max-width:100%}.toy .official-maps-actions{flex-wrap:wrap}.toy .official-maps-actions button{flex:1}.toy #scene{width:100%;height:auto;touch-action:pan-y}.toy .toolbar{gap:8px}.toy .toolbar input{max-width:100px}.toy .toolbar .spacer{display:none}.toy .toolbar button{flex-grow:1}.toy .threshold-details{flex-wrap:wrap}.toy #densityCell{min-height:40px}.toy .mineral-toast{bottom:max(16px,env(safe-area-inset-bottom));width:calc(100vw - 24px)}
+}
+.toy #canvasHost{width:100%;align-self:stretch}
+.toy #canvasHost.preview,.toy #canvasHost:fullscreen{display:block}
+.toy #canvasHost.preview #map,.toy #canvasHost:fullscreen #map{width:100%;height:100%;min-height:0;max-height:none}
+.toy #canvasHost.preview #mobileMapInfo,.toy #canvasHost:fullscreen #mobileMapInfo{position:absolute;left:8px;right:8px;bottom:8px;min-height:0;padding:6px 10px;background:#101c25d9;pointer-events:none}
+/* Fill the available landscape height; vh remains a fallback for older WebViews. */
+@media(orientation:landscape) and (max-height:600px) and (max-width:1200px){
+ .toy #map{height:calc(100vh - 16px);height:calc(100svh - 16px);height:calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));min-height:240px;max-height:none}
+}
+/* Collapsed by default, with symbols matching the procedural map artwork. */
+.toy-art-legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:4px 16px;margin:10px 0}
+.toy-art-legend>span{display:flex;align-items:center;gap:6px;font-size:13px}
+.toy-art-legend canvas{width:42px;height:44px;flex:0 0 42px;max-width:none}
+#toyArtworkLegend{margin:10px 0;color:#c7dbe2}
+#toyArtworkLegend>summary{cursor:pointer}
+.toy #terrain3dDialog label[hidden]{display:none}
+.toy .toy-3d-panel{margin:0;padding:0;border:0;flex:0 0 auto;min-height:0}
+.toy .toy-3d-panel>summary{padding:9px 16px;color:#a9e4d0;cursor:pointer;border-top:1px solid #2b404c;font-size:13px}
+.toy #toy3dControls>summary{display:none}
+.toy #toy3dDetails{max-height:31%;overflow:auto}
+.toy #toy3dDetails .terrain3d-footer{max-height:none;border-top:0;padding-top:4px}
+.toy #terrain3dError{margin:0 16px 8px}
+@media(max-width:760px),(pointer:coarse),(max-height:600px){
+ .toy #terrain3dDialog{width:100vw;height:100dvh;border:0;border-radius:0}
+ .toy .terrain3d-header{padding:8px 12px;gap:8px}
+ .toy .terrain3d-header h2{font-size:17px}
+ .toy .terrain3d-header .eyebrow{font-size:10px;margin-bottom:2px}
+ .toy #toy3dControls>summary{display:list-item}
+ .toy #toy3dControls{max-height:32%;overflow:auto}
+ .toy .terrain3d-controls{padding:6px 12px 10px;gap:8px}
+ .toy .terrain3d-controls button,.toy .terrain3d-controls select{font-size:13px;min-height:40px;padding:6px 8px}
+ .toy #terrain3dStage{min-height:80px}
+ .toy #toy3dDetails{max-height:29%}
+ .toy .terrain3d-gesture{font-size:10px;left:5px;right:5px;bottom:5px;padding:4px 6px}
+ .toy .terrain3d-footer{padding:4px 12px 8px}
+ .toy #terrain3dRelations button{font-size:12px;min-height:36px}
+}

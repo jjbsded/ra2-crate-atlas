@@ -58,6 +58,23 @@ doc.overlap=true;R.apply(doc,game);assert.equal(doc.regions[0].cells.size,23);as
 R.apply(doc,game.slice(0,3),true);assert.equal(doc.regions[1].cells.size,27);
 doc.overlap=false;assert.equal(R.exclusive(doc),23);assert.equal(doc.regions[0].cells.size,0);
 const roundtrip=R.decode(R.encode(doc),valid);assert.equal(R.encode(roundtrip),R.encode(doc));
+const eraser=R.defaults();eraser.overlap=true;eraser.active=R.EMPTY;
+eraser.regions[0].cells=new Set(game);eraser.regions[1].cells=new Set(game);
+assert.ok(R.apply(eraser,game.slice(0,3),false));
+assert.equal(eraser.regions[0].cells.size,27);assert.equal(eraser.regions[1].cells.size,27);
+assert.equal(R.revision(eraser.regions[0]),1);assert.equal(R.revision(eraser.regions[1]),1);
+assert.equal(R.apply(eraser,game.slice(0,3),true),false,'Erasing already empty cells is a no-op.');
+assert.equal(R.revision(eraser.regions[0]),1,'No-op erasing must reuse geometry/statistic caches.');
+assert.ok(R.apply(eraser,game.slice(3,4),true));
+assert.equal(R.encode(R.decode(R.encode(eraser),valid)),R.encode(eraser),'Empty survives backup roundtrip without adding a region.');
+// Fill uses edge connectivity and land/sea type, never distant equal colors.
+const fillCells=[{x:1,y:1,land:0},{x:2,y:1,land:0},{x:3,y:1,land:2},{x:4,y:1,land:0},{x:3,y:2,land:0}],fillLookup=new Map(fillCells.map(c=>[R.key(c),c])),fillDoc=R.defaults();
+fillDoc.regions[1].cells=new Set(fillLookup.keys());fillDoc.active='r1';
+assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],fillLookup),[R.key(fillCells[0]),R.key(fillCells[1])]);
+assert.deepEqual(R.fillKeys(fillDoc,fillCells[2],fillLookup),[R.key(fillCells[2])]);
+fillDoc.regions[1].cells.delete(R.key(fillCells[1]));assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],fillLookup),[R.key(fillCells[0])]);
+assert.deepEqual(R.fillKeys(fillDoc,fillCells[1],fillLookup),[R.key(fillCells[1])],'Unassigned cells form their own fill membership');
+const cut=new Map(fillLookup);cut.delete(R.key(fillCells[0]));assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],cut),[]);
 const dirty=JSON.parse(R.encode(doc));dirty.regions[0].cells=[9999999];dirty.regions[0].color='url(bad)';
 assert.equal(R.decode(JSON.stringify(dirty),valid).regions[0].cells.size,0);
 assert.equal(R.decode(JSON.stringify(dirty),valid).regions[0].color,R.colors[0]);
@@ -88,3 +105,11 @@ if(report){
  console.log(`Real map: ${all.all.count} cells, land ${all.land.count}, sea ${all.sea.count}; exact partition conserved.`);
 }
 console.log('Region geometry, gap-free brushes, exclusive/overlap edits, persistence, zero-area averages and exact sorting passed.');
+{
+ const saved=R.defaults();delete saved.autoOptionsVersion;saved.autoOptions.maxStraight=50;saved.autoOptions.maxPath=100;
+ const migrated=R.decode(R.encode(saved),new Map());assert.equal(migrated.autoOptions.maxStraight,40);assert.equal(migrated.autoOptions.maxPath,70);
+ saved.autoOptions.maxStraight=12;saved.autoOptions.maxPath=20;
+ assert.equal(R.decode(R.encode(saved),new Map()).autoOptions.maxStraight,12,'Custom limits survive migration');
+ saved.autoOptionsVersion=2;saved.autoOptions.maxStraight=50;saved.autoOptions.maxPath=100;
+ assert.equal(R.decode(R.encode(saved),new Map()).autoOptions.maxPath,100,'Explicit settings after migration stay unchanged');
+}

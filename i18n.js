@@ -82,9 +82,10 @@
  function setBusy(owner,value){value?busy.add(owner):busy.delete(owner);if(selector)selector.disabled=busy.size>0;}
  function mount(doc=root.document){
   documentText(doc);
-  if(root.location.protocol==='file:')try{root.localStorage?.setItem(storageKey,language);}catch{}
+  const localPreference=root.location.protocol==='file:'||root.CrateWebConfig?.static;
+  if(localPreference)try{root.localStorage?.setItem(storageKey,language);}catch{}
   const host=doc.querySelector('.page-links')||doc.querySelector('header');if(!host)return;
-  const label=doc.createElement('label');label.className='language-control';label.append('中文 / English ');
+  const label=doc.createElement('label');label.className='language-control';const globe=doc.createElement('span');globe.textContent='🌐';globe.setAttribute('aria-hidden','true');label.append(globe,' 中文 / English ');
   selector=doc.createElement('select');selector.id='languageSelect';selector.setAttribute('aria-label','Language / 界面语言');
   for(const [value,text] of [['zh-CN','简体中文'],['en','English']]){const o=doc.createElement('option');o.value=value;o.textContent=text;selector.append(o);}
   selector.value=language;selector.title=t('切换语言后重新载入页面，保留当前地图与已保存的区域划分。');label.append(selector);host.append(label);
@@ -92,11 +93,11 @@
   selector.onchange=async()=>{
    const next=selector.value;selector.disabled=true;error.textContent='';
    try{
-    if(root.location.protocol!=='file:'){
+    if(!localPreference){
      const response=await root.fetch('/api/preferences/language',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({language:next})});
      if(!response.ok)throw Error(t('语言设置未保存，请重试。'));
     }
-    try{root.localStorage?.setItem(storageKey,next);}catch{if(root.location.protocol==='file:')throw Error(t('浏览器不允许保存语言设置。'));}
+    try{root.localStorage?.setItem(storageKey,next);}catch{if(localPreference)throw Error(t('浏览器不允许保存语言设置。'));}
     root.dispatchEvent(new Event('crate:language-before-reload'));
     root.location.reload();
    }catch(e){error.textContent=message(e.message);selector.value=language;selector.disabled=busy.size>0;}

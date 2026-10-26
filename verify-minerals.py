@@ -1,4 +1,4 @@
-"""No-mineral layouts must equal an independently cleared map, in both games."""
+"""Combined OFF equals a map cleared independently of ore AND trees."""
 import json
 from pathlib import Path
 import re
@@ -13,9 +13,19 @@ from realmap_3d import patch
 from realmap_refresh import refresh_result
 import server
 from map_test_fixtures import fixture, pack
+from realmap_parser import is_tree
 
 
 def main():
+    assert is_tree('CUSTOMPALM', {'NAME': 'Palm Tree'})
+    assert is_tree('MODALIAS', {'IMAGE': 'TREE02'})
+    for kind, cfg in [('TIBTRE01', {'NAME': 'Tiberium Tree'}),
+                      ('VEINTREE', {'NAME': 'Tree'}),
+                      ('CUSTOM', {'NAME': 'Tree', 'SPAWNSTIBERIUM': 'yes'}),
+                      ('ICE01', {'NAME': 'Ice Floe', 'WATERBOUND': 'yes'}),
+                      ('TRFF01', {'NAME': 'Traffic Light'}),
+                      ('BOXES01', {'NAME': 'Boxes'}), ('UNKNOWN', {})]:
+        assert not is_tree(kind, cfg), kind
     folder = ROOT/'output/mineral-verification'
     folder.mkdir(parents=True, exist_ok=True)
     reports = {}
@@ -23,6 +33,7 @@ def main():
         res = resources(version)
         names = list(res.rules['OVERLAYTYPES'].values())
         raw = fixture(objects=True).decode()
+        raw = raw.replace('[Terrain]\n', '[Terrain]\n21023=TREE01\n23023=BOXES01\n')
         overlays = bytearray([255]*262144)
         overlays[20+512*21] = names.index('GASAND')
         overlays[21+512*20] = names.index('TIB01')
@@ -33,10 +44,10 @@ def main():
                           raw, flags=re.S).encode()
 
         original = with_overlays(overlays)
-        # Reference input clears exactly the two resource locations, not a
+        # Reference input clears both resource locations and the tree, not a
         # second use of the option/implementation under test.
         overlays[21+512*20] = overlays[22+512*21] = 255
-        cleared = with_overlays(overlays)
+        cleared = with_overlays(overlays).replace(b'21023=TREE01\n', b'')
         on = analyze(original, folder/f'{version}-on', version)
         off = analyze(original, folder/f'{version}-off', version, minerals_enabled=False)
         reference = analyze(cleared, folder/f'{version}-reference', version)
@@ -47,6 +58,9 @@ def main():
         assert off['metadata']['sourceSha256'] == on['metadata']['sourceSha256'] == sha(original)
         assert off['metadata']['mineralsEnabled'] is False
         assert off['metadata']['removedMineralCount'] == 2
+        assert off['metadata']['treesEnabled'] is False
+        assert off['metadata']['removedTreeCount'] == 1
+        assert off['metadata']['terrainRemovalVersion'] == 1
         assert (folder/f'{version}-off/source.map').read_bytes() == original
         lookup_on = {(c['x'],c['y']):c for c in on['cells']}
         lookup_off = {(c['x'],c['y']):c for c in off['cells']}
@@ -55,6 +69,13 @@ def main():
             assert lookup_off[p]['status'] == 'crate' and lookup_off[p]['probability'] > 0
         assert lookup_on[20,21]['overlayName'] == lookup_off[20,21]['overlayName'] == 'GASAND'
         assert lookup_off[19,19]['terrain'] == 'TIBTRE01'  # drill remains
+        assert lookup_off[18,20]['terrain'] == 'TRFF01'  # non-tree scenery remains
+        assert lookup_off[23,23]['terrain'] == 'BOXES01'
+        assert lookup_on[23,21]['occupied'] and lookup_on[23,21]['probability'] == 0
+        assert not lookup_off[23,21]['occupied'] and lookup_off[23,21]['terrain'] is None
+        assert lookup_off[23,21]['probability'] > 0
+        for p in ((20,20), (22,20), (20,22)):
+            assert lookup_off[p]['occupied'], 'Buildings, vehicles and infantry remain'
         assert any(c['probability'] != lookup_off[p]['probability'] for p,c in lookup_on.items()
                    if c['probability'] > 0), 'Retry changes must affect other cells too.'
         for key in ('image', 'objectImage'):
@@ -71,7 +92,8 @@ def main():
             assert (folder/f'{version}-off'/refreshed['rendering'][key]).read_bytes() == pixels
         selected = patch(f'/output/mineral-verification/{version}-off/result.json',21,20,4)
         assert selected['metadata']['mineralsEnabled'] is False
-        assert not any(d['name'] in ('TIB01','GEM01') for c in selected['cells'] for d in c['decorations'])
+        assert selected['metadata']['treesEnabled'] is False
+        assert not any(d['name'] in ('TIB01','GEM01','TREE01') for c in selected['cells'] for d in c['decorations'])
         assert any(d['name'] == 'TIBTRE01' for c in selected['cells'] for d in c['decorations'])
         for c in selected['cells']:
             source = lookup_off[c['x'],c['y']]

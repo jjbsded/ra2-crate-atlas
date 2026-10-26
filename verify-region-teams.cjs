@@ -1,0 +1,20 @@
+/* Team persistence and the region-only start-marker contract. */
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),{createCanvas}=require('@napi-rs/canvas');
+const R=require('./region-statistics.js'),P=require('./player-starts.js');
+const doc=R.defaults();doc.appliedTeams={1:'A',2:'A',3:'empty'};doc.autoOptions.teams={...doc.appliedTeams};
+Object.assign(doc.regions[0],{generatedName:{kind:'team',team:'A'},color:'#ffff00'});
+Object.assign(doc.regions[1],{generatedName:{kind:'player',number:4},color:'#121b4c'});
+const restored=R.decode(R.encode(doc),new Set());assert.deepEqual(restored.appliedTeams,doc.appliedTeams);assert.deepEqual(restored.autoOptions.teams,doc.autoOptions.teams);assert.equal(R.displayName(restored.regions[0]),'小队A');
+restored.regions[0].name='自定义';restored.regions[0].customName=true;assert.equal(R.displayName(restored.regions[0]),'自定义');
+const data={metadata:{waypoints:{0:7001,1:5003,2:3005,3:1007}},rendering:{origin:[230,-30]}},cells=[{x:1,y:7,level:0},{x:3,y:5,level:0},{x:5,y:3,level:0},{x:7,y:1,level:0}],state={data,lookup:new Map(cells.map(c=>[c.x+','+c.y,c]))};
+const styles=R.playerStyles(restored,P.positions(state));assert.equal(styles[1].color,styles[2].color);assert.equal(styles[1].team,'A');assert.equal(styles[3].empty,true);assert.equal(styles[4].team,null);assert.equal(styles[4].color,'#121b4c');
+assert.deepEqual(R.labelStrokes('#ffff00'),{outer:'#fff',inner:'#050a0b'});assert.deepEqual(R.labelStrokes('#121b4c'),{outer:'#fff',inner:'#050a0b'});
+const legacy=JSON.parse(R.encode(doc));delete legacy.appliedTeams;delete legacy.autoOptions.teams;assert.deepEqual(R.decode(JSON.stringify(legacy),new Set()).appliedTeams,{});
+const image=createCanvas(480,130),ctx=image.getContext('2d'),texts=[],fill=ctx.fillText.bind(ctx);ctx.fillText=(text,...args)=>{texts.push({text,color:ctx.fillStyle,alpha:ctx.globalAlpha});fill(text,...args);};
+P.draw(ctx,state,{x:0,y:0,scale:1},{radius:13,offset:23,regionStyles:styles});assert.equal(texts.filter(t=>t.text==='A').length,2);assert.ok(texts.find(t=>t.text==='3').alpha<.5);assert.equal(texts.find(t=>t.text==='4').alpha,1);
+const pixels=ctx.getImageData(0,0,480,130).data;
+let crossOutside=0;for(let y=54;y<=80;y++)for(let x=270;x<=310;x++){const i=(y*480+x)*4;if(Math.abs(x-290)>15&&pixels[i]>180&&pixels[i+1]<120&&pixels[i+3]>0&&pixels[i+3]<200)crossOutside++;}assert.ok(crossOutside>0,'The translucent red X extends horizontally beyond the circle');
+const a=createCanvas(480,130),b=createCanvas(480,130);P.draw(a.getContext('2d'),state,{x:0,y:0,scale:1});P.draw(b.getContext('2d'),state,{x:0,y:0,scale:1},{regionStyles:null});assert.deepEqual(a.toBuffer('image/png'),b.toBuffer('image/png'));
+fs.mkdirSync('output/region-teams-qa',{recursive:true});fs.writeFileSync('output/region-teams-qa/markers.png',image.toBuffer('image/png'));
+console.log('PASS teams: saved/migrated settings, custom names, shared colors, empty-slot X and alpha, neutral squares, white outer / black inner outlines and unchanged normal mode.');

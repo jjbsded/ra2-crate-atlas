@@ -4,27 +4,37 @@
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
- function createReader({fetch=(...args)=>root.fetch(...args),Image=root.Image,
+ function createReader({fetch=(...args)=>root.fetch(...args),Image=root.Image,readJSON=null,readBinary=null,
   createSources=(...args)=>root.CrateTransferOrigins.create(...args)}={}){
   return async function read(url,{signal}={}){
-   const response=await fetch(url,{cache:'no-store',signal});
-   if(!response.ok)throw Error(_t('分析结果无法读取，请重新分析地图'));
-   const data=await response.json(),base=url.slice(0,url.lastIndexOf('/')+1);
+   let data;
+   if(readJSON)data=await readJSON(url,{signal});
+   else{const response=await fetch(url,{cache:'no-store',signal});
+    if(!response.ok)throw Error(_t('分析结果无法读取，请重新分析地图'));
+    data=await response.json();}
+   const base=url.slice(0,url.lastIndexOf('/')+1);
    _i18n?.diagnostics(data);
-   if(!data.metadata||!Array.isArray(data.cells)||!data.rendering?.image)throw Error(_t('地图分析结果不完整，请重新分析地图'));
+   if(!data.metadata||!Array.isArray(data.cells)||(!data.rendering?.image&&!data.rendering?.simplified))throw Error(_t('地图分析结果不完整，请重新分析地图'));
    async function picture(name){
     if(!name)return null;
     const image=new Image();image.src=base+name+'?v='+(data.rendering.version||1);
     await image.decode();return image;
    }
-   const [im,objectImage]=await Promise.all([picture(data.rendering.image),picture(data.rendering.objectImage)]);
+   let im,objectImage;
+   if(data.rendering.simplified){
+    if(data.rendering.simplified.version!==1||!root.CrateToyTerrain)throw Error('Unsupported Toy artwork format');
+    ({im,objectImage}=root.CrateToyTerrain.create(data));
+   }else{
+    const [ground,other]=await Promise.all([picture(data.rendering.image),data.rendering.objectImage===data.rendering.image?null:picture(data.rendering.objectImage)]);
+    im=ground;objectImage=data.rendering.objectImage===data.rendering.image?im:other;
+   }
    signal?.throwIfAborted();
    let sourceIndex=null;
    function getSources(){
-    if(!sourceIndex)sourceIndex=fetch(base+'search.bin').then(async response=>{
+    if(!sourceIndex)sourceIndex=(readBinary?readBinary(base+(data.precomputed?.search||'search.bin')):fetch(base+'search.bin').then(async response=>{
      if(!response.ok)throw Error(_t('来源记录无法读取，请重新分析地图。'));
-     return createSources(data,await response.arrayBuffer());
-    }).catch(error=>{sourceIndex=null;throw error;});
+     return response.arrayBuffer();
+    })).then(buffer=>createSources(data,buffer)).catch(error=>{sourceIndex=null;throw error;});
     return sourceIndex;
    }
    return {url,data,base,im,objectImage,getSources};

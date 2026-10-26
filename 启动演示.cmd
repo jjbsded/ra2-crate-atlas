@@ -1,10 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "CRATE_PY=%~dp0runtime\python\python.exe"
-if exist "%CRATE_PY%" (
-  "%CRATE_PY%" -B server.py --open --page demo %*
-) else (
-  python -B server.py --open --page demo %*
-)
-pause
+call "%~dp0run-python.cmd" -B server.py --open --page demo %*
+set "CRATE_LAUNCH_EXIT=%errorlevel%"
+if not "%CRATE_LAUNCH_EXIT%"=="0" pause
+exit /b %CRATE_LAUNCH_EXIT%

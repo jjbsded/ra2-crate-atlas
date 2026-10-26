@@ -2,6 +2,23 @@
 const assert=require('node:assert/strict');
 const {searchMaps,preferredVersion}=require('./official-maps-ui.js');
 const {maps}=require('./official-maps/catalog.json');
+const I=require('./i18n.js'),N=require('./official-map-names.js');
+for(const locale of ['zh-CN','en']){
+ I.setLanguage(locale);
+ for(const entry of maps){
+  assert.ok(N.aliases.has(entry.name),'Missing reviewed pronunciation: '+entry.name);
+  assert.equal(N.pronunciations.get(entry.name).split(' ').length,(entry.name.match(/[\p{Script=Han}a-zA-Z0-9]/gu)||[]).length,'One syllable per character: '+entry.name);
+  for(const query of [entry.name,I.messages[entry.name],...N.aliases.get(entry.name)])assert.ok(query&&searchMaps(maps,{query}).includes(entry),locale+': '+query);
+ }
+ for(const query of ['bingtianxuedi','BTXD','bing tian xue di','bīngtiānxuědì','ＢＴＸＤ','Heck Freezes Over'])assert.ok(searchMaps(maps,{query}).some(e=>e.name==='冰天雪地'));
+ for(const query of ['qīn lüè xiāo xī','qinluexiaoxi','qlxxhdzs'])assert.ok(searchMaps(maps,{query}).some(e=>e.name==='侵略消息获得证实'));
+ assert.ok(searchMaps(maps,{query:'Tanya’s Training Grounds'}).some(e=>e.name==='谭雅的训练场'));
+ assert.ok(searchMaps(maps,{query:'snowballs chance'}).some(e=>e.name==='雪地生机'));
+ assert.ok(searchMaps(maps,{query:'chongfanbali'}).some(e=>e.name==='重返巴黎'));
+ assert.ok(searchMaps(maps,{query:'changzheng'}).some(e=>e.name==='长征'));
+ assert.equal(searchMaps(maps,{query:'BTXD 巨富',mode:'megawealth',version:'ra2'}).length,1);
+}
+I.setLanguage('zh-CN');
 const ice=searchMaps(maps,{query:'冰天雪地'});
 assert.equal(ice.length,5);
 assert.equal(searchMaps(maps,{query:'冰天雪地 巨富'}).length,2);
@@ -37,4 +54,14 @@ async function failures(){
   console.log('PASS: offline service, outdated endpoint, missing bundle and invalid response have distinct explanations.');
  }finally{global.fetch=original;}
 }
-failures().catch(error=>{console.error(error);process.exitCode=1;});
+async function browserChecks(){
+ const {chromium}=require('playwright'),browser=await chromium.launch({channel:'msedge',headless:true});
+ try{for(const url of ['http://127.0.0.1:8767/maps.html?result=/output/map-8b9caa6619a1/result.json','http://127.0.0.1:8787/toy/crate-atlas/index.html']){
+  const page=await browser.newPage({locale:'zh-CN'}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(url);await page.waitForFunction(()=>window.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:60000});
+  await page.locator('#loadHeck').click();await page.waitForSelector('.official-map-row');
+  for(const query of ['bingtianxuedi','BTXD','bing tian xue di','Heck Freezes Over']){await page.locator('#officialMapSearch').fill(query);const rows=page.locator('.official-map-row');assert.ok(await rows.count()>0);assert.ok((await rows.allTextContents()).every(t=>/冰天雪地|Heck Freezes Over/.test(t)));}
+  await page.locator('#officialMapSearch').fill('Tanya’s Training Grounds');assert.ok(await page.locator('.official-map-row').count()>0);
+  assert.deepEqual(errors,[]);console.log('PASS browser search',url);await page.close();
+ }}finally{await browser.close();}
+}
+failures().then(()=>process.argv.includes('--browser')?browserChecks():null).catch(error=>{console.error(error);process.exitCode=1;});

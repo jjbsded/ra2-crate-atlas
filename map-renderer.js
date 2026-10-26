@@ -8,6 +8,7 @@
  const transfers=typeof module!=='undefined'?require('./transfer-origins.js'):root.CrateTransferOrigins;
  const probabilityDisplay=typeof module!=='undefined'?require('./probability-display.js'):root.CrateProbabilityDisplay;
  const players=typeof module!=='undefined'?require('./player-starts.js'):root.CratePlayerStarts;
+ const artwork=typeof module!=='undefined'?require('./map-artwork.js'):root.CrateMapArtwork;
  const flat=[[[0,-15],[30,0],[0,15],[-30,0]]];
  const armFraction=1/6;
  function surface(c,whole=false){return (whole?c.surface:c.visibleSurface)??flat;}
@@ -139,7 +140,7 @@
   // only the camera boundary: the usable/top-band transition is whole-cell.
   const camera=r.cameraRect;
   if(!options.foregroundOnly){
-  ctx.drawImage(options.objects&&state.objectImage?state.objectImage:state.image,state.x,state.y,r.width*state.scale,r.height*state.scale);
+  artwork.draw(ctx,options.objects&&state.objectImage?state.objectImage:state.image,state.x,state.y,r.width*state.scale,r.height*state.scale);
   if(camera){
    ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);
    ctx.rect(state.x+camera[0]*state.scale,state.y+camera[1]*state.scale,camera[2]*state.scale,camera[3]*state.scale);ctx.clip('evenodd');
@@ -177,8 +178,9 @@
   }
   if(options.baseOnly){ctx.restore();return {colored,labels};}
   options.regionLayer?.(ctx,state,visible);
-  if(options.players)players.draw(ctx,state,state,{radius:13,offset:23,clip:area});
+  if(options.players)players.draw(ctx,state,state,{radius:13,offset:23,clip:area,regionStyles:options.playerRegionStyles});
   for(const c of visible)if(c!==state.selected)cellLabels(c);
+  options.regionLabels?.(ctx,state);
   const incoming=state.selected&&state.incoming?.key===transfers.key(state.selected)?state.incoming:null;
   const sourceKeys=new Set(incoming?.sources.map(transfers.key)||[]);
   if(incoming){
@@ -194,7 +196,9 @@
     ctx.save();ctx.beginPath();
     for(const {rings}of sources)for(const ring of rings){ring.forEach(([x,y],i)=>ctx[i?'lineTo':'moveTo'](x,y));ctx.closePath();}
     ctx.clip('evenodd');ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
-    ctx.drawImage(options.objects&&state.objectImage?state.objectImage:state.image,state.x,state.y,r.width*state.scale,r.height*state.scale);ctx.restore();
+    const points=sources.flatMap(s=>s.rings.flat()),left=Math.max(area.x,Math.min(...points.map(p=>p[0]))-2),top=Math.max(area.y,Math.min(...points.map(p=>p[1]))-2);
+    const right=Math.min(area.x+area.w,Math.max(...points.map(p=>p[0]))+2),bottom=Math.min(area.y+area.h,Math.max(...points.map(p=>p[1]))+2);
+    if(right>left&&bottom>top)artwork.crop(ctx,options.objects&&state.objectImage?state.objectImage:state.image,r,state,{x:left,y:top,w:right-left,h:bottom-top});ctx.restore();
     for(const {s,c,rings}of sources){const color=transfers.style(s.strength);
      ctx.save();cellPath(c);ctx.clip('evenodd');
      occupancy.path(ctx,rings,Math.min(4,3*state.scale));ctx.fillStyle=color.fill;ctx.fill('evenodd');ctx.strokeStyle=color.stroke;ctx.lineWidth=Math.max(1,Math.min(2,state.scale));ctx.stroke();ctx.restore();

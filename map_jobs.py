@@ -108,7 +108,7 @@ class MapJobs:
         if version in ('directory', 'shikong'):
             res, _ = resource_context(report, path)
             root = res.discovery['config']['root']
-        if meta.get('mineralsEnabled', True) == enabled:
+        if matches_layout(meta, enabled):
             return {'url': url}
         # Disk links are sufficient; avoid a second unbounded process-local
         # index. The shared report reader caches by path/size/mtime.
@@ -129,11 +129,19 @@ class MapJobs:
 
 def compatible_variant(report, cached, enabled):
     meta, other = report['metadata'], cached['metadata']
-    return (other.get('mineralsEnabled', True) == enabled and
+    return (matches_layout(other, enabled) and
             cached.get('rendering', {}).get('version') == report.get('rendering', {}).get('version') and
             all(other.get(key) == meta.get(key) for key in
                 ('sourceSha256', 'version', 'rulesSha256', 'theaterSha256', 'probabilityQuality',
                  'resourceRoot', 'resourceFingerprint', 'artSha256')))
+
+
+def matches_layout(meta, enabled):
+    # Old ore-only OFF reports cannot satisfy a combined OFF request. Original
+    # ON reports are still valid: neither kind of object was removed there.
+    return (meta.get('mineralsEnabled', True) == enabled and
+            meta.get('treesEnabled', True) == enabled and
+            (enabled or meta.get('terrainRemovalVersion') == 1))
 
 
 def mineral_links(path):
@@ -145,7 +153,13 @@ def mineral_links(path):
 
 
 def remember_pair(previous, current, enabled):
-    links = {str(enabled).lower(): current, str(not enabled).lower(): previous}
+    links = {str(enabled).lower(): current}
+    try:
+        previous_report, _ = load_report(result_path(previous))
+        if matches_layout(previous_report['metadata'], not enabled):
+            links[str(not enabled).lower()] = previous
+    except (OSError, ValueError, KeyError):
+        pass  # A previous report may have been removed during analysis.
     for url in (previous, current):
         try:
             target = result_path(url).parent/'mineral-variants.json'
