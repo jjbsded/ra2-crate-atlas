@@ -14,6 +14,7 @@ import time
 from runtime_bootstrap import ROOT
 from realmap_exact import calculate, read_search
 from realmap_bridges import elevated
+from map_storage import write_report
 
 # Compatibility exports for existing scripts. New internal consumers import
 # the owning module directly instead of depending on this orchestration layer.
@@ -124,7 +125,7 @@ def finish_preview(cells, res, theater, tmps, meta, folder, filename, progress, 
     report = dict(schemaVersion=3, model='partial-map-preview' if reason else 'mod-visual-preview',
         metadata=meta, rendering=rendering, probability=None, markers=[], zeroProbabilityRockCandidates=[],
         potentialMarkers=[], clearance=None, cells=list(cells.values()))
-    (folder/'result.json').write_text(json.dumps(report, ensure_ascii=False, separators=(',', ':')), 'utf8')
+    write_report(folder/'result.json', report, compressed=False)
     return report
 
 
@@ -180,7 +181,7 @@ def analyze_directory(data, folder, filename, progress, minerals_enabled=True, r
     return report
 
 
-def analyze(data, folder, version='yr', filename='map.yrm', progress=lambda *args: None, mix_paths=None, minerals_enabled=True, resource_root=None):
+def analyze(data, folder, version='yr', filename='map.yrm', progress=lambda *args: None, mix_paths=None, minerals_enabled=True, resource_root=None, *, use_precomputed=True):
     if version in ('directory', 'shikong'):
         return analyze_directory(data, folder, filename, progress, minerals_enabled=minerals_enabled, resource_root=resource_root)
     start = time.perf_counter()
@@ -194,15 +195,13 @@ def analyze(data, folder, version='yr', filename='map.yrm', progress=lambda *arg
                                minerals_enabled=minerals_enabled, reason=str(error))
     meta['resourceFiles'] = [Path(p).name for p in res.mix_paths]
     (folder/'source.map').write_bytes(data)
-    return finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start)
+    return finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start, use_precomputed=use_precomputed)
 
 
-def finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start):
-    version = meta['version']
-    approximate = bool(meta.get('approximate'))
+def compute_analysis(cells, folder, meta, theater, progress):
+    """Compute gameplay results independently of rendering and cache loading."""
     ensure_tools()
-    meta.setdefault('resourceFiles', [str(p) for p in res.mix_paths])
-    meta['filename'] = Path(filename.replace('\\', '/')).name[:160]
+    approximate = bool(meta.get('approximate'))
     grid = bytearray(262144)
     statuses = {}
     for p, c in cells.items():
@@ -231,15 +230,31 @@ def finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress,
             c['potentialMarked'] = False
     else:
         potential, clearance = clearance_risks(cells, folder, meta, theater['effectiveRules'], progress)
+    return dict(probability=probability, markers=markers, zeroProbabilityRockCandidates=shadowed,
+                potentialMarkers=potential, clearance=clearance)
+
+
+def finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start, *, use_precomputed=True):
+    version = meta['version']
+    approximate = bool(meta.get('approximate'))
+    meta.setdefault('resourceFiles', [str(p) for p in res.mix_paths])
+    meta['filename'] = Path(filename.replace('\\', '/')).name[:160]
+    from official_precomputed import restore, model_fingerprint
+    if version in ('ra2', 'yr') and not approximate:
+        meta['calculationModelSha256'] = model_fingerprint()
+    computed = restore(cells, res, meta, folder, progress) if use_precomputed and not approximate else None
+    if computed is None:
+        computed = compute_analysis(cells, folder, meta, theater, progress)
+        meta.setdefault('calculationSource', dict(kind='live', reason='forced' if not use_precomputed else 'not-covered'))
+    markers, potential, clearance = computed['markers'], computed['potentialMarkers'], computed['clearance']
     rendering = render_ground(cells, res, theater, tmps, folder, meta, progress)
     if approximate:
         for missing in rendering.get('missingSprites', []):
             meta['loadIssues'].append(dict(message='地形物／覆盖物贴图未能绘制：'+missing, count=1, cells=[]))
     meta['elapsedSeconds'] = round(time.perf_counter()-start, 3)
     report = dict(schemaVersion=3 if approximate else 2, model='approximate-unknown-retry' if approximate else ('original-YR-1.001' if version == 'yr' else 'original-RA2-1.006')+'-static-next-crate', metadata=meta, rendering=rendering,
-                  probability=probability, markers=markers, zeroProbabilityRockCandidates=shadowed,
-                  potentialMarkers=potential, clearance=clearance, cells=list(cells.values()))
-    (folder/'result.json').write_text(json.dumps(report, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+                  **computed, cells=list(cells.values()))
+    write_report(folder/'result.json', report, compressed=False)
     with (folder/'cells.csv').open('w', encoding='utf-8-sig', newline='') as output:
         names = ['x', 'y', 'level', 'slope', 'rawLand', 'land', 'postLand', 'overlayName', 'terrain', 'occupied',
                  'occupiedGround', 'occupiedDeck', 'status', 'ghostReason',

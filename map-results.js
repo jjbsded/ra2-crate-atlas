@@ -14,14 +14,17 @@
     data=await response.json();}
    const base=url.slice(0,url.lastIndexOf('/')+1);
    _i18n?.diagnostics(data);
-   if(!data.metadata||!Array.isArray(data.cells)||(!data.rendering?.image&&!data.rendering?.simplified))throw Error(_t('地图分析结果不完整，请重新分析地图'));
+   if(!data.metadata||!Array.isArray(data.cells)||(!data.rendering?.image&&!data.rendering?.simplified&&!data.rendering?.original))throw Error(_t('地图分析结果不完整，请重新分析地图'));
    async function picture(name){
     if(!name)return null;
     const image=new Image();image.src=base+name+'?v='+(data.rendering.version||1);
     await image.decode();return image;
    }
    let im,objectImage;
-   if(data.rendering.simplified){
+   if(data.rendering.original){
+    if(!root.CrateToyOriginal||!readJSON)throw Error('Original Toy artwork loader is unavailable');
+    ({im,objectImage}=await root.CrateToyOriginal.create(data,base,readJSON,{signal}));
+   }else if(data.rendering.simplified){
     if(data.rendering.simplified.version!==1||!root.CrateToyTerrain)throw Error('Unsupported Toy artwork format');
     ({im,objectImage}=root.CrateToyTerrain.create(data));
    }else{

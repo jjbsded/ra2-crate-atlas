@@ -139,6 +139,8 @@ def verify(root):
             assert complete(request('/api/maps/minerals', {'result':variant, 'enabled':True})) == url
             patch = request('/api/maps/terrain3d?'+urlencode({'result':variant, 'x':99, 'y':105, 'radius':10}))
             assert patch['metadata']['mineralsEnabled'] is False and patch['textures'] and not patch['metadata']['missing']
+            navigation = request('/api/maps/region-navigation?'+urlencode({'result':variant}))
+            assert navigation['count'] == len(report['cells']) and navigation['flags']
             objects = complete(request('/api/maps/analyze?version=yr&filename=portable-objects.map',
                                        (root/'output/portable-smoke/objects.map').read_bytes()))
             rendered = request(objects)['rendering']['objects']

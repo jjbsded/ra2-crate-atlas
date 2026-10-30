@@ -23,6 +23,8 @@ APPLICATION_MODULES = (
     'realmap_3d.py', 'terrain_depth.py', 'realmap_objects.py', 'realmap_voxel.py',
     'realmap_mod.py', 'realmap_approx.py', 'original_resources.py',
     'official_maps.py', 'directory_picker.py', 'runtime_bootstrap.py', 'i18n_settings.py',
+    'official_precomputed.py', 'official_render_cache.py', 'toy_codec.py',
+    'map_storage.py', 'map_images.py',
 )
 EXTRA_FILES = ('voxel-worker.cs', 'realmap-search.c', 'requirements.txt', 'export.cjs')
 DATA_FILES = (
@@ -53,7 +55,7 @@ def require_file(path):
 def frontend_files():
     # The Toy launcher needs a separately generated static map package. Do not
     # expose a non-working entry in the ordinary Windows portable installation.
-    source_only = {'启动Toy网页版.cmd'}
+    source_only = {'启动Toy网页版.cmd', '启动Toy现场计算实验版.cmd'}
     return sorted({p for pattern in ('*.js', '*.html', '*.css', '*.md', '*.cmd')
                    for p in ROOT.glob(pattern) if p.name not in source_only})
 
@@ -72,6 +74,7 @@ def validate_sources():
                     raise ValueError(f'发布清单遗漏本地模块：{name} → {dependency}')
     for name in DATA_FILES:
         require_file(ROOT/name)
+    precomputed_files()
     class Dependencies(HTMLParser):
         def handle_starttag(self, tag, attrs):
             attrs = dict(attrs)
@@ -133,11 +136,57 @@ def copy_stock_resources(target):
         copy(source, target/'assets/original'/source.name)
 
 
-def build(target, node, ffmpeg, node_license, version='unreleased'):
+def precomputed_files():
+    """Only manifest-listed, verified gameplay data enters a release."""
+    from official_precomputed import DATA, manifest, checked_blob
+    index = manifest()
+    if not index['layouts']:
+        raise ValueError('官方预计算数据为空，请先构建')
+    names = {'manifest.json'}
+    for entry in index['layouts'].values():
+        for kind in ('report', 'search'):
+            name = entry[kind]
+            if name not in names:
+                checked_blob(DATA, name, entry[kind+'Sha256'])
+                names.add(name)
+    return [DATA/name for name in sorted(names)]
+
+
+def archive_files(target, archive_format='both', seven_zip=None):
+    formats = ('zip', '7z') if archive_format == 'both' else (archive_format,)
+    if not set(formats) <= {'zip', '7z'}:
+        raise ValueError('Archive format must be zip, 7z or both')
+    paths = [target.with_name(target.name+'.'+suffix) for suffix in formats]
+    if any(path.exists() for path in paths):
+        raise ValueError('输出 ZIP 或 7z 已存在；请为每次构建选择新名称')
+    tool = None
+    if '7z' in formats:
+        tool = seven_zip or shutil.which('7z') or Path(os.environ.get('ProgramFiles', 'C:/Program Files'))/'7-Zip/7z.exe'
+        require_file(Path(tool))
+    return paths, tool
+
+
+def package_archives(target, archives, seven_zip):
+    for archive in archives:
+        if archive.suffix == '.zip':
+            with zipfile.ZipFile(archive, 'x', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+                for path in target.rglob('*'):
+                    if path.is_file():
+                        z.write(path, str(Path(target.name)/path.relative_to(target)))
+        else:
+            subprocess.run([str(seven_zip), 'a', '-t7z', '-m0=LZMA2', '-mx=7', '-md=32m', '-mmt=2',
+                            '-ms=on', '-bd', '-bb0', str(archive), target.name], cwd=target.parent,
+                           check=True, timeout=7200, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            subprocess.run([str(seven_zip), 't', '-bd', str(archive)], check=True, timeout=600,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        archive.with_suffix(archive.suffix+'.sha256').write_text(checksum(archive)+'  '+archive.name+'\n', 'utf8')
+
+
+def build(target, node, ffmpeg, node_license, version='unreleased', archive_format='both', seven_zip=None):
     target = target.resolve()
-    archive = target.with_name(target.name+'.zip')
-    if target.exists() or archive.exists():
-        raise ValueError('输出目录或 ZIP 已存在；请为每次构建选择新名称')
+    if target.exists():
+        raise ValueError('输出目录已存在；请为每次构建选择新名称')
+    archives, seven_zip = archive_files(target, archive_format, seven_zip)
     validate_sources()
     deps, runtime_versions = validate_runtimes(node, ffmpeg, node_license)
     from original_resources import resolve
@@ -150,6 +199,8 @@ def build(target, node, ffmpeg, node_license, version='unreleased'):
     for name in DATA_FILES:
         copy(ROOT/name, target/name)
     copy_stock_resources(target)
+    for source in precomputed_files():
+        copy(source, target/'official-precomputed'/source.name)
     # Optional directory settings and Mod profiles/assets are never packaged.
     python_root = Path(sys.base_prefix)
     py = target/'runtime/python'
@@ -185,12 +236,8 @@ def build(target, node, ffmpeg, node_license, version='unreleased'):
     manifest = {p.relative_to(target).as_posix(): {'size':p.stat().st_size, 'sha256':checksum(p)}
                 for p in sorted(target.rglob('*')) if p.is_file()}
     (target/'release-files.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False), 'utf8')
-    with zipfile.ZipFile(archive,'x',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
-        for p in target.rglob('*'):
-            if p.is_file():
-                z.write(p, str(Path(target.name)/p.relative_to(target)))
-    archive.with_suffix('.zip.sha256').write_text(checksum(archive)+'  '+archive.name+'\n', 'utf8')
-    print(json.dumps({'folder':str(target),'zip':str(archive),'bytes':archive.stat().st_size}),flush=True)
+    package_archives(target, archives, seven_zip)
+    print(json.dumps({'folder':str(target),'archives':[dict(path=str(p),bytes=p.stat().st_size) for p in archives]}),flush=True)
 
 
 if __name__ == '__main__':
@@ -200,5 +247,7 @@ if __name__ == '__main__':
     parser.add_argument('--ffmpeg',type=Path,required=True)
     parser.add_argument('--node-license',type=Path,required=True)
     parser.add_argument('--version', default='unreleased')
+    parser.add_argument('--archive-format', choices=('zip', '7z', 'both'), default='both')
+    parser.add_argument('--seven-zip', type=Path)
     args = parser.parse_args()
-    build(args.output,args.node,args.ffmpeg,args.node_license,args.version)
+    build(args.output,args.node,args.ffmpeg,args.node_license,args.version,args.archive_format,args.seven_zip)

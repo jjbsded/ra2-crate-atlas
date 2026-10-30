@@ -3,6 +3,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import argparse
 import hashlib
+import io
 import json
 import math
 import os
@@ -76,6 +77,30 @@ def export(job, config):
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def send_head(self):
+        from map_storage import storage_path, read_bytes, accepts_gzip, COMPRESSED_DOWNLOADS
+        path = Path(self.translate_path(self.path)).resolve()
+        if path.name in COMPRESSED_DOWNLOADS and path.is_relative_to(ROOT/'output'):
+            stored = storage_path(path).resolve()
+            if stored.is_relative_to(ROOT/'output') and stored.suffix == '.gz':
+                try:
+                    encoded = accepts_gzip(self.headers.get('Accept-Encoding', ''))
+                    stream = stored.open('rb') if encoded else io.BytesIO(read_bytes(stored))
+                    size = os.fstat(stream.fileno()).st_size if encoded else stream.getbuffer().nbytes
+                except (OSError, ValueError, EOFError):
+                    self.send_error(500, 'Compressed map data cannot be read')
+                    return None
+                self.send_response(200)
+                self.send_header('Content-Type', self.guess_type(str(path)))
+                self.send_header('Content-Length', str(size))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Vary', 'Accept-Encoding')
+                if encoded:
+                    self.send_header('Content-Encoding', 'gzip')
+                self.end_headers()
+                return stream
+        return super().send_head()
 
     def json(self, value, code=200):
         data = json.dumps(value, ensure_ascii=False).encode('utf-8')
@@ -181,7 +206,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(i18n_settings.save(payload['language']))
             except (OSError, ValueError) as error:
                 return self.json({'error': str(error)}, 400)
-        if route.path == '/api/maps/minerals':
+        if route.path in ('/api/maps/minerals', '/api/maps/recompute'):
             expected = f'http://{self.headers.get("Host", "")}'
             if self.headers.get('Origin', expected) != expected:
                 return self.json({'error': '不接受其他网页的分析请求'}, 403)
@@ -189,7 +214,8 @@ class Handler(SimpleHTTPRequestHandler):
                 size = int(self.headers.get('Content-Length', 0))
                 if not 0 < size <= 4096:
                     raise ValueError('无效请求长度')
-                response = MAPS.minerals(json.loads(self.rfile.read(size)))
+                action = MAPS.recompute if route.path.endswith('/recompute') else MAPS.minerals
+                response = action(json.loads(self.rfile.read(size)))
                 return self.json(response, 202 if 'id' in response else 200)
             except BusyError as error:
                 return self.json({'error': str(error)}, 409)

@@ -6,15 +6,15 @@ Explore where random crates can appear on real maps, compare regions and inspect
 
 ## Download and run
 
-**[Download v0.4.0 for Windows x64](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Windows-x64.zip)**, extract the entire ZIP, and run **Start Crate Atlas.cmd**. The Chinese launcher `启动工具.cmd` opens the same tool. No Python, Node.js or game installation is required: the package includes its runtimes, official maps and hash-verified stock resources. An optional game directory enables other installations or Mods; no specific Mod configuration or artwork is bundled.
+**v0.5.0 for Windows x64: [ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip) · [7z — smaller download](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z)**. Both contain the complete application with identical files. Extract the entire archive and run **Start Crate Atlas.cmd**. The Chinese launcher `启动工具.cmd` opens the same tool. No Python, Node.js or game installation is required: the package includes its runtimes, official maps and hash-verified stock resources. An optional game directory enables other installations or Mods; no specific Mod configuration or artwork is bundled. The 7z package needs a compatible extractor.
 
-[Release notes](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.4.0) · [Windows SHA-256 checksum](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Windows-x64.zip.sha256) · [Latest release](https://github.com/jjbsded/ra2-crate-atlas/releases/latest)
+[Release notes](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.5.0) · SHA-256: [ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip.sha256) / [7z](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z.sha256) · [Latest release](https://github.com/jjbsded/ra2-crate-atlas/releases/latest)
 
 **[Download the v0.4.0 Toy web ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Toy-Web.zip)** ([SHA-256](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Toy-Web.zip.sha256)). This is the **low-resolution simplified edition, not the full application**: upload the ZIP to Toy, or extract and serve it over HTTP. It contains all 131 official Battle / Team Alliance menu entries and stays below 50 MB. It has no Windows launcher or custom-map analysis service; see [the web edition guide](TOY.en.md).
 
-v0.4.0 adds the static Toy edition with touch controls and simplified 3D, player/team automatic regions, connected fill, water-area allocation, at least two spare editing regions, an Empty eraser target, and current-region land/sea/combined multipliers. Both editions support Pinyin/initial search and English names in the Chinese interface. The ore switch now controls ore, gems and trees together.
+v0.5.0 adds verified official-map precomputation, reusable rendered-map caches, lossless report/image compression and a smaller 7z package. Probability precision, original artwork resolution, 3D and exports are preserved. This release updates the full Windows application; the published Toy download remains v0.4.0.
 
-The repository is **private**. Sign in to a GitHub account with repository access to see or download releases. Choose the **Windows-x64.zip release asset**, not GitHub's automatically generated “Source code” ZIP. Each release includes a SHA-256 file. See [portable use and migration](PORTABLE.en.md) before upgrading.
+Choose a **Windows-x64.zip or Windows-x64.7z release asset**, not GitHub's automatically generated “Source code” archive. Both formats have a SHA-256 file. Before upgrading, close the old launcher and extract into a new folder; see [portable use and migration](PORTABLE.en.md).
 
 ## English and Chinese
 
@@ -50,7 +50,7 @@ The catalog includes Battle, Megawealth, Land Rush, Meat Grinder, Naval War, Tea
 Open **Region statistics** after loading a map. It starts with 12 empty regions and a 2:1 elliptical brush that matches the game projection. Names and colors are editable; new colors maximize perceptual separation from existing ones. The probability layer and labels switch off on entering editing; the nearby **Probability: On / Off / Mixed** button stays synchronized with the original controls.
 
 - Screen-aligned rectangle selection and game-coordinate parallelogram selection preview while dragging and commit on release, using cell centers. Rectangle, parallelogram, circle and ellipse brushes have adjustable sizes. Erase removes cells from the current region only.
-- Right-drag or Alt + left-drag pans; the wheel zooms; Esc cancels a stroke. **Pick region** or Ctrl + left-click selects the region under a cell, then restores the last non-picker tool. Blank cells do not change the current region. With overlaps, the current region wins if present, otherwise the top region does. Hold Shift to temporarily reverse paint / erase, including during a stroke.
+- Right-drag or Alt + left-drag pans; the wheel zooms; Esc cancels a stroke. **Pick region** or Ctrl + left-click selects the region under a cell, then restores the last non-picker tool. Unassigned cells select **Empty**. With overlaps, the current region wins if present, otherwise the top region does. Hold Shift to temporarily reverse paint / erase, including during a stroke.
 - Overlap is off by default. Painting transfers membership to the active region. Turning overlap off keeps the active region first, then creation order. Undo keeps 20 edits; use Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z. New edits clear the redo branch.
 - Region transparency defaults to 50%, is adjustable and saved. Only usable cells with at least partial camera coverage are selectable; the upper restricted band and cells outside camera bounds are excluded, including when restoring backups. Ordinary zero-probability cells remain selectable.
 - The sortable list shows total and area-average multipliers for land crates, water crates and both. Averages include selected zero-probability cells and use the corresponding category's cell count; an empty category shows `—`. Statistics share the map's 1× baseline and ignore display filters. Each row has a tight terrain crop and a minimap location marker; click to locate.
@@ -95,10 +95,10 @@ Canvas tests need `NODE_PATH` pointing to `runtime/node/node_modules`. For actua
 Build a portable package with verified local runtimes:
 
 ```powershell
-.\runtime\python\python.exe -B build-portable.py --output ..\CrateAtlas-Windows-x64 --node .\runtime\node\node.exe --node-license .\runtime\node\LICENSE --ffmpeg .\runtime\ffmpeg\ffmpeg.exe --version v0.3.1
+.\runtime\python\python.exe -B build-portable.py --output ..\CrateAtlas-v0.5.0-Windows-x64 --node .\runtime\node\node.exe --node-license .\runtime\node\LICENSE --ffmpeg .\runtime\ffmpeg\ffmpeg.exe --version v0.5.0 --archive-format both
 ```
 
-The output folder and corresponding ZIP must not already exist. The builder validates module coverage, browser dependencies, stock archives, native-source digests, voxel provenance, Canvas and FFmpeg before copying files. It creates a file manifest and ZIP checksum. Extract to a separate test directory, then run `python -B verify-portable-install.py --root <extracted-folder>`. Do not repackage that test directory: verification creates analysis and video outputs.
+The output folder and requested archives must not already exist. Building both formats requires 7-Zip; `--archive-format zip` builds ZIP only. The builder validates module coverage, browser dependencies, stock archives, precomputed data, native-source digests, voxel provenance, Canvas and FFmpeg before copying files. It creates a file manifest and a SHA-256 checksum for each archive. Extract to a separate test directory, then run `python -B verify-portable-install.py --root <extracted-folder>`. Do not repackage that test directory: verification creates analysis and video outputs.
 
 To rebuild the official catalog from an original Windows game installation:
 
@@ -122,3 +122,13 @@ The builder reads `MULTI.MIX`, `multimd.mix`, official PKT registrations and CSF
 | [Third-party notices](third-party-notices.md) | Component provenance, licenses and original asset rights |
 
 Original game assets, Mod assets and third-party components retain their respective rights and licenses.
+
+## Official precomputation and lossless storage
+
+The desktop tool now bundles verified gameplay results for all 131 Battle / Team Alliance menu entries, including both ore/tree layouts (294 selections, 278 unique inputs). It matches map content, game version, rules/art/terrain and the calculation model before restoring exact probabilities, ordered transfer origins and risk markers. Full-resolution rendering and detailed 3D continue to use current local assets. Missing, incompatible or corrupt cache entries fall back to live calculation; Mod-directory analysis remains live.
+
+Completed official views are also reused from a validated local disk cache. **Recalculate** bypasses both caches, keeps the current view and saved regions, and uses the current resources. The status distinguishes official precomputation and local cached results. These features are included in v0.5.0.
+
+Rebuild bundled data with `run-python.cmd -B build-official-precomputed.py --output official-precomputed-new --jobs 3`, verify it with `run-python.cmd -B verify-official-precomputed.py --data official-precomputed-new --render`, then replace the bundle directory when the service is stopped. Existing output directories are preserved. The portable builder validates and includes only manifest-listed stock gameplay data; rendering, personal regions and Mod data are excluded.
+
+Current builds use lossless XZ for bundled probabilities, gzip for newly generated desktop reports, and pixel-exact WebP for map images, with duplicate layers shared and optional idle recompression. Existing result URLs and older PNG/JSON reports remain supported. The portable builder creates both ZIP and smaller 7z packages; see [storage and packaging](PORTABLE.en.md). These changes preserve probability precision and original artwork resolution.

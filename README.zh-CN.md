@@ -12,13 +12,13 @@
 
 ## 直接使用
 
-下载 [v0.4.0 Windows 64 位便携包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Windows-x64.zip)，完整解压后双击 **启动工具.cmd**（英文文件名 **Start Crate Atlas.cmd** 也可），默认进入真实地图概率计算。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和经过哈希校验的原版资源。游戏目录为可选项，用于读取其他安装或 Mod；发布包不携带任何具体 Mod 配置或美术素材。
+**v0.5.0 Windows 64 位完整版：[ZIP 包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip) · [7z 包（下载更小）](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z)**。两种包内容完全相同；7z 需要支持该格式的解压工具。完整解压后双击 **启动工具.cmd**（英文文件名 **Start Crate Atlas.cmd** 也可），默认进入真实地图概率计算。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和经过哈希校验的原版资源。游戏目录为可选项，用于读取其他安装或 Mod；发布包不携带任何具体 Mod 配置或美术素材。
 
-[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.4.0) · [Windows SHA-256 校验文件](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Windows-x64.zip.sha256)。仓库为私有仓库，下载时需要登录具有仓库访问权限的 GitHub 账号。升级时请解压到新目录，并先关闭旧版启动窗口；区域划分迁移见 [使用与迁移](PORTABLE.md)。
+[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.5.0) · SHA-256 校验文件：[ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip.sha256) / [7z](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z.sha256)。升级时请先关闭旧版启动窗口，并解压到新目录；区域划分迁移见 [使用与迁移](PORTABLE.md)。
 
 另提供 [v0.4.0 Toy 网页 ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Toy-Web.zip)（[SHA-256](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Toy-Web.zip.sha256)）。这是**低清简化版，非完整版**，可直接上传 Toy，或解压后使用 HTTP 静态服务预览；收录全部 131 项官方作战／小队联盟地图，ZIP 小于 50 MB。此包不含 Windows 启动器和自定义地图分析服务，使用方式见 [网页版说明](TOY.md)。
 
-v0.4.0 新增 Toy 静态网页版、手机触控和简化 3D；两版同步支持玩家／小队自动划分、连通填充、大块水域分区、至少两个空区域、空区域擦除，以及当前区域的陆地／海洋／总倍率。地图搜索支持拼音全拼、首字母，中文界面也能用英文名搜索。矿石开关现同时控制矿石、宝石和树木。
+v0.5.0 新增经过校验的官方地图预计算、可复用的地图绘制缓存、报告与图像无损压缩，以及更小的 7z 完整包。概率精度、原版素材分辨率、3D 与导出功能保持不变。本次更新 Windows 完整版；已发布的 Toy 下载仍为 v0.4.0。
 
 “Code → Download ZIP”仅提供源码和小型组件，直接使用请选择上面的便携包。源码运行方式见下文；index.html 的概率演示可直接打开。
 
@@ -90,12 +90,12 @@ cd ra2-crate-atlas
 重新构建完整便携包：
 
 ```powershell
-.\runtime\python\python.exe -B build-portable.py --output ..\CrateAtlas-Windows-x64 --node .\runtime\node\node.exe --node-license .\runtime\node\LICENSE --ffmpeg .\runtime\ffmpeg\ffmpeg.exe
+.\runtime\python\python.exe -B build-portable.py --output ..\CrateAtlas-v0.5.0-Windows-x64 --node .\runtime\node\node.exe --node-license .\runtime\node\LICENSE --ffmpeg .\runtime\ffmpeg\ffmpeg.exe --version v0.5.0 --archive-format both
 ```
 
-构建前校验内置原版资源；输出目录及同名 ZIP 必须不存在。新包的 Mod 目录默认为空。本机选择保存在被 Git 忽略的 `data/game-directory.json`。
+构建前校验内置原版资源；输出目录及所选格式的压缩包必须不存在。构建两种格式需要安装 7-Zip；只生成 ZIP 可用 `--archive-format zip`。新包的 Mod 目录默认为空。本机选择保存在被 Git 忽略的 `data/game-directory.json`。
 
-构建可加 `--version v0.3.1` 记录版本；同时生成包内 `release-files.json` 和 ZIP 的 `.sha256` 校验文件。前端依赖、原生程序源码散列、Node Canvas 和 FFmpeg 均在创建输出目录前检查。发布前应在新目录解压，再运行 `python -B verify-portable-install.py --root <解压后的工具目录>`：测试只用包内运行环境，临时生成的分析／视频结果留在这个验收目录，不进入待发布 ZIP。
+构建通过 `--version v0.5.0` 记录版本；同时生成包内 `release-files.json` 和每个压缩包的 `.sha256` 校验文件。前端依赖、预计算数据、原生程序源码散列、Node Canvas 和 FFmpeg 均在创建输出目录前检查。发布前应在新目录解压，再运行 `python -B verify-portable-install.py --root <解压后的工具目录>`：测试只用包内运行环境，临时生成的分析／视频结果留在这个验收目录，不进入待发布包。
 
 重建官方目录（仅开发时需要 Windows 及原版游戏安装，日常使用无需游戏目录）：
 
@@ -111,7 +111,7 @@ cd ra2-crate-atlas
 
 - 矩形框选按屏幕方向；平行四边形框选沿游戏 X / Y 坐标。左键拖动预览，松手确认，按格子中心选取。
 - 矩形、平行四边形、圆形和椭圆笔刷支持调整大小；「取消选择」仅擦除当前区域。右键或 Alt + 左键拖动平移，滚轮缩放，Esc 取消当前笔画。
-- 「取色」工具或 Ctrl + 左键点击已有区域的格子，可切换到其所属区域，成功后恢复最近使用的非取色工具；空白格不改变当前区域，拖动不触发取色。重叠时优先保留当前区域，否则取最上层区域。按住 Shift 临时反转「选择／取消选择」，松开恢复，笔刷预览和工具栏会提示实际操作；支持笔画途中按下或松开。
+- 「取色」工具或 Ctrl + 左键点击格子，可切换到其所属区域，成功后恢复最近使用的非取色工具；未划分格会选中「空」，拖动不触发取色。重叠时优先保留当前区域，否则取最上层区域。按住 Shift 临时反转「选择／取消选择」，松开恢复，笔刷预览和工具栏会提示实际操作；支持笔画途中按下或松开。
 - 「允许区域重叠」默认关闭。关闭时涂入新区域会移除原归属；从重叠切回不重叠时，优先保留当前区域，其余按创建顺序。撤销支持最近 20 步及 Ctrl+Z，重做支持 Ctrl+Y / Ctrl+Shift+Z；新编辑会清除重做分支。
 - 区域色块默认透明度 50%，可在工具栏调节并随划分保存；0% 不透明，100% 全透明，轮廓保留。只允许加入运行时可用边界内且至少部分位于镜头可视范围内的格子，上方禁区和镜头范围外不可选；恢复已有划分或备份时也排除这些格子。普通零概率格仍可选。
 - 列表分别显示陆地箱子、海洋箱子与综合的总倍率、面积平均倍率，可按任一指标升降序排序。平均值包含所选零概率格，分母分别为本类格数；无该类格子显示 `—`。所有统计沿用本图的统一 1× 基准，不受概率显示筛选影响；选中的普通零概率格计入面积，地图外虚空及不可选择的禁区不计。
@@ -144,3 +144,13 @@ cd ra2-crate-atlas
 更多资料：[使用与迁移](PORTABLE.md) · [真实地图范围](REAL-MAPS.md) · [绘图实现](RENDERING.md) · [第三方组件与素材说明](third-party-notices.zh-CN.md)。原版与 Mod 素材、第三方组件保留各自权利和许可证。
 
 工程模块边界、缓存与任务生命周期见 [工程结构](ARCHITECTURE.md)。
+
+## 官方地图预计算与无损存储
+
+完整版新增作战／小队联盟的内置预计算：131 个菜单条目，含矿石／树木开关共 294 套选择，按原文件与版本去重后为 278 份。地图内容、游戏版本、规则／art／地形和计算模型一致时复用精确概率、转移来源顺序和禁行标记；高清绘制和精细 3D 仍使用当前本地资源。数据缺失、损坏或不兼容时自动现场计算，Mod 目录分析仍走现场计算。
+
+已完成的官方地图画面另有经过校验的本地磁盘缓存，反复选图时可直接复用。点击「重新计算」可绕过两层缓存，使用当前资源计算，并保留视角和已保存区域。状态栏会区分「官方预计算」与「本地缓存」。这些功能已包含在 v0.5.0 中。
+
+重建命令：`run-python.cmd -B build-official-precomputed.py --output official-precomputed-new --jobs 3`。验证：`run-python.cmd -B verify-official-precomputed.py --data official-precomputed-new --render`。验证后停服替换数据目录；构建器不会覆盖已有目录。便携包只收录清单中校验通过的原版计算数据，不打包个人区域、生成画面或 Mod 数据。
+
+当前构建使用 XZ 无损压缩内置概率、gzip 保存新生成的分析结果，并以逐像素无损 WebP 保存底图；相同图层共用图片，空闲时进一步压缩。现有结果链接和旧 PNG／JSON 报告保持兼容，概率精度及素材分辨率不变。便携构建默认生成 ZIP 和更小的 7z 两种完整包，详见[存储与打包说明](PORTABLE.md)。

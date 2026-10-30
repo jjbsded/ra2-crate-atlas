@@ -89,6 +89,12 @@ Toy 的传输编码独立于分析模型：`toy_codec.py` 生成地形共享列�
 
 `build-portable.py` 的 `APPLICATION_MODULES` 是 Python 运行模块清单。构建开始前扫描这些文件的本地导入关系，发现未列入的依赖立即失败；拆分模块时同步维护清单。JavaScript / HTML / CSS 保持现有直接加载方式，新页面依赖须更新脚本引用与缓存版本。内置美术仍通过独立的原版资源白名单复制。
 
+完整版的 `realmap.compute_analysis` 独立生成概率、转移来源与禁行结果；`finish_analysis` 先尝试 `official_precomputed.py`，再调用同一个计算入口，并统一执行高清绘制与导出。预计算按地图字节、版本、规则和解析输入校验，模型指纹忽略换行格式差异；读取计算函数的 AST，不反向导入分析编排模块。`build-official-precomputed.py` 用原生计算生成压缩数据，逐格核对还原值和有序来源，不复制 Toy 底图。
+
+`official_render_cache.py` 为匹配内置地图的完整绘制结果建立磁盘索引，读取时核对模型、渲染版本、原版资源与所有文件散列，复制出独立结果目录，避免地图模式标签或后续绘制修改旧结果。缺失、损坏、过期即回退；`/api/maps/recompute` 跳过概率和绘制缓存。前端沿用双布局加载器，保留视角、选中格及区域文档。`verify-official-precomputed.py --render` 覆盖原生结果对照、两层缓存失效、强制重算、导出与渲染像素一致性。
+
+`map_storage.py` 统一报告的原子写入和 gzip／旧 JSON 读取；服务发布阶段压缩报告与 CSV，`send_head` 在原 URL 上协商 gzip，GET／HEAD 和下载保持一致。分析 CLI 保持普通文件契约。`map_images.py` 保存快速无损 WebP、按全部 RGBA 通道去重并为过大图片回退 PNG；有界空闲队列逐像素验证重编码，原子替换图片和更新绘制缓存使用同一短时锁。前台分析优先，重编码在锁外进行；已完成图片的散列标记随缓存复制，重复开图无需重复编码。`verify-lossless-storage.py` 检查 HTTP、旧数据、透明像素、编码器限制、去重与空闲队列。
+
 发布数据由 `DATA_FILES` 明确列出，不递归复制本机样例／配置目录。构建前还检查 HTML 引用、两种原生辅助程序的源码散列、体素 DLL 来源、Node Canvas 及 FFmpeg。包内记录版本和逐文件校验清单，ZIP 另附 SHA-256。便携 Python 不加载开发目录里的备用依赖；重新启动时通过安装目录和代码指纹核对已有服务，避免新包误打开旧版本。
 
 `verify-source-package.py` 检查 Git 将发布的文件是否覆盖应用及测试依赖；`map_test_fixtures.py` 是可独立生成的合成地图，不依赖本机旧研究输出。`verify-portable-install.py` 面向新解压目录，清理开发环境变量后检查包内依赖、两版本地图、无矿布局、3D、四类对象和视频导出；验收会生成结果，不能把验收目录再次打包发布。

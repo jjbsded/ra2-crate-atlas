@@ -11,6 +11,10 @@ Crate Atlas combines a local Python HTTP service with plain JavaScript pages. Th
 | `server.py` | HTTP parameters, origin checks, static files, preferences, resource settings and video export |
 | `map_jobs.py` | Submission, serial execution, progress snapshots and ore/tree-layout reuse; no HTTP or 3D dependency |
 | `map_results.py` | Result paths, source-map hashes, bounded shared report cache and resource consistency |
+| `map_storage.py` | Atomic plain/gzip report publication, compressed CSV storage and compatible logical URLs |
+| `map_images.py` | Pixel-exact WebP, identical-layer reuse and bounded idle recompression |
+| `official_precomputed.py` | Validate model/resource signatures and restore lossless official gameplay data |
+| `official_render_cache.py` | Validate and reuse complete local render results without sharing mutable output files |
 | `realmap.py` | Analysis orchestration and CLI: parsing, approximation, native search, probability, rendering, output |
 | `realmap_format.py` | INI / numeric syntax and bounded LCW / LZO decoding; no model or rendering dependency |
 | `realmap_resources.py`, `realmap_mod.py` | Stock MIX, rules / art, theaters / palettes, optional directory discovery |
@@ -29,6 +33,8 @@ Crate Atlas combines a local Python HTTP service with plain JavaScript pages. Th
 Stock and directory resources share cell parsing and sprite decoding. `realmap.py` retains old function imports for compatibility. New code should import the owning module directly. The dependency-cycle check includes function-local imports, excluding only the explicit delayed compatibility forwarders `realmap_mod.preview` and `realmap_render.refresh_result`. Business modules must remain acyclic. Shared sprite functions belong in `realmap_sprites`, not reverse imports of the renderer.
 
 The job manager retains at most 64 polling records, never evicting active / queued jobs. Eviction does not delete disk results. One analysis runs at a time. A foreground request can await an already-running matching preload; incompatible requests return busy. Identical in-flight layouts reuse jobs; readers get locked state snapshots.
+
+Bundled official data uses checksum-verified XZ with bounded decoding; incompatible or damaged entries fall back to live calculation. A separate local cache validates rendered files before reuse. Explicit recalculation bypasses both. Desktop reports and CSVs use gzip behind the original URLs, while CLI output remains plain JSON/CSV. WebP preserves every pixel, shares identical ground/object layers and retains PNG for oversized images. A single bounded idle worker checks decoded pixels before replacing an image; publication and rendered-cache checksums share a lock, while encoding happens outside it.
 
 The report cache holds two reports and coordinate indexes, invalidated by path, size and nanosecond modification time. Consumers treat shared reports as immutable. `mineral-variants.json` links layouts, checked against map / rule / resource fingerprints and renderer version before reuse. Invalid links allow recalculation. Optional game paths stay in `data/game-directory.json`; no named Mod profile or artwork enters builds.
 

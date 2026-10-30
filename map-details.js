@@ -12,10 +12,11 @@
  const previewLabel=meta=>meta.partialAnalysis?_t('部分地图预览'):['directory','shikong'].includes(meta.version)?_t('目录资源预览'):_t('地图外观预览');
  function failurePercent(p){return p.finalFailure===0&&BigInt(p.exact.failureNumerator||0)>0n?_t('极小（非零）'):pct(p.finalFailure);}
 
- function completion(data){
+ function completionText(data){
   const {previewOnly:preview,approximate}=data.metadata,objectInfo=data.rendering.objects;
   if(approximate)return _t`近似计算完成 · ${data.metadata.filename} · 概率不保证准确 · ${data.metadata.approximation.retryCellCount} 格采用重抽假设`;else if(preview)return _t`${previewLabel(data.metadata)}完成 · ${data.metadata.filename} · 矿石/树木${data.metadata.mineralsEnabled===false&&data.metadata.treesEnabled!==false?_t('混合'):data.metadata.mineralsEnabled===false?_t('关'):_t('开')} · 已绘制 ${objectInfo?.total||0} 个建筑／单位`;else return _t`完成 · ${_i18n?.mapName(data.metadata)||data.metadata.displayName||data.metadata.filename} · ${data.metadata.version==='ra2'?_t('原版'):_t('尤里')}规则 · 矿石/树木${data.metadata.mineralsEnabled===false&&data.metadata.treesEnabled!==false?_t('混合'):data.metadata.mineralsEnabled===false?_t('关'):_t('开')} · 放箱后禁行 ${data.markers.length} 格 · 清空对象后潜在禁行 ${data.potentialMarkers?.length??_t('未计算')} 格 · ${data.metadata.elapsedSeconds} 秒`;
  }
+ function completion(data){const text=completionText(data),kind=data.metadata.calculationSource?.kind;return kind==='official-precomputed'?_t('官方预计算')+' · '+text:kind==='local-cache'?_t('本地缓存')+' · '+text:text;}
  function create({document=root.document}={}){
   const $=id=>document.getElementById(id);
  function appendRow(table,label,value){const tr=document.createElement('tr'),th=document.createElement('th'),td=document.createElement('td');th.textContent=label;td.textContent=value;tr.append(th,td);table.append(tr);}
@@ -25,11 +26,11 @@
   if(data.metadata.previewOnly){appendRow(table,_t('模式'),previewLabel(data.metadata)+_t('（未计算概率）'));appendRow(table,_t('高度 / 坡型'),`${c.level} / ${c.terrainError?_t('未知'):c.slope}`);appendRow(table,_t('对象'),c.objects.join(', ')||_t('无'));appendRow(table,'Overlay',c.overlayName||(c.overlay!==255?_t('未知类型 ')+c.overlay:_t('无')));appendRow(table,'TMP',`${c.file} / ${c.subTile}`);if(c.terrainError)appendRow(table,_t('地形告警'),c.terrainError+_t('；菱形为占位显示。'));appendRow(table,_t('占用判定'),c.occupancyUnknown?_t('缺少定义，无法确定'):_t('仅保留对象位置，未验证通行'));return;}
   if(data.metadata.approximate)appendRow(table,_t('结果质量'),_t('近似概率，不保证准确'));
   appendRow(table,_t('相对倍率'),fixed(display.get(c).multiplier)+'×'+(display.get(c).isBaseline?_t('（基准格）'):''));appendRow(table,data.metadata.approximate?_t('近似概率（单次调用）'):_t('最终概率（单次调用）'),pct(c.probability));
-  appendRow(table,_t('高度 / 坡型'),`${c.level} / ${c.terrainError?_t('未知'):c.slope}`);appendRow(table,_t('原始 / 当前地面'),`${landNames[c.rawLand]||_t('未知')} → ${landNames[c.land]}`);
+  appendRow(table,_t('高度 / 坡型'),`${c.level} / ${c.terrainError?_t('未知'):c.slope}`);appendRow(table,_t('原始 / 当前地面'),`${c.terrainError?_t('未知'):landNames[c.rawLand]||_t('未知')} → ${landNames[c.land]}`);
   appendRow(table,_t('放箱后地面（预测）'),data.metadata.approximate?_t('未验证'):c.status==='crate'?landNames[c.postLand]:_t('无实体／未放置'));
   if(c.assumedRetry)appendRow(table,_t('重抽假设'),c.retryAssumptions.join('；')+_t('。搜索选中本格时放箱失败并重抽。'));
   appendRow(table,_t('可用边界'),c.usable?_t('范围内'):c.visibleBand?_t('顶部可视禁区（不可移动／建造）'):_t('范围外'));appendRow(table,_t('镜头显示范围'),c.cameraCoverage===undefined?_t('旧版'):fixed(c.cameraCoverage*100)+_t('%（边界按显示范围裁切）'));appendRow(table,_t('表面可见'),c.surfaceVisibility===undefined?_t('旧版平面显示'):fixed(c.surfaceVisibility*100)+_t('%（其余被地形遮挡）'));appendRow(table,_t('投影分组'),c.primary?_t('首选'):_t('次选'));
-  appendRow(table,'Overlay',c.overlayName||_t('空'));appendRow(table,_t('占用'),c.objects.join(', ')||_t('无'));
+  appendRow(table,'Overlay',c.overlayName||(c.overlay!==255?_t('未知类型 ')+c.overlay:_t('空')));appendRow(table,_t('占用'),c.objects.join(', ')||_t('无'));
   if(c.bridge){
    appendRow(table,_t('桥梁'),c.bridge.kind==='high'?_t`高桥：桥下高度 ${c.level}，桥面高度 ${c.bridge.deckLevel}；搜索检查桥面占用层`:_t`低桥：使用地面通行和占用层${c.bridge.emptySprite?_t('；本格自身帧透明，相邻桥段的贴图可能覆盖本格'):''}`);
    if(c.bridge.kind==='high'&&c.objectsGround){
@@ -105,12 +106,12 @@
    $('scope').replaceChildren();for(const line of data.metadata.warnings){const el=document.createElement('p');el.textContent=line;$('scope').append(el);}
    $('crateLimitNote').hidden=false;$('crateLimitNote').textContent=data.metadata.warnings[0];
   }
-  const issues=data.metadata.loadIssues||[],partial=!!data.metadata.partialAnalysis;
-  $('analysisNotice').hidden=!partial&&!preview&&!approximate;
+  const issues=data.metadata.loadIssues||[],partial=!!data.metadata.partialAnalysis,warningOnly=issues.length&&!partial&&!preview&&!approximate;
+  $('analysisNotice').hidden=!partial&&!preview&&!approximate&&!warningOnly;
   $('retryApprox').hidden=!preview;
-  $('analysisNoticeTitle').textContent=approximate?_t('近似概率 · 不保证准确'):_t('地图已部分加载 · 未计算概率');
-  $('analysisNoticeText').textContent=approximate?
-   _t`已继续计算概率：${data.metadata.approximation.retryCellCount} 格含不明内容，按可读地形参与附近搜索，选中时假定放箱失败并重抽。未知建筑只使用可读基础，否则按原点一格；这些假设会影响全图概率。区域统计、3D 和导出同步使用近似结果；禁行风险未验证。`:
+  $('analysisNoticeTitle').textContent=approximate?_t('近似概率 · 不保证准确'):warningOnly?_t('地图已加载 · 有告警'):_t('地图已部分加载 · 未计算概率');
+  $('analysisNoticeText').textContent=warningOnly?_t('静态概率已完成计算。以下冲突字段不参与本工具的静态计算，详细记录包含原值、采用值和行号。'):approximate?
+   (data.metadata.approximation.retryCellCount>0?_t`已继续计算概率：${data.metadata.approximation.retryCellCount} 格含不明内容，按可读地形参与附近搜索，选中时假定放箱失败并重抽。未知建筑只使用可读基础，否则按原点一格；这些假设会影响全图概率。区域统计、3D 和导出同步使用近似结果；禁行风险未验证。`:_t('检测到冲突或未支持的配置，已按告警中列出的假设继续计算。这些假设可能影响全图概率；区域统计、3D 和导出使用同一近似结果，禁行风险未验证。')):
    data.metadata.analysisError?
    _t`原因：${data.metadata.analysisError}。已继续读取可用的地形、建筑和单位；缺失内容可能影响全图的附近搜索及重抽，因此概率、区域倍率和禁行预测暂不可用。`:
    _t('部分内容缺少定义或无法解析，已保留可用地形和对象。紫灰色菱形表示未知地形，仅保留地图记录的高度；对象标识不代表已验证占用。');

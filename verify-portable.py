@@ -81,6 +81,22 @@ class PackageChecks(unittest.TestCase):
             self.assertEqual(saved.read_bytes(), b'keep this')
             self.assertFalse(target.with_name(target.name+'.zip').exists())
 
+    def test_both_archive_formats_preserve_existing_7z(self):
+        with tempfile.TemporaryDirectory(dir=OUT) as temporary:
+            target = Path(temporary)/'CrateAtlas.test'
+            archive = target.with_name(target.name+'.7z')
+            archive.write_bytes(b'keep this archive')
+            with self.assertRaises(ValueError):
+                builder.archive_files(target)
+            self.assertEqual(archive.read_bytes(), b'keep this archive')
+
+    def test_archive_only_zip_needs_no_extra_tool(self):
+        with tempfile.TemporaryDirectory(dir=OUT) as temporary:
+            target = Path(temporary)/'CrateAtlas.test'
+            archives, tool = builder.archive_files(target, 'zip')
+            self.assertIsNone(tool)
+            self.assertEqual(archives, [target.with_name(target.name+'.zip')])
+
 
 if __name__ == '__main__':
     unittest.main()

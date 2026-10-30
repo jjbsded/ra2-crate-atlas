@@ -118,14 +118,15 @@
    const events=new AbortController();let observer=null;
    try{
     await Promise.all(Object.entries(data.textures).map(([id,source])=>new Promise((resolve,reject)=>{
-     function ready(im){if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();}
+     function ready(im){if(disposed){resolve();return;}const tex=new T.Texture(im);tex.needsUpdate=true;tex.colorSpace=T.SRGBColorSpace;tex.magFilter=T.NearestFilter;if(data.originalArt){tex.minFilter=T.NearestFilter;tex.generateMipmaps=false;}tex.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());textures[id]=tex;resolve();}
      if(typeof source!=='string'){ready(source);return;}
      const im=new Image();im.onload=()=>ready(im);im.onerror=()=>reject(Error(_t('部分地形贴图无法解码')));im.src=source;
     })));
     if(ticket!==revision){dispose();return null;}
-    function surface(c,mat,offset=0,inset=0,warp=null){
+    const textureUV=(u,v,r)=>r?[r[0]+u*r[2],1-r[1]-(1-v)*r[3]]:[u,v];
+    function surface(c,mat,offset=0,inset=0,warp=null,rect=c.textureRect){
      const positions=[],uv=[],indices=[],n=c.slope?6:1;
-     for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){const u=inset+(1-2*inset)*i/n,v=inset+(1-2*inset)*j/n,p=point(c,u,v,offset);if(warp)warp(p,u,v);positions.push(...p.toArray());uv.push(u,1-v);}
+     for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){const u=inset+(1-2*inset)*i/n,v=inset+(1-2*inset)*j/n,p=point(c,u,v,offset);if(warp)warp(p,u,v);positions.push(...p.toArray());uv.push(...textureUV(u,1-v,rect));}
      for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=j*(n+1)+i,b=a+1,d=a+n+1,e=d+1;indices.push(a,d,b,b,d,e);}
      const g=geometry(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();return new T.Mesh(g,mat);
     }
@@ -151,7 +152,7 @@
      reliefAssets.set(id,{geometry:g,material:material({map:textures[detail.texture],alphaTest:.5,side:T.FrontSide}),rear});
     }
     for(const c of cells){
-     if(!topMats.has(c.texture))topMats.set(c.texture,material({map:textures[c.texture]||null,color:c.texture?0xffffff:0x7c8990,side:T.DoubleSide}));
+     if(!topMats.has(c.texture))topMats.set(c.texture,material({map:textures[c.texture]||null,color:c.texture?0xffffff:0x7c8990,alphaTest:data.originalArt?.05:0,side:T.DoubleSide}));
      const detail=reliefAssets.get(c.relief);
      const top=surface(c,topMats.get(c.texture));top.userData.cell=c;(detail?coarse:terrain).add(top);pickables.push(top);
      if(detail){
@@ -169,7 +170,8 @@
       // Keep the original Lambert light on rear faces and patch cut boundaries.
       const gameFacing=!!n&&(edge===1||edge===2),matKey=`${id}:${gameFacing?'game':'rear'}`;
       if(!wallMats.has(matKey)){const options={map:n?textures[id]||null:null,color:gameFacing?0xffffff:n?0xd3d4d0:0x293945,side:T.DoubleSide};const m=gameFacing?new T.MeshBasicMaterial(options):new T.MeshLambertMaterial(options);materials.add(m);wallMats.set(matKey,m);}
-      const g=geometry(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute([...pa.toArray(),...pb.toArray(),...nb.toArray(),...na.toArray()],3));g.setAttribute('uv',new T.Float32BufferAttribute([0,1,1,1,1,0,0,0],2));g.setIndex([0,1,2,0,2,3]);g.computeVertexNormals();
+      const wallRect=c.wallsRect?.[edge]||c.wallTextureRect;
+      const g=geometry(new T.BufferGeometry());g.setAttribute('position',new T.Float32BufferAttribute([...pa.toArray(),...pb.toArray(),...nb.toArray(),...na.toArray()],3));g.setAttribute('uv',new T.Float32BufferAttribute([[0,1],[1,1],[1,0],[0,0]].flatMap(([u,v])=>textureUV(u,v,wallRect)),2));g.setIndex([0,1,2,0,2,3]);g.computeVertexNormals();
       const wall=new T.Mesh(g,wallMats.get(matKey));wall.userData.cell=c;
       const detailedWall=n&&(detail||reliefAssets.has(n.relief));
       (detailedWall?coarse:terrain).add(wall);pickables.push(wall);
@@ -187,7 +189,7 @@
        // stretching the fascia flat over the water. Move along the original
        // camera ray so its game-view projection and texture anchor stay fixed.
        const warp=d.bridge==='high'&&d.span?(p,u,v)=>{const delta=bridgeFold(c,d,u,v);p.x+=delta;p.z+=delta;p.y+=2*delta*H;}:null;
-       const mesh=surface(decorationSurface(c,d),decorMaterial(d),d.bridge ? .018 : .012,0,warp);
+       const mesh=surface(decorationSurface(c,d),decorMaterial(d),d.bridge ? .018 : .012,0,warp,d.textureRect);
        decor.add(mesh);
        if(d.bridge==='high'){mesh.userData.cell=c;pickables.push(mesh);}
        addRails(c,d);
@@ -198,7 +200,7 @@
     // Toy uses a small shared palette. Batch static meshes by material while
     // retaining a face-to-cell table for picking, including elevated decks.
     // Original-art relief meshes retain their separate visibility groups.
-    if(data.simplified)for(const group of [terrain,decor]){
+    if(data.simplified||data.batchStatic)for(const group of [terrain,decor]){
      const batches=new Map(),oldPickables=new Set(pickables),removed=new Set();
      for(const mesh of group.children){
       if(!mesh.isMesh)continue;

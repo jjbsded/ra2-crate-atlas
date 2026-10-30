@@ -11,6 +11,7 @@ import uuid
 
 import original_resources
 from map_results import ROOT, load_report, result_path, resource_context, source_bytes
+from map_storage import write_report, compress_downloads
 
 
 class BusyError(ValueError):
@@ -24,6 +25,11 @@ class MapJobs:
         self._jobs = OrderedDict()
         self._lock = threading.RLock()
         self._analysis_lock = threading.Lock()
+        self._image_optimizer = None
+
+    def _idle(self):
+        with self._lock:
+            return not any(not job.get('done') and not job.get('error') for job in self._jobs.values())
 
     def status(self, job):
         with self._lock:
@@ -35,7 +41,7 @@ class MapJobs:
             self._jobs[job].update(changes)
 
     def submit(self, data, version, filename, mix_paths, official=None,
-               minerals_enabled=True, previous_result=None, resource_root=None, *, background=False):
+               minerals_enabled=True, previous_result=None, resource_root=None, *, background=False, force_recompute=False):
         with self._lock:
             active = [(key, value) for key, value in self._jobs.items()
                       if not value.get('done') and not value.get('error')]
@@ -57,7 +63,7 @@ class MapJobs:
                                   mineralSource=previous_result, mineralEnabled=minerals_enabled,
                                   message='等待后台预加载完成' if active else '准备读取地图')
             args = (job, data, version, filename, mix_paths, official,
-                    minerals_enabled, previous_result, resource_root)
+                    minerals_enabled, previous_result, resource_root, force_recompute)
             try:
                 threading.Thread(target=self._run, args=args, daemon=True).start()
             except Exception:
@@ -65,30 +71,57 @@ class MapJobs:
                 raise
             return {'id': job}
 
-    def _run(self, job, data, version, filename, mix_paths, official, enabled, previous, root):
+    def _run(self, job, data, version, filename, mix_paths, official, enabled, previous, root, force_recompute):
         with self._analysis_lock:
             try:
                 from realmap import analyze
                 folder = ROOT/'output'/('map-'+job)
                 progress = lambda message, percent: self._update(job, message=message, progress=percent)
-                result = (self._analyzer or analyze)(data, folder, version, filename, progress, mix_paths,
-                                                   minerals_enabled=enabled, resource_root=root)
+                options = dict(minerals_enabled=enabled, resource_root=root)
+                from official_render_cache import key, reuse, remember
+                identity = key(data, version, enabled, mix_paths) if official and not root and self._analyzer is None else None
+                result = reuse(identity, folder, filename, progress) if not force_recompute else None
+                if force_recompute:
+                    options['use_precomputed'] = False
+                if result is None:
+                    result = (self._analyzer or analyze)(data, folder, version, filename, progress, mix_paths, **options)
                 if official:
                     result['metadata'].update(officialMap=official, displayName=official['label'])
                 if previous:
                     result['metadata']['mineralPreviousResult'] = previous
-                if official or previous:
-                    (folder/'result.json').write_text(json.dumps(result, ensure_ascii=False, separators=(',', ':')), 'utf8')
+                write_report(folder/'result.json', result)
+                compress_downloads(folder)
                 url = f'/output/map-{job}/result.json'
                 if previous:
                     remember_pair(previous, url, enabled)
+                remember(identity, folder, url)
                 meta = result['metadata']
                 message = ('近似计算完成，概率不保证准确' if meta.get('approximate') else
                            '部分加载完成，请查看告警' if meta.get('partialAnalysis') else
                            '外观预览完成' if meta.get('previewOnly') else '精确计算完成')
                 self._update(job, done=True, progress=100, message=message, url=url, cells=meta['cellCount'])
+                if self._analyzer is None and result.get('rendering'):
+                    from map_images import IdleOptimizer
+                    if self._image_optimizer is None:
+                        self._image_optimizer = IdleOptimizer(self._idle)
+                    self._image_optimizer.submit(folder, lambda: remember(identity, folder, url))
             except Exception as error:
                 self._update(job, error=str(error) or type(error).__name__, message='计算未完成，未输出近似概率')
+
+    def recompute(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError('无效的重新计算请求')
+        path = result_path(payload.get('result'))
+        report, _ = load_report(path)
+        meta = report['metadata']; version = meta['version']
+        data = source_bytes(report, path)
+        root = None
+        if version in ('directory', 'shikong'):
+            res, _ = resource_context(report, path)
+            root = res.discovery['config']['root']
+        paths = None if root is not None else original_resources.resolve(version)
+        return self.submit(data, version, meta['filename'], paths, meta.get('officialMap'),
+                           meta.get('mineralsEnabled', True), resource_root=root, force_recompute=True)
 
     def minerals(self, payload):
         if not isinstance(payload, dict) or type(payload.get('enabled')) is not bool:
@@ -133,7 +166,7 @@ def compatible_variant(report, cached, enabled):
             cached.get('rendering', {}).get('version') == report.get('rendering', {}).get('version') and
             all(other.get(key) == meta.get(key) for key in
                 ('sourceSha256', 'version', 'rulesSha256', 'theaterSha256', 'probabilityQuality',
-                 'resourceRoot', 'resourceFingerprint', 'artSha256')))
+                 'resourceRoot', 'resourceFingerprint', 'artSha256', 'calculationModelSha256')))
 
 
 def matches_layout(meta, enabled):

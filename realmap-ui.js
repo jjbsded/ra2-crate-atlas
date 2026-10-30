@@ -82,6 +82,7 @@
   $('retryMod').disabled=value;
   $('resourcesOpen').disabled=$('version').disabled=value;
   $('reanalyzeResources').disabled=value||!state.data;
+  if($('recompute'))$('recompute').disabled=value||!state.data;
   $('retryApprox').disabled=value;
   if(value)$('progress').value=0;
   syncMineralToggle();
@@ -399,6 +400,7 @@
   $('workspace').hidden=false;$('thresholdRange').max=Math.max(Number(previous?.threshold)||0,Math.ceil(display.maxMultiplier*10)/10)||1;$('threshold').max=data.probability?.sampleCount||1;$('threshold').value=$('thresholdRange').value=previous?.threshold||'0.0';
   details.report(prepared,display,{busy:state.busy,lookup:state.lookup,onFocus:focus});
   syncProbabilityToggle();syncMineralToggle();
+  if($('recompute'))$('recompute').disabled=state.busy;
   if(previous){
    Object.assign(state,{x:previous.x,y:previous.y,scale:previous.scale});miniState.position=previous.position;miniState.minimized=previous.minimized;
    const c=previous.selected&&state.lookup.get(previous.selected.join(','));if(c)select(c);else deselect();schedule();
@@ -423,6 +425,19 @@
   finally{setBusy(false);$('mapFile').value='';}
  }
  CrateOfficialMaps.create({onAnalyze:official=>analyze(null,official),...(platform?{loadCatalog:platform.catalog,precomputed:true}:{})});
+ if($('recompute')){
+  $('recompute').hidden=!!platform;
+  $('recompute').onclick=async()=>{
+   if(state.busy||!state.data)return;
+   resultLoader.invalidate();setBusy(true);message('',true);message(_t('正在重新计算当前地图…'));
+   try{
+    const job=await CrateLocalAPI.json('/api/maps/recompute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:state.prepared.url})});
+    await loadResult(await jobResult(job),true,{preserveView:true});
+    mineralLayouts.use(state.prepared,{reset:true});
+   }catch(error){message(error.message,true);message(_t('分析未完成；之前的结果保留。'));}
+   finally{setBusy(false);}
+  };
+ }
  async function analyzeSaved(version){
   if(state.busy||!state.data)return;
   setBusy(true);message('',true);

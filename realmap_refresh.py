@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from realmap_render import render, refresh_sprite_issues
+from map_storage import read_json, write_report, storage_path
 
 
 def refresh_result(path):
@@ -13,8 +14,8 @@ def refresh_result(path):
     from runtime_bootstrap import ROOT
     from realmap_parser import parse_map
     from realmap_format import sha
-    path = Path(path)
-    result = json.loads(path.read_text('utf8'))
+    path = storage_path(path)
+    result = read_json(path)
     meta = result['metadata']
     choices = [path.parent/'source.map', ROOT.parents[1]/'scripts/crate_generation_research/heck-analysis'/meta['filename']]
     source = next((p for p in choices if p.is_file() and sha(p.read_bytes()) == meta['sourceSha256']), None)
@@ -41,5 +42,5 @@ def refresh_result(path):
     cells = {(c['x'], c['y']): c for c in result['cells']}
     result['rendering'] = render(cells, res, theater, tmps, path.parent, meta, lambda *a: None)
     refresh_sprite_issues(meta, result['rendering'])
-    path.write_text(json.dumps(result, ensure_ascii=False, separators=(',', ':')), 'utf8')
+    write_report(path, result, compressed=path.suffix == '.gz')
     return result['rendering']

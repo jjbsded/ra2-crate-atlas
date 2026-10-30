@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import re
 import threading
+from map_storage import storage_path, read_json
 
 ROOT = Path(__file__).resolve().parent
 _contexts = OrderedDict()
@@ -74,7 +75,7 @@ def _directory_context(meta, path):
 def result_path(value):
     if not isinstance(value, str) or not re.fullmatch(r'/output/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+){0,2}/result\.json', value):
         raise ValueError('需要本工具生成的地图分析结果')
-    path = (ROOT/value.lstrip('/')).resolve()
+    path = storage_path((ROOT/value.lstrip('/')).resolve()).resolve()
     if not path.is_relative_to((ROOT/'output').resolve()) or not path.is_file():
         raise ValueError('地图分析结果不存在，请重新分析地图')
     return path
@@ -82,12 +83,12 @@ def result_path(value):
 
 @lru_cache(maxsize=2)
 def read_report(path, size, modified):
-    report = json.loads(Path(path).read_text('utf8'))
+    report = read_json(path)
     return report, {(c['x'], c['y']): c for c in report.get('cells', [])}
 
 
 def load_report(path):
-    path = Path(path)
+    path = storage_path(path)
     stat = path.stat()
     return read_report(str(path.resolve()), stat.st_size, stat.st_mtime_ns)
 

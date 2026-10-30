@@ -54,3 +54,13 @@ Vehicles, aircraft and voxel turrets use `voxel-worker.cs` / `output/realmap-too
 Video dependencies can be set with `CODEX_NODE_MODULES` and `FFMPEG_PATH`; bundled runtimes take priority by default. Licenses and component sources are described in [third-party notices](third-party-notices.md) and the package's `runtime/THIRD-PARTY-NOTICES.md`.
 
 The server root opens the map page. Use `index.html` or `--page demo` for the probability demo.
+
+## Precomputed caches and lossless storage (v0.5.0+)
+
+`official-precomputed` holds Battle / Team Alliance gameplay data for both ore/tree layouts (about 9.07 MB with lossless XZ), without duplicate artwork. Portable builds validate the model revision and file checksums. Entries load per map; unavailable or stale data falls back to live analysis. `output/official-render-cache` indexes locally generated views and is not packaged; deleted or damaged results are regenerated.
+
+**Recalculate** bypasses both bundled and rendered caches while retaining the view and regions. Precomputation improves loading, with full-resolution artwork, detailed 3D and exports preserved. It does not change frame rate or probability definitions.
+
+New desktop reports and CSV downloads are stored as gzip while retaining their existing `.json` / `.csv` URLs. Older results remain readable without migration. Map images use lossless WebP with unchanged dimensions, color and transparent pixels; identical ground/object layers share one image. Images exceeding the encoder's dimension limit retain PNG. Idle recompression further reduces storage without changing pixels or probabilities. Developer scripts calling the analysis CLI still receive plain JSON/CSV files.
+
+Portable builds create both ZIP and smaller 7z packages by default, each with SHA-256 checksums and identical extracted contents. Install 7-Zip on the build machine or pass `--seven-zip`; use `--archive-format zip` for ZIP only. Users need a compatible extractor for the 7z package; running Crate Atlas itself does not require 7-Zip.

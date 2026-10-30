@@ -87,27 +87,28 @@ def main():
             print('PASS: in-flight reuse, nonblocking queued import, serial execution, restart-safe pair cache.')
 
             variant_path = server.ROOT/variant.lstrip('/')
-            cached = json.loads(variant_path.read_text('utf8'))
+            from map_storage import read_json, write_report
+            cached = read_json(variant_path)
             legacy = copy.deepcopy(cached)
             legacy['metadata'].pop('treesEnabled')
             legacy['metadata'].pop('terrainRemovalVersion')
-            variant_path.write_text(json.dumps(legacy), 'utf8')
+            write_report(variant_path, legacy)
             replacement = request('/api/maps/minerals', {'result': variant, 'enabled': False})
             assert 'id' in replacement, 'Legacy ore-only OFF cannot satisfy combined OFF'
             complete(replacement)
             from map_jobs import compatible_variant
             assert not compatible_variant(report, legacy, False)
-            variant_path.write_text(json.dumps(cached), 'utf8')
+            write_report(variant_path, cached)
             cached['rendering']['version'] = 9
-            variant_path.write_text(json.dumps(cached), 'utf8')
+            write_report(variant_path, cached)
             replacement = request('/api/maps/minerals', payload)
             assert 'id' in replacement, 'Older rendering must not be reused'
             complete(replacement)
             cached = json.loads((folder/'mineral-variants.json').read_text('utf8'))
             current_path = server.ROOT/cached['false'].lstrip('/')
-            current = json.loads(current_path.read_text('utf8'))
+            current = read_json(current_path)
             current['metadata']['resourceFingerprint'] = 'changed'
-            current_path.write_text(json.dumps(current), 'utf8')
+            write_report(current_path, current)
             replacement = request('/api/maps/minerals', payload)
             assert 'id' in replacement, 'Different resource fingerprints must not be reused'
             complete(replacement)

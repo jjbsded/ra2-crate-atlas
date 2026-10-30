@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from realmap_bridges import HIGH_NAMES, sprite_frame
 
-VERSION = 12
+VERSION = 13
 # Compatibility exports; shared sprite code lives below both renderers.
 from realmap_sprites import palette, sprite_spec, shadow_frame, SHADOW_ALPHA
 
@@ -355,10 +355,8 @@ def render(cells, res, theater, tmps, folder, meta, progress):
         c['visibleBand'] = (bool(camera_pixels.any()) and not c['usable'] and
                             cy <= 15*(meta['size'][2]+2*meta['visibleRect'][1]+1)-miny)
     progress('保存真实地形与表面轮廓', 91)
-    filename = f'ground-v{VERSION}.png'
-    canvas.save(folder/filename)
-    scene_filename = f'objects-v{VERSION}.png'
-    scene.save(folder/scene_filename)
+    from map_images import save_layers
+    filename, scene_filename = save_layers(canvas, scene, folder, VERSION)
     (folder/'object-audit.json').write_text(json.dumps(object_info, ensure_ascii=False, indent=2), 'utf8')
     object_info.pop('records')
     shadow_info = dict(objects=shadow_count, pixels=shadow_pixels, alpha=SHADOW_ALPHA,

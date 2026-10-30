@@ -204,6 +204,8 @@ def compact_search(raw, count):
 
 
 def expand_search(raw):
+    if raw[:4] == b'CSP2':
+        return expand_anchored_search(raw)
     if raw[:4] != b'CSC1':
         return raw
     count, size = struct.unpack_from('<II',raw,4)
@@ -236,4 +238,57 @@ def expand_search(raw):
         picked = values[index-1] if index else [(i//maximum+1)*512+i%maximum+1]
         output.extend(struct.pack('<'+'I'*(len(picked)+1),len(picked),*picked))
     assert offset == len(raw)
+    return bytes(output)
+
+
+def expand_anchored_search(raw):
+    """Decode the same ordered, duplicate-preserving format as Toy's worker."""
+    if len(raw) < 12:
+        raise ValueError('CSP2 header')
+    count, size = struct.unpack_from('<II', raw, 4)
+    maximum = int(count**.5)
+    if maximum**2 != count or not 1 <= maximum <= 510 or size > count:
+        raise ValueError('CSP2 size')
+    offset = 12
+    def read():
+        nonlocal offset
+        value = 0
+        for shift in range(0, 35, 7):
+            if offset >= len(raw):
+                raise ValueError('CSP2 truncated')
+            byte = raw[offset]; offset += 1
+            value += (byte & 127) << shift
+            if byte < 128:
+                return value
+        raise ValueError('CSP2 varint')
+    def signed():
+        n = read()
+        return n//2 if n%2 == 0 else -(n+1)//2
+    patterns = []
+    for _ in range(size):
+        if offset >= len(raw) or not 1 <= raw[offset] <= 24:
+            raise ValueError('CSP2 pattern length')
+        n = raw[offset]; offset += 1
+        row, previous = [], 0
+        for _ in range(n):
+            previous += signed(); row.append(previous)
+        patterns.append(row)
+    ids = [read() for _ in range(count)]
+    if any(i > size+1 for i in ids):
+        raise ValueError('CSP2 pattern index')
+    output = bytearray()
+    for i, index in enumerate(ids):
+        origin = (i//maximum+1)*512+i%maximum+1
+        if index == 0:
+            row = [origin]
+        elif index == 1:
+            row = []
+        else:
+            anchor = origin+signed()
+            row = [anchor+delta for delta in patterns[index-2]]
+        if any(not 0 <= target < 262144 for target in row):
+            raise ValueError('CSP2 target')
+        output.extend(struct.pack('<'+'I'*(len(row)+1), len(row), *row))
+    if offset != len(raw):
+        raise ValueError('CSP2 trailing data')
     return bytes(output)
