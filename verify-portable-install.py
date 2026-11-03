@@ -86,8 +86,8 @@ def verify(root):
         process = subprocess.Popen(command, cwd=root, env=env, stdout=stream, stderr=stream,
                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         base = f'http://127.0.0.1:{port}'
-        def request(path, data=None, raw=False):
-            headers = {}
+        def request(path, data=None, raw=False, headers=None):
+            headers = dict(headers or {})
             if isinstance(data, dict):
                 headers['Content-Type'] = 'application/json'; data = json.dumps(data).encode()
             with urlopen(Request(base+path, data=data, headers=headers), timeout=90) as response:
@@ -110,7 +110,13 @@ def verify(root):
                     assert time.monotonic() < deadline, 'Service did not start'
                     time.sleep(.1)
             assert health['instance']
-            assert 'Existing crate demo:' in run(command)
+            # Startup wording can change. Verify reuse by process/instance,
+            # rather than requiring the old English-only console message.
+            run(command)
+            identity = request('/api/server/identity', headers={
+                'X-Crate-Atlas-Control': 'crate-atlas-control-v1'})
+            assert process.poll() is None and identity['pid'] == process.pid
+            assert identity['instance'] == health['instance']
             with urlopen(base+'/', timeout=10) as response:
                 assert response.url.endswith('/maps.html')
             status = request('/api/resources')
