@@ -6,6 +6,8 @@ Toy 只维护一个版本：官方地图预计算查看与自定义地图浏览�
 
 ## 使用
 
+[下载 v0.6.0 Toy ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Toy-Web.zip) · [发布说明与校验文件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.6.0)。
+
 工作区双击 `D:/Ra2/Work/启动箱子Toy.cmd`；源码目录的 `启动Toy网页版.cmd` 指向同一个最新包。解压发布 ZIP 后双击 `Start Toy.cmd`，使用 Windows 自带 PowerShell/.NET 启动本地静态服务，不依赖 Python、Node.js 或游戏安装。保留整个解压目录；也可以把 ZIP 部署到 Toy 或普通 HTTPS 静态站点。不要直接双击 HTML。
 
 最新包由 `output/latest-release.json` 的 `toy` 字段指定。旧包仅作历史存档，不再提供独立启动入口或更新。

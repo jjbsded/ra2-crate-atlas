@@ -12,13 +12,13 @@
 
 ## 直接使用
 
-**v0.5.0 Windows 64 位完整版：[ZIP 包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip) · [7z 包（下载更小）](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z)**。两种包内容完全相同；7z 需要支持该格式的解压工具。完整解压后双击 **启动工具.cmd**（英文文件名 **Start Crate Atlas.cmd** 也可），默认进入真实地图概率计算。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和经过哈希校验的原版资源。游戏目录为可选项，用于读取其他安装或 Mod；发布包不携带任何具体 Mod 配置或美术素材。
+**v0.6.0 Windows 64 位完整版：[ZIP 包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Windows-x64.zip) · [7z 包（下载更小）](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Windows-x64.7z)**。两种包内容完全相同；7z 需要支持该格式的解压工具。完整解压后双击 **启动工具.cmd** 或 **Start Crate Atlas.cmd**。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和校验过的原版资源。游戏目录为可选项，发布包不携带具体 Mod 配置或素材。
 
-[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.5.0) · SHA-256 校验文件：[ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip.sha256) / [7z](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z.sha256)。升级时解压到新目录。当前源码已支持自动接管确认身份的旧服务；已发布的 v0.5.0 启动器仍需手动关闭旧服务。区域划分迁移见 [使用与迁移](PORTABLE.md)。
+**v0.6.0 Toy：[ZIP 包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Toy-Web.zip)**。只维护这一个 Toy，合并官方地图预计算查看和自定义地图浏览器本地计算，保留原生无损图集。ZIP 不超过 50,000,000 字节；完整解压后双击 **Start Toy.cmd**，使用 Windows 自带 PowerShell/.NET，无需 Python、Node.js 或游戏。也可部署到 HTTPS 静态站点。
 
-当前源码的 Toy 统一为一个版本，包含官方地图和自定义地图本地计算、原生无损贴图与 Windows 双击入口。源码已更新至绘图版本 19，包含地图纹理变体、原生 VPL 光照、载具阴影及四种单位部署外观；这些源码更新晚于上方的 v0.5.0 完整版和 v0.4.0 Toy 下载。使用与构建见 [Toy 说明](TOY.md)，跨工具移植见 [统一渲染接入文档](docs/rendering-porting-guide.md)。
+[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.6.0) · SHA-256：[完整版 ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Windows-x64.zip.sha256) / [完整版 7z](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Windows-x64.7z.sha256) / [Toy ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Toy-Web.zip.sha256)。升级请解压到新目录，区域划分迁移见 [使用与迁移](PORTABLE.md)。
 
-v0.5.0 新增经过校验的官方地图预计算、可复用的地图绘制缓存、报告与图像无损压缩，以及更小的 7z 完整包。概率精度、原版素材分辨率、3D 与导出功能保持不变。本次更新 Windows 完整版；已发布的 Toy 下载仍为 v0.4.0。
+v0.6.0 使用绘图版本 19：加入地图纹理变体、原生 VPL 光照、载具阴影与四种单位部署外观，修正所属色、DPI 显示、图层控制和启动缓存。Toy 使用与完整版相同的显示规则；概率算法及无损数据保持原样。自动区域划分增加严格的“总倍率 > 50×”或条件。使用与构建见 [Toy 说明](TOY.md)，跨工具移植见 [统一渲染接入文档](docs/rendering-porting-guide.md)。
 
 “Code → Download ZIP”仅提供源码和小型组件，直接使用请选择上面的便携包。源码运行方式见下文；index.html 的概率演示可直接打开。
 

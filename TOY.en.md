@@ -6,6 +6,8 @@ Toy is one maintained product: precomputed official maps and browser-local custo
 
 ## Run
 
+[Download v0.6.0 Toy ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.6.0/CrateAtlas-v0.6.0-Toy-Web.zip) · [Release notes and checksums](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.6.0).
+
 Double-click `D:/Ra2/Work/启动箱子Toy.cmd`, or `启动Toy网页版.cmd` in the source project. Both select the same latest package through the `toy` key in `output/latest-release.json`. To distribute, fully extract the release ZIP and double-click `Start Toy.cmd`: it uses Windows PowerShell/.NET and needs no Python, Node.js or game installation. Alternatively deploy to Toy or an HTTPS static host. Opening HTML with file:// is unsupported.
 
 Official Battle/Team Alliance maps include 131 menu entries, 147 version variants and 294 ore/tree layouts with exact probability data. Local `.map`, `.yrm` and `.mpr` imports up to 16 MB run in a browser worker, stay on your device, support cancellation and cache both layouts. Choose the correct game version. Regions persist by map content; reselect custom files after reload.
@@ -23,6 +25,6 @@ Scope is stock resources and simple embedded rules. Triggers, scripts, moving un
 .\run-python.cmd -B verify-toy.py output/toy --mode standard --mode teamgame
 ```
 
-The first two commands are internal data/artwork stages: no release ZIP or Windows launcher. Only the final command publishes Toy, enforcing a **50,000,000-byte ZIP limit**. Rebuild affected caches after analysis/render changes; never spoof fingerprints. For frontend-only changes, refresh the internal artwork stage with `build-toy.py --refresh-ui`, then rebuild the final Toy. Never refresh the final package directly with the internal-stage builder.
+The first two commands are internal data/artwork stages: no release ZIP or Windows launcher. Only build-toy-live.py publishes Toy, enforcing a **50,000,000-byte ZIP limit**. Rebuild affected caches after analysis/render changes; never spoof fingerprints. For frontend-only changes, refresh the internal artwork stage with `build-toy.py --refresh-ui`, then rebuild the final Toy. Never refresh the final package directly with the internal-stage builder.
 
 See [lighting integration](docs/voxel-lighting.md), [mechanism research](docs/random-crate-generation.en.md) and [the seven-requirement review](docs/review-seven-requirements-20261103.md). Historical releases are archives, not maintained products.
