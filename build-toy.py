@@ -32,7 +32,7 @@ def dump(path, value):
 
 def source_fingerprint():
     files = sorted(set(ROOT.glob('realmap*.py')) | {
-        ROOT/'terrain_depth.py', ROOT/'original_resources.py', ROOT/'official_maps.py',
+        ROOT/'terrain_depth.py', ROOT/'original_resources.py', ROOT/'official_maps.py', ROOT/'map_images.py',
         ROOT/'output/realmap-tools/map-search.exe'})
     return hashlib.sha256(b''.join(p.name.encode()+p.read_bytes() for p in files)).hexdigest()
 
@@ -294,7 +294,7 @@ def page(source, demo=False):
     if not demo:
         text = text.replace('href="index.html"', 'href="demo.html"')
         text = re.sub(r'<script src="resource-ui\.js[^\"]*"></script>', '', text)
-        text = text.replace('<script src="realmap-ui.js', '<script src="terrain-symbols.js"></script><script src="terrain-artwork.js"></script><script src="terrain3d-patch.js"></script><script src="static-codec.js"></script><script src="toy-platform.js"></script><script src="realmap-ui.js', 1)
+        text = text.replace('<script src="realmap-ui.js', '<script src="terrain-symbols.js"></script><script src="terrain-artwork.js"></script><script src="terrain3d-patch.js"></script><script src="original-artwork.js"></script><script src="terrain-variants.js"></script><script src="original-terrain3d.js"></script><script src="static-codec.js"></script><script src="toy-platform.js"></script><script src="realmap-ui.js', 1)
     else:
         text = text.replace('href="maps.html"', 'href="index.html"')
     text = text.replace('</body>', '<script src="toy-page.js?v='+hashlib.sha256((ROOT/'toy/toy-page.js').read_bytes()).hexdigest()[:12]+'"></script></body>')
@@ -302,9 +302,16 @@ def page(source, demo=False):
 
 
 def frontend(output):
+    existing = output/'build-manifest.json'
+    if existing.is_file() and json.loads(existing.read_text('utf8')).get('liveAnalysisExperiment'):
+        raise ValueError('Refresh the internal artwork stage, then rebuild Toy with build-toy-live.py; direct refresh would remove local map analysis')
+    # This is an internal artwork/data stage. Only build-toy-live.py publishes
+    # the sole Toy product and its Windows double-click entry.
+    for name in ('Start Toy.cmd', 'serve-toy.ps1'):
+        (output/name).unlink(missing_ok=True)
     for name in FRONTEND:
         shutil.copy2(ROOT/name, output/name)
-    for name in ['toy-boot.js', 'toy-platform.js', 'toy-page.js', 'toy.css', 'data-worker.js', 'static-codec.js', 'terrain-symbols.js', 'terrain-artwork.js', 'terrain3d-patch.js', 'about.html']:
+    for name in ['toy-boot.js', 'toy-platform.js', 'toy-page.js', 'toy.css', 'data-worker.js', 'static-codec.js', 'terrain-symbols.js', 'terrain-artwork.js', 'terrain3d-patch.js', 'original-artwork.js', 'original-terrain3d.js', 'terrain-variants.js', 'about.html']:
         shutil.copy2(ROOT/'toy'/name, output/name)
     (output/'lib').mkdir(exist_ok=True)
     for name in ['three-r160.min.js', 'three-LICENSE.txt']:
@@ -319,6 +326,7 @@ def frontend(output):
         revision.update(report.read_bytes())
     stamp = revision.hexdigest()[:16]
     with (output/'toy-boot.js').open('a', encoding='utf-8') as boot:
+        boot.write('\nwindow.CrateWebConfig.originalArt='+json.dumps(json.loads((output/'catalog.json').read_text('utf8')).get('artwork',{}).get('style')=='original')+';\n')
         boot.write('\nwindow.CrateWebConfig.catalogVersion='+json.dumps(stamp)+';\n')
         boot.write('window.CrateWebConfig.workerVersion='+json.dumps(hashlib.sha256(worker.read_bytes()).hexdigest()[:16])+';\n')
     def asset_version(match):
@@ -329,13 +337,16 @@ def frontend(output):
         return match.group(1)+'="'+match.group(2)+'?v='+version+'"'
     for name, source, demo in [('index.html','maps.html',False),('maps.html','maps.html',False),('demo.html','index.html',True)]:
         text = re.sub(r'(src|href)="([^"?]+\.(?:js|css))(?:\?[^\"]*)?"', asset_version, page(ROOT/source, demo))
+        if json.loads((output/'catalog.json').read_text('utf8')).get('artwork',{}).get('style')=='original':
+            text=text.replace('低清简化版（非完整版）','原版贴图轻量版（非完整版）')
         (output/name).write_text(text, 'utf-8')
     (output/'docs').mkdir(exist_ok=True)
     for name in ['random-crate-generation.md', 'random-crate-generation.en.md']:
         shutil.copy2(ROOT/'docs'/name, output/'docs'/name)
 
 
-def finalize(output, manifest):
+def finalize(output, manifest, archive=None):
+    manifest['internalBuild'] = manifest.get('edition') != 'toy'
     if any(output.rglob('*.tmp')):
         raise ValueError('Incomplete artwork remains in the build directory')
     if manifest.get('transportCodec') == 1:
@@ -344,18 +355,30 @@ def finalize(output, manifest):
             report = json.loads(gzip.decompress(path.read_bytes()))
             references = [report['_static']['base'], report['precomputed']['search']]
             references.extend(report['rendering'].get(field) for field in ('image','objectImage') if report['rendering'].get(field))
+            if original := report['rendering'].get('original'):
+                references.append(original['index'])
+                index=path.parent/original['index']
+                from toy_atlas_codec import decode as decode_artwork
+                art=decode_artwork(index.read_bytes())
+                references.extend(original['index'].rsplit('/',1)[0]+'/'+p['file'] for p in art['atlases'])
             row['downloadBytes'] = sum(file.stat().st_size for file in {path.resolve(),*((path.parent/name).resolve() for name in references)})
     manifest['files'] = {str(p.relative_to(output)).replace('\\', '/'):hashlib.sha256(p.read_bytes()).hexdigest()
                          for p in sorted(output.rglob('*')) if p.is_file() and p.name != 'build-manifest.json'}
     dump(output/'build-manifest.json', manifest)
-    archive = Path(str(output)+'.zip')
+    if manifest['internalBuild']:
+        print(json.dumps(dict(output=str(output), internalBuild=True, reports=len(manifest['maps'])), ensure_ascii=False), flush=True)
+        return
+    archive = Path(archive) if archive is not None else Path(str(output)+'.zip')
+    if archive.resolve().is_relative_to(output.resolve()):
+        raise ValueError('ZIP output must be outside the site directory')
+    archive.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zipped:
         for path in sorted(output.rglob('*')):
             if path.is_file():
                 zipped.write(path, str(path.relative_to(output)).replace('\\', '/'))
     archive.with_suffix('.zip.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest()+'  '+archive.name+'\n', encoding='utf-8')
     if manifest.get('zipBudgetBytes') and archive.stat().st_size > manifest['zipBudgetBytes']:
-        raise ValueError(f'ZIP exceeds budget: {archive.stat().st_size} > {manifest["zipBudgetBytes"]}. Reduce --max-image-edge or --image-quality.')
+        raise ValueError(f'ZIP exceeds budget: {archive.stat().st_size} > {manifest["zipBudgetBytes"]}. Optimize artwork/data packing; preserve exact probability data.')
     print(json.dumps(dict(output=str(output), zip=str(archive), bytes=archive.stat().st_size,
                           reports=len(manifest['maps'])), ensure_ascii=False), flush=True)
 

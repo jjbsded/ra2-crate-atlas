@@ -2,8 +2,9 @@
 (function(root){
  const messages={
  "水域{0}":"Water {0}",
+ "总倍率沿用本图 1× 基准，按候选连通块内所有格子的综合倍率求和，与统计表一致；海岸仍不计入面积门槛。同一坐标的桥上／桥下不重复计数。50× 整不触发倍率条件。已有划分保留，点击“重新自动划分”应用新条件。":"Totals use this map’s 1x baseline and sum the combined multiplier of all cells in the candidate component, matching the statistics table. Shore cells still do not count toward the area threshold. Bridge layers at one coordinate count once. Exactly 50x does not qualify. Saved regions are preserved; click Repartition to apply the new condition.",
  "自动划分完成：{0} 个玩家／小队区域，{1} 块无玩家陆地，{2} 块水域；保留 {3} 个空区域，{4} 格未归属。可撤销。":"Partition complete: {0} player/team regions, {1} player-free land areas, {2} water areas; {3} spare regions and {4} unassigned cells remain. Undo is available.",
- "剩余连续水域超过 35 格时（不含海岸线），按面积从大到小分配为“水域＋区域编号”。不借道已归属格，也不混用桥面与桥下水面。区域总数可超过 12 个，完成后至少保留 2 个空区域。":"Remaining connected water areas larger than 35 cells (excluding coast) are assigned by descending area as Water + region number. Assigned cells block passage; bridge decks and water below remain separate. The region count can exceed 12; at least 2 spare regions remain after partitioning.",
+ "剩余连续水域超过 35 格（不含海岸线），或总倍率严格大于 50× 时，按面积从大到小分配为“水域＋区域编号”。不借道已归属格，也不混用桥面与桥下水面。区域总数可超过 12 个，完成后至少保留 2 个空区域。":"Remaining connected water areas with more than 35 cells (excluding coast), or a total multiplier strictly above 50x, are assigned by descending area as Water + region number. Assigned cells block passage; bridge decks and water below remain separate. The region count can exceed 12; at least 2 spare regions remain after partitioning.",
  "当前区域倍率":"Current region multipliers",
  "陆地倍率":"Land multiplier",
  "海洋倍率":"Sea multiplier",
@@ -55,7 +56,7 @@
  "自动划分完成：{0} 个玩家区域，{1} 块无玩家陆地；{2} 格未归属。可撤销。":"Partition complete: {0} player regions, {1} unowned land areas; {2} unassigned cells. Undo is available.",
  "未找到可通行起点的玩家：{0}":"Players without a passable starting cell: {0}",
  "此网页版缺少自动划分通行数据，请更新网页包。":"This web package lacks routing data. Please update it.",
- "按八方向寻路：边长 1、对角线 √2，不穿障碍角或跨海角。树木与可摧毁建筑按清除后通过；岩石、矿石钻井、单位及其他阻挡物保留。玩家从出生点同时扩展，同一格先到者归属，同距按玩家编号；其他玩家／小队区域不可借道通过，同队可通行，包括同坐标的桥面与桥下。桥上桥下不互通，只连接高度匹配的相邻表面。不可通行的出生点会提示，不会移到障碍另一侧。每段跨海计入两端海岸线。独占陆地仅忽略直线半径与路径上限。无玩家的剩余连通陆地超过 35 格（不含海岸）时，按面积分配剩余区域。重新划分替换当前归属，保留颜色，可撤销。": "Eight-direction routes cost 1 per edge and sqrt(2) diagonally, without cutting blocked or sea corners. Trees and destructible buildings are cleared; rocks, ore drills, units and other blockers remain. Players expand simultaneously from their starts: first arrival owns a cell, ties favor the lower player number. Rival players/teams block passage on both bridge layers; teammates do not block one another. Ground and deck do not connect vertically; adjacent surfaces must match heights. Blocked starts are reported, never moved across obstacles. Sea crossings include both shores. Exclusive land only bypasses radius and path caps. Remaining connected player-free land over 35 non-shore cells gets regions by area. Rerunning replaces memberships, preserves colors and supports undo.",
+ "按八方向寻路：边长 1、对角线 √2，不穿障碍角或跨海角。树木与可摧毁建筑按清除后通过；岩石、矿石钻井、单位及其他阻挡物保留。玩家从出生点同时扩展，同一格先到者归属，同距按玩家编号；其他玩家／小队区域不可借道通过，同队可通行，包括同坐标的桥面与桥下。桥上桥下不互通，只连接高度匹配的相邻表面。不可通行的出生点会提示，不会移到障碍另一侧。每段跨海计入两端海岸线。独占陆地仅忽略直线半径与路径上限。无玩家的剩余连通陆地超过 35 格（不含海岸），或总倍率严格大于 50× 时，按面积分配剩余区域。重新划分替换当前归属，保留颜色，可撤销。": "Eight-direction routes cost 1 per edge and sqrt(2) diagonally, without cutting blocked or sea corners. Trees and destructible buildings are cleared; rocks, ore drills, units and other blockers remain. Players expand simultaneously from their starts: first arrival owns a cell, ties favor the lower player number. Rival players/teams block passage on both bridge layers; teammates do not block one another. Ground and deck do not connect vertically; adjacent surfaces must match heights. Blocked starts are reported, never moved across obstacles. Sea crossings include both shores. Exclusive land only bypasses radius and path caps. Remaining connected player-free land with more than 35 non-shore cells, or a total multiplier strictly above 50x, gets regions by area. Rerunning replaces memberships, preserves colors and supports undo.",
  "区域中心显示综合最终概率之和（单次放箱调用），不是总倍率；矿石/树木切换后同步更新。":"Region centers show summed final probabilities for one placement call, not total multipliers; totals update with the ore/tree layout.",
  "示意布局 · 高格 L6 / 低格 L2 · 使用原版雪地贴图；只演示地面属性变化，不计算随机箱子概率或完整可达路线。": "Illustrative layout · High cell L6 / low cells L2 · Original snow textures. Demonstrates land-type changes only; no random-crate probabilities or complete pathfinding.",
  "链接播放参数无效：{0}已恢复默认节奏。": "Invalid playback parameters in the URL: {0} Default timing restored.",
@@ -734,6 +735,7 @@
  "显示占用标识": "Occupancy markers",
  "格子坐标": "Cell coordinates",
  "概率倍率": "Multiplier labels",
+ "显示 1× 图层": "Show 1× layer",
  "显示 1× 标签": "Show 1× labels",
  "格线": "Grid",
  "地图出生点编号，不代表玩家阵营或当前单位位置": "Map starting-position numbers, not player factions or current unit locations",

@@ -1,5 +1,6 @@
 # Track the reviewed application sources only. Local research and results stay local.
 /*
+!/verify-deployed-art.py
 !/.gitignore
 !/.gitattributes
 !/README.md
@@ -25,6 +26,7 @@
 !/verify-resource-ui.cjs
 !/verify-portable.py
 !/server.py
+!/server_lifecycle.py
 !/realmap.py
 !/realmap_bridges.py
 !/verify-bridge-native.py
@@ -41,6 +43,15 @@
 !/lib/
 !/realmap_objects.py
 !/realmap_voxel.py
+!/realmap_voxel_lighting.py
+!/realmap_voxel_normals.py
+!/realmap_voxel_light_tables.py
+!/generate-voxel-light-tables.py
+!/voxel-lighting-oracle.c
+!/realmap_palette_lighting.py
+!/verify-palette-lighting.py
+!/verify-toy-palette-lighting.py
+!/verify-voxel-lighting.py
 !/realmap_mod.py
 !/realmap_approx.py
 !/terrain_depth.py
@@ -57,6 +68,8 @@
 !/build-portable.py
 !/build-toy-original.py
 !/toy_original.py
+!/toy_build_inputs.py
+!/verify-toy-lighting-build.py
 !/verify-toy-original.cjs
 !/realmap-search.c
 !/voxel-worker.cs
@@ -68,9 +81,17 @@
 !/output/
 
 /docs/*
+!/docs/deployed-art.md
+!/docs/rendering-porting-guide.md
 !/docs/random-crate-generation.md
 !/docs/bridge-crates.md
 !/docs/stock-map-loading.md
+!/docs/voxel-lighting.md
+!/docs/vehicle-brightness-native.md
+!/docs/toy-lighting-size.md
+!/docs/toy-lighting-release.md
+!/docs/toy-brightness-release.md
+!/docs/display-repair-20261103.md
 /runtime/*
 !/runtime/voxel/
 !/runtime/ffmpeg/
@@ -178,3 +199,15 @@ Thumbs.db
 !/map_storage.py
 !/map_images.py
 !/verify-lossless-storage.py
+!/verify-building-remap.py
+!/verify-display-ui.cjs
+!/launch-latest.ps1
+!/verify-server-cache.py
+
+!/docs/review-seven-requirements-20261103.md
+!/realmap_terrain_variants.py
+!/realmap_voxel_shadow.py
+!/docs/terrain-shadows.md
+!/verify-terrain-shadows.py
+!/verify-terrain-shadow-ui.cjs
+!/verify-toy-terrain-shadow-ui.cjs

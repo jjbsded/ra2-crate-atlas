@@ -24,7 +24,7 @@
   async function direct(url,type,signal){
    const value=await raw(url,type,signal),codec=root.CrateStaticCodec;
    if(!codec){if(value?._static)throw Error('CODEC_UNAVAILABLE');return value;}
-   const result=type==='json'?await codec.report(value,path=>raw(address(new URL(path,url).href),'json',signal)):codec.search(value);
+   const result=type==='json'?await codec.report(value,path=>raw(address(new URL(path,url).href),'json',signal)):type==='artwork'?codec.artwork(value):codec.search(value);
    signal?.throwIfAborted();return result;
   }
   function load(path,type,{signal}={}){
@@ -90,8 +90,8 @@
    return current.variant.reports[enabled?'ore':'clear'];
   }
   function dispose(){worker?.terminate();worker=null;for(const request of pending.values()){request.cleanup();request.reject(Error('Disposed'));}pending.clear();}
-  return {static:true,terrain3d:true,terrain3dPatch:(context,options)=>root.CrateToyTerrain3D.patch(context.data,context.cell,options),preload:!(root.navigator?.connection?.saveData||root.matchMedia?.('(pointer: coarse)').matches),
-   catalog,official,initial,minerals,readJSON:(path,options)=>load(path,'json',options),readBinary:(path,options)=>load(path,'binary',options),dispose};
+  return {static:true,terrain3d:true,terrain3dPatch:(context,options)=>(context.data.rendering.original?root.CrateToyOriginal3D:root.CrateToyTerrain3D).patch(context.data,context.cell,options),preload:!(root.navigator?.connection?.saveData||root.matchMedia?.('(pointer: coarse)').matches),
+   catalog,official,initial,minerals,readJSON:(path,options)=>load(path,'json',options),readBinary:(path,options)=>load(path,'binary',options),readArtwork:(path,options)=>load(path,'artwork',options),dispose};
  }
  const api={create};if(typeof module!=='undefined')module.exports=api;
  else{root.CrateMapPlatform=create();root.addEventListener('pagehide',()=>root.CrateMapPlatform.dispose());}

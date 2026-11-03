@@ -17,16 +17,18 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 class PackageChecks(unittest.TestCase):
     def test_server_does_not_reuse_a_different_installation(self):
+        import errno
         import server
+        import server_lifecycle
         for identity, reuse in ((server.INSTANCE_ID, True), ('another-version', False)):
-            payload = io.BytesIO(json.dumps({'feature':'real-maps-v1', 'instance':identity}).encode())
-            with patch.object(server, 'LocalServer', side_effect=OSError()), \
-                 patch('urllib.request.urlopen', return_value=payload), \
+            payload = {'feature':'real-maps-v1', 'instance':identity}
+            with patch.object(server, 'LocalServer', side_effect=OSError(errno.EADDRINUSE, 'busy')), \
+                 patch.object(server_lifecycle, 'request', return_value=payload), \
                  patch('sys.argv', ['server.py']), patch('builtins.print'):
                 if reuse:
                     server.main()
                 else:
-                    with self.assertRaisesRegex(RuntimeError, '旧版本'):
+                    with self.assertRaises(server_lifecycle.StartupError):
                         server.main()
 
     def test_preflight_rejects_missing_frontend_and_worker(self):

@@ -2,6 +2,17 @@
 window.CrateWebConfig={static:true};
 window.CrateLanguageSettings={};
 Object.assign(window.CrateEnglish,{
+ '官方地图概率图集 · 原版贴图轻量版（非完整版）':'Official map atlas · Original-art web edition (not the full app)',
+ '官方地图概率图集 · 原版贴图轻量版':'Official map atlas · Original-art web edition',
+ '轻量网页版，非完整版 · 原版像素素材按地图加载；模型内精确概率与初始静态布局':'Lightweight web edition, not the full app · Original pixel art loaded per map; exact model probabilities and initial layouts',
+ 'TOY / 原版贴图 3D':'TOY / ORIGINAL-ART 3D',
+ '正在生成附近的原版贴图 3D 地形…':'Building nearby 3D terrain with original artwork…',
+ '桥梁 / 地形对象 / 建筑单位':'Bridges / Scenery / Buildings and units',
+ '蓝色仅示高差条件，未标色不代表可通行；3D 几何仅作地形示意，不演示完整寻路。':'Blue indicates height-test conditions; unmarked cells are not necessarily passable. 3D geometry is illustrative, not a full pathfinding simulation.',
+ '原版素材逐格拼接，无损共享图集按地图加载；小地图、3D、区域裁图和图片导出使用同一套素材。':'Original artwork assembled cell by cell from lossless shared atlases, loaded per map. The minimap, 3D view, region crops and image exports use the same assets.',
+ '概率演示 · 轻量网页版（非完整版）':'Probability demo · Lightweight web edition (not the full app)',
+ '原版贴图轻量网页版，非完整版。只读取预计算地图，3D 使用原版贴图与简化几何；自定义地图、Mod、精细 3D 和视频导出请使用本地完整版。':'Original-art lightweight web edition, not the full app. Precomputed maps with original textures and simplified 3D geometry. Use the desktop app for custom maps, Mods, detailed 3D and video export.',
+ '原版贴图 3D：复用当前地图的共享素材、原始高度和坡形；悬崖使用简化几何，对象使用静态贴图。概率与主图一致。':'Original-art 3D reuses this map’s shared assets, heights and slopes. Cliffs use simplified geometry and objects use static sprites. Probabilities match the main map.',
  'TOY / 简化 3D':'TOY / SIMPLIFIED 3D',
  '正在生成附近的简化 3D 地形…':'Building nearby simplified 3D terrain…',
  '简化 3D：沿用原地图高度、坡形和桥面高度；方块崖壁与对象符号仅作示意，概率和判定标识与主图一致。':'Simplified 3D uses the original cell heights, slopes and bridge deck heights. Block cliffs and object symbols are illustrative; probabilities and rule markers match the main map.',

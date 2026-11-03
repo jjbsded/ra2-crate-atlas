@@ -13,6 +13,24 @@ from PIL import Image
 from realmap_parser import object_records as records  # Legacy import compatibility.
 
 
+def deployed_voxel_type(category, cfg, image):
+    """The supported Siege Chopper's alternate static model, not a type change.
+
+    UnloadingClass also serves transports and SCHD's reverse transition. Only
+    SCHP (including Image aliases) is eligible for this map-display shortcut.
+    """
+    from realmap_format import yes
+    target = cfg.get('UNLOADINGCLASS', '').strip().upper()
+    if category == 'UNITS' and image.upper() == 'SCHP' and yes(cfg.get('ISSIMPLEDEPLOYER', 'no')):
+        return target if target not in ('', 'NONE', '<NONE>') else ''
+    return ''
+
+
+def deployment_mission(category, cfg, image, mission):
+    eligible = category == 'INFANTRY' or deployed_voxel_type(category, cfg, image)
+    return 'UNLOAD' if eligible and mission.strip().upper() == 'UNLOAD' else ''
+
+
 def visual_foundation(art):
     """Art footprint for painter sorting only; never infer crate occupation.
 
@@ -66,6 +84,7 @@ class ObjectPainter:
             self.rules[house] = {**self.rules.get(house, {}), **cfg}
         self.art = res.art
         self.cache, self.files, self.palettes = {}, {}, {}
+        self.cells = {}
         self.audit, self.missing, self.warnings = [], [], set()
         self.voxels = None
         self.voxel_error = None
@@ -109,6 +128,17 @@ class ObjectPainter:
             self.palettes[key] = colors
         return self.palettes[key], name
 
+    def voxel_brightness(self, obj):
+        from realmap_palette_lighting import light_step
+        cell = self.cells.get((obj.get('x'), obj.get('y')), {})
+        return light_step(self.rules, self.theater.get('mapLighting', {}),
+                          obj['category'], cell.get('level', 0))
+
+    def voxel_colors(self, art, obj):
+        from realmap_palette_lighting import light_palette
+        colors, name = self.colors(art, obj['house'])
+        return light_palette(colors, self.voxel_brightness(obj)), name
+
     def shape(self, image, art, building=False):
         from realmap_format import yes
         name = art.get('IMAGE', image).lower()
@@ -146,7 +176,11 @@ class ObjectPainter:
         if not 0 <= frame < count:
             self.warnings.add(f'{filename} 帧 {frame} 越界，使用静态首帧')
             frame = 0
-        colors, palname = self.colors(art, house, remap=remap and yes(art.get('REMAPABLE', 'yes')))
+        # RA2/YR ignore the obsolete Remapable art flag. Stock tech buildings,
+        # prism/gap towers and psychic tower bases explicitly set it to no but
+        # still use house colors at indices 16..31. TerrainPalette remains
+        # excluded by colors(); explicit caller opt-outs remain supported.
+        colors, palname = self.colors(art, house, remap=remap)
         im = shp_frame(raw, frame, colors)
         shadow, _ = shadow_frame(raw, frame, cfg, art)
         if not yes(art.get('SHADOW', 'yes')):
@@ -164,6 +198,9 @@ class ObjectPainter:
             return []
         house, category = obj['house'], obj['category']
         key = obj['type'], house, category, obj['facing'], obj['health'], obj['mission'], tuple(obj['upgrades'])
+        from realmap_palette_lighting import voxel_object
+        if voxel_object(category, cfg, art):
+            key += (self.voxel_brightness(obj),)
         if key in self.cache:
             return self.cache[key]
         parts = []
@@ -217,11 +254,19 @@ class ObjectPainter:
                 image += 'A'
                 art = self.art.get(image, art)
             seq = self.art.get(art.get('SEQUENCE', '').upper(), {})
-            seqkey = 'DEPLOYED' if obj['mission'].upper() == 'UNLOAD' and 'DEPLOYED' in seq else 'GUARD'
+            seqkey = 'DEPLOYED' if deployment_mission(category, cfg, image, obj['mission']) and 'DEPLOYED' in seq else 'GUARD'
             f = [ini_integer(v) for v in seq.get(seqkey, '0,1,1').split(',')]
             frame = f[0] + ((7-obj['facing']//32) % 8)*(f[2] if len(f)>2 else 1)
             parts.append(self.shp(image, art, cfg, house, frame))
         elif yes(art.get('VOXEL', 'no')):
+            if deployment_mission(category, cfg, image, obj['mission']):
+                target = deployed_voxel_type(category, cfg, image)
+                _, deployed_image, deployed_art = self.art_for(target)
+                if yes(deployed_art.get('VOXEL', 'no')):
+                    # The deployed body, turret and ShadowIndex belong to the
+                    # alternate art; ownership, lighting and occupancy remain
+                    # those of the original map object.
+                    image, art = deployed_image, deployed_art
             parts = self.voxel_parts(obj, cfg, image, art)
         else:
             facings = max(1, ini_integer(art.get('FACINGS', '8')))
@@ -258,6 +303,8 @@ class ObjectPainter:
 
     def voxel_parts(self, obj, cfg, image, art, turret=None):
         from realmap_voxel import VoxelRenderer
+        from realmap_voxel_lighting import MODEL
+        from realmap_voxel_shadow import MODEL as SHADOW_MODEL
         from realmap_format import yes, ini_integer
         if self.voxel_error:
             raise ValueError(self.voxel_error)
@@ -267,7 +314,7 @@ class ObjectPainter:
             except (ValueError, OSError) as error:
                 self.voxel_error = str(error)
                 raise
-        colors, palname = self.colors(art, obj['house'])
+        colors, palname = self.voxel_colors(art, obj)
         offset = [ini_integer(v) for v in art.get('TURRETOFFSET', '0,0,0').split(',')]
         offset = (offset+[0,0,0])[:3]
         names = [(image, [0,0,0], 0)]
@@ -288,11 +335,21 @@ class ObjectPainter:
             facing = (obj['facing']//8-8) % 32
             if turret:
                 facing = (obj['facing']//8-8) % 32
-            im, shadow, x, y, sx, sy = self.voxels.draw(vxl, hva, facing, offsets, angle, colors)
+            casts = not (yes(cfg.get('NOSHADOW', 'no')) or yes(art.get('NOSHADOW', 'no')))
+            # Vehicle turrets/barrels are not separate casters by default.
+            if turret or i > 0:
+                casts = False  # UseTurretShadow applies to SHP turrets, not VXL.
+            shadow_section = ini_integer(art.get('SHADOWINDEX', '0')) if casts else None
+            shadow_scale = .5 if yes(cfg.get('CONSIDEREDAIRCRAFT', 'no')) else 1.0
+            im, shadow, x, y, sx, sy = self.voxels.draw(vxl, hva, facing, offsets, angle, colors,
+                                                      shadow_section=shadow_section, shadow_scale=shadow_scale)
             dx = ini_integer(cfg.get('TURRETANIMX', '0')) if turret else 0
             dy = ini_integer(cfg.get('TURRETANIMY', '0'))-15 if turret else 0
-            parts.append(dict(image=im, shadow=None if yes(cfg.get('NOSHADOW', 'no')) else shadow,
-                x=x+dx, y=y+dy, shadowX=sx+dx, shadowY=sy+dy, file=name.lower()+'.vxl', frame=facing, palette=palname))
+            parts.append(dict(image=im, shadow=shadow,
+                x=x+dx, y=y+dy, shadowX=sx+dx, shadowY=sy+dy, file=name.lower()+'.vxl', frame=facing, palette=palname,
+                lighting=MODEL, paletteLightStep=self.voxel_brightness(obj),
+                shadowModel=SHADOW_MODEL, shadowSection=shadow_section, shadowScale=shadow_scale,
+                shadowPixels=sum(shadow.histogram()[1:]) if shadow is not None else 0))
         barrel_in_front = 32 <= obj['facing'] < 160 or yes(art.get('BARRELOVERTURRET', 'no'))
         if not barrel_in_front and len(parts) >= (2 if turret else 3):
             parts[-2], parts[-1] = parts[-1], parts[-2]
@@ -300,6 +357,7 @@ class ObjectPainter:
 
     def prepare(self, cells, origin):
         from realmap_bridges import elevated
+        self.cells = cells
         events, counts = [], Counter()
         hidden = []
         roofs = {}

@@ -17,10 +17,12 @@ import runtime_bootstrap
 
 ROOT = Path(__file__).resolve().parent
 APPLICATION_MODULES = (
-    'server.py', 'map_jobs.py', 'map_results.py', 'region_navigation.py',
+    'server.py', 'server_lifecycle.py', 'map_jobs.py', 'map_results.py', 'region_navigation.py',
     'realmap_format.py', 'realmap_resources.py', 'realmap_parser.py', 'realmap_sprites.py',
     'realmap.py', 'realmap_bridges.py', 'realmap_exact.py', 'realmap_render.py', 'realmap_refresh.py',
     'realmap_3d.py', 'terrain_depth.py', 'realmap_objects.py', 'realmap_voxel.py',
+    'realmap_voxel_lighting.py', 'realmap_voxel_normals.py', 'realmap_voxel_light_tables.py', 'realmap_palette_lighting.py',
+    'realmap_voxel_shadow.py', 'realmap_terrain_variants.py',
     'realmap_mod.py', 'realmap_approx.py', 'original_resources.py',
     'official_maps.py', 'directory_picker.py', 'runtime_bootstrap.py', 'i18n_settings.py',
     'official_precomputed.py', 'official_render_cache.py', 'toy_codec.py',
@@ -28,6 +30,12 @@ APPLICATION_MODULES = (
 )
 EXTRA_FILES = ('voxel-worker.cs', 'realmap-search.c', 'requirements.txt', 'export.cjs')
 DATA_FILES = (
+    'docs/rendering-porting-guide.md',
+    'docs/deployed-art.md',
+    'docs/voxel-lighting.md',
+    'docs/vehicle-brightness-native.md',
+    'docs/terrain-shadows.md',
+    'docs/review-seven-requirements-20261103.md',
     'examples/mp32s8.map', 'examples/xmp32s8.map', 'examples/cliff-demo.json',
     'docs/random-crate-generation.md', 'docs/bridge-crates.md', 'docs/stock-map-loading.md',
     'docs/random-crate-generation.en.md', 'docs/bridge-crates.en.md', 'docs/stock-map-loading.en.md',
@@ -37,6 +45,7 @@ DATA_FILES = (
     'runtime/voxel/CncVxlRenderText.dll', 'runtime/voxel/msvcp140.dll',
     'runtime/voxel/vcruntime140.dll', 'runtime/voxel/provenance.json',
     'runtime/voxel/FA2SPHE-project-LICENSE.txt', 'runtime/voxel/FA2SPHE-project-readme.txt',
+    'runtime/voxel/CNCMaps-COPYING.txt',
     'output/realmap-tools/map-search.exe', 'output/realmap-tools/map-search.sha256',
     'output/realmap-tools/voxel-worker.exe', 'output/realmap-tools/voxel-worker.sha256',
 )
@@ -55,7 +64,7 @@ def require_file(path):
 def frontend_files():
     # The Toy launcher needs a separately generated static map package. Do not
     # expose a non-working entry in the ordinary Windows portable installation.
-    source_only = {'启动Toy网页版.cmd', '启动Toy现场计算实验版.cmd'}
+    source_only = {'启动Toy网页版.cmd'}
     return sorted({p for pattern in ('*.js', '*.html', '*.css', '*.md', '*.cmd')
                    for p in ROOT.glob(pattern) if p.name not in source_only})
 

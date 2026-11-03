@@ -419,7 +419,7 @@
      navigationCache.set(data,navigation);
     }
     controller.signal.throwIfAborted();
-    const result=await root.CrateRegionAuto.partition({cells:data.cells,navigation,starts:root.CratePlayerStarts.positions(s),eligible:new Set(eligible.keys()),settings:doc.autoOptions},{signal:controller.signal,onProgress:reportProgress});
+    const result=await root.CrateRegionAuto.partition({cells:data.cells,navigation,starts:root.CratePlayerStarts.positions(s),eligible:new Set(eligible.keys()),settings:doc.autoOptions,display:getDisplay()},{signal:controller.signal,onProgress:reportProgress});
     if(ticket!==autoEpoch||state().data!==data)return;
     automatic=null;doc.autoHandled=true;checkpoint();
     doc.appliedTeams=root.CrateRegionAuto.teams(result.settings.teams);

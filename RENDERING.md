@@ -2,6 +2,8 @@
 
 # 真实地图渲染修正（2026-10-13）
 
+地图纹理变体、载具光照及阴影、部署状态请统一按 [渲染移植说明](docs/rendering-porting-guide.md) 接入。该文档以绘图版本 19 为基线，包含 Save2Map 的差异合并位置、局部换色保留项、缓存与验收要求。下文保留各功能的历史细节。
+
 本次仅修改画面和点击几何，不修改随机坐标、搜索顺序、可用格判定、精确概率分数或 Rock 检测。当前浏览器中的 `map-690d23bccea0` 已按原地图 SHA-256 核对后原位重绘。
 
 ## 调色盘与绘制锚点
@@ -18,6 +20,24 @@
 其他气候按对应名称读取原版 MIX 内的调色盘。SHP 帧内裁切偏移已在解码时保留，不能再次做底部对齐。旧算法 `cy + 15 - H` 与正确的树木锚点相差 `H/2 - 15` 像素，因各树的画布高度不同，不能统一平移两格。矿石读取 OverlayDataPack 指定的密度帧。一个单元格存在 Terrain 和 Overlay 时，分别绘制两者。
 
 六位调色盘通道展开为 `(v << 2) | (v >> 4)`，索引 0 透明。原始 SHP 的配对阴影帧已加入，详见下节。原图的灯光与动画仍未重建；颜色为原调色盘静态帧，不承诺与特定时刻的游戏灯光逐像素一致。
+
+## 初次载具体素光照修复（版本 14–15 历史记录，2026-11-03）
+
+以下记录初次实现；当前版本 18 已修正其光源坐标近似，见 [最新原版光照增量](docs/vehicle-brightness-native.md)。当前回归扩展至 11 类模型、352 组朝向，旧模型标识及 192 组数据仅描述初次修复。
+
+其他工具的接口、坐标约定、缓存与验收步骤见 [载具体素光照复用说明](docs/voxel-lighting.md)。
+
+完整版改为按原始 VXL 法线和单位朝向计算漫反射、高光，再查询当前资源的 `voxels.vpl`。旧桥接固定光源 `(-1,1,1)`，组件用 `acos` 夹角线性选择 VPL 页，导致受光面和高光分布偏离游戏式渲染。新实现使用 `max(n·l,0) + max((n·h)/(3-2(n·h)),0)`，其中 `h=normalize(l+(0,0,1))`；乘 16 并截断为 VPL 页号。法线 253–255 使用中性页 16。先还原桥接朝向的四分之一圈偏移，避免混用游戏与 DLL 的镜像坐标系。
+
+实现位于 `realmap_voxel_lighting.py`。只在临时 VXL 副本写入已着色的索引，并给 DLL 传入恒等 VPL，避免组件再次施光；源素材不修改。现有几何投影、HVA、车体／炮塔／炮管组合、透明色和阴影继续由原组件处理。每个体素部件的 `object-audit.json` 记录 `ra2-vpl-diffuse-specular-v1`。渲染版本提升到 14，官方画面缓存指纹包含新模块；旧报告需要重新分析或显式重绘，箱子概率预计算仍可复用。
+
+依据为 [World-Altering Editor 的 VPL 光照计算](https://github.com/CnCNet/WorldAlteringEditor/blob/f01be61e460c1fe5d76c827ed0f4eb1adaa2bf92/src/TSMapEditor/Rendering/ObjectRenderers/VxlRenderer.cs)、[CNCMaps 的对应实现](https://github.com/zzattack/ccmaps-net/blob/56712d7c9c5048afbfe9bddb01c0ec43f6fc008a/CNCMaps.Engine/Rendering/VxlRenderer.cs)，以及 [现有组件的夹角算法](https://github.com/handama/CncVxlRenderText/blob/755dbb6e9bf751d7c3c4c1c2dc07ac8bb094d1d0/src/vxlfile.cpp)。四种 VXL 法线表来自 CNCMaps，数值与 WAE 逐项核对一致，来源许可保留在 `realmap_voxel_normals.py`。
+
+`python -B verify-voxel-lighting.py --integration` 检查 4 种法线模式、全部 32 朝向、保留法线、透明索引、损坏 span/VPL；真实组件对照覆盖灰熊、犀牛、盟军基地车、气垫船、V3 与入侵者共 192 组朝向。图像轮廓、锚点及阴影逐像素不变；原版温带、尤复雪地测试图的地形和全部概率字段不变。对照图与记录位于 `output/voxel-lighting-verification/`，每种单位上排为旧版、下排为新版。
+
+绘图版本 15 增加 `realmap_palette_lighting.py`：在 VPL 和所属色之后，应用 `Ambient - Ground + Level * cell.level + ExtraUnitLight / ExtraAircraftLight`，量化到 0–62 强度行，中性行为 31。原版平地车辆使用第 37 行。240–254 特殊色、透明度及阴影不变；部件缓存包含强度行。建筑体素炮塔只接收环境／高度亮度，不添加车辆额外亮度。官方 Toy 烘焙最终图集，现场版保留预烘焙索引，并在所属色换色后应用相同强度行。
+
+这是静止、直立模型的游戏式光照近似，尚未做同场景实机截图逐像素对拍。地图 RGB 环境色、局部灯光、闪光、倾斜／动画部件的法线变化和 Phobos 自定义光源仍不模拟，SHP 光照不在本次范围内。已应用到本地完整版、便携构建输入及 Toy 的构建时预烘焙；新 Toy 本地成品见 [构建记录](docs/toy-lighting-release.md)，尚未发布到远端平台。
 
 
 ## 原始阴影（渲染版本 3）
@@ -126,3 +146,21 @@ SHP 车辆按 `Facings/8` 旋转方向索引，遵循编辑器帧列表约定。
 `player-starts.js` 使用结果已有的 `metadata.waypoints`，仅解码 0–7，按 `Y*1000+X` 找到真实格并沿用高度，显示为 1–8。不是出生槽的路径点、负值和不存在的格子不显示；新增结果明确记录 `multiplayerOnly`，单人地图不显示玩家出生标记。主图标记位于区域着色上方、概率文字下方，采用轻微上移及连接线避免占据格子中央；小地图和区域缩略图在实际出生位置显示同款缩小数字。
 
 `node verify-regions.cjs <result.json>` 检查 12 区域默认值、配色、旧数据迁移、索引与遍历选择一致性及真实地图统计守恒。`node verify-map-view-cache.cjs` 对比缓存／直接渲染的图像、标签数量，并检查平移、缩放、筛选和图层切换后的缓存失效。图像测试和 `node benchmark-map-view.cjs <result.json>` 需要 Node 能找到 `@napi-rs/canvas`，便携版可将 `NODE_PATH` 指向 `runtime/node/node_modules`。基准测量离屏 Canvas 工作耗时，不代表浏览器实际呈现帧率。
+# 2026-11-03 显示修复（绘图版本 16）
+
+本轮在版本 15 最终亮度阶段上补齐 SHP 所属色。RA2/YR 的 `Remapable=no` 不阻止单位调色盘的索引 16–31 换色；底座、建筑动画和中立科技建筑统一继承房屋颜色，地形调色盘仍排除换色。见 [复用说明](docs/voxel-lighting.md)。
+
+大地图不再预缩小到最长边 9000 像素，底图保留原始 TMP/SHP 像素、无损 PNG/WebP。浏览器主画布、地图离屏缓存和导航图按屏幕实际物理像素绘制，放大使用最近邻；缩小总览仍会采样。DPI 放大、浏览器缩放、全屏都会重新分配画布。关闭概率、占用、禁行等叠加层可查看原始底图。Toy 沿用无损图集和相同前端，不增加游戏运行库。
+
+
+## 2026-11-03：地形变体与阴影
+
+绘图版本 17 现在读取原版 TMP 字母后缀变体，以稳定坐标表减少地面重复；VXL 阴影尊重 ShadowIndex，去掉独立炮塔／炮管投影，并对 ConsideredAircraft 使用半尺寸。完整机制、复用接口和静态边界见 [接入说明](docs/terrain-shadows.md)。
+
+## 2026-11-03：部署外观（绘图版本 19）
+
+按导入地图的 `Unload` 任务自动显示美国大兵、重装大兵、辐射工兵和武装直升机的部署静态外观。武装直升机采用 SCHD 主体与炮塔，并切换到该模型的阴影设置；普通状态、原生光照与概率计算保持原样。完整版和 Toy 共用同一素材选择规则，详见 [接入说明](docs/deployed-art.md)。
+
+## 2026-11-03：载具偏亮（绘图版本 18）
+
+旧 VPL 方向近似遗漏了世界光源仰角和等角相机的逆变换，使部分车体表面过亮。`ra2-native-vpl-v2` 改用原版函数生成的 4 种法线模式、32 朝向页值，保留游戏的快速数学与舍入；模式 4 法线 241 同时修正 X 符号。继续保留原版单位额外亮度，不统一调暗地面。完整版、3D 与 Toy 的画面／索引缓存均需重建，详见 [复用与原版算术校验](docs/vehicle-brightness-native.md)。

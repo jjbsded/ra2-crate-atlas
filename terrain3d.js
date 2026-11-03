@@ -19,7 +19,7 @@
    if(!source||options.filter!=='all'&&(options.filter==='water'?source.land!==2:source.land===2)||!display.meetsThreshold(source,options.threshold||0))return [];
    const value=display.get(source);
    if(!(value.multiplier>0))return [];
-   return [{cell:c,multiplier:value.multiplier,alpha:display.cellAlpha(source,{opacity:1-options.opacity/100}),
+   return [{cell:c,multiplier:value.multiplier,alpha:options.baselineLayer===false&&value.isBaseline?0:display.cellAlpha(source,{opacity:1-options.opacity/100}),
     label:display.showLabel(source,options.baselineValues)?value.multiplier.toFixed(1)+'×':null}];
   });
  }

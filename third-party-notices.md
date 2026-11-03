@@ -39,3 +39,9 @@ local provenance are in runtime/voxel/provenance.json. Upstream FA2SPHE
 readme and license are retained there as project notices, without attributing
 that license to independently provided Microsoft or game components.
 Mod graphics remain in the optional user-selected game directory.
+
+`realmap_voxel_normals.py` contains standard normal lookup data from the
+[CNCMaps VXL reader](https://github.com/zzattack/ccmaps-net/blob/56712d7c9c5048afbfe9bddb01c0ec43f6fc008a/CNCMaps.FileFormats/VxlFile.cs),
+with WAE's CNCMaps source notice retained in that file. The upstream project's
+complete `COPYING` is also preserved in `runtime/voxel/CNCMaps-COPYING.txt`.
+Lighting references and validation scope are documented in `RENDERING.en.md`.

@@ -9,6 +9,8 @@ import threading
 
 import numpy as np
 from PIL import Image
+from realmap_voxel_lighting import identity_vpl, shade_vxl, vpl_tables
+from realmap_voxel_shadow import footprint
 
 ROOT = Path(__file__).resolve().parent
 
@@ -41,13 +43,14 @@ def ensure_worker():
 
 class VoxelRenderer:
     def __init__(self, folder, vpl):
+        self.vpl = vpl_tables(vpl)
         dll = renderer_path()
         if not dll:
             raise ValueError('内置体素组件缺失，请重新完整解压工具包；源码运行也可用 CRATE_VOXEL_DLL 指定组件')
         self.folder = folder/'voxel-cache'; self.folder.mkdir(exist_ok=True)
         self.cache = {}
         exe = ensure_worker()
-        vp = self.folder/'voxels.vpl'; vp.write_bytes(vpl)
+        vp = self.folder/'voxels.vpl'; vp.write_bytes(identity_vpl(vpl))
         self.process = subprocess.Popen([str(exe), str(dll.parent), str(vp)], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf8', creationflags=0x08000000)
         self.lines = queue.Queue()
@@ -104,15 +107,19 @@ class VoxelRenderer:
                     except OSError:
                         pass
 
-    def draw(self, vxl, hva, facing, offsets, angle, colors):
+    def draw(self, vxl, hva, facing, offsets, angle, colors, *, shadow_section=0, shadow_scale=1.0):
         if self.process.poll() is not None or self.process.stdin.closed:
             raise ValueError('体素进程已停止，无法继续绘制对象')
         checksum = hashlib.sha256(vxl+hva).hexdigest()
-        key = checksum, facing, tuple(offsets), angle
+        key = checksum, facing, tuple(offsets), angle, shadow_section, shadow_scale
         if key not in self.cache:
-            vp, hp = self.folder/(checksum+'.vxl'), self.folder/(checksum+'.hva')
+            # Bake game-style normal lighting before rasterization. The worker
+            # receives an identity VPL, so its editor light cannot shade twice.
+            shaded = shade_vxl(vxl, facing, self.vpl)
+            prepared = hashlib.sha256(shaded+hva).hexdigest()
+            vp, hp = self.folder/(prepared+'.vxl'), self.folder/(prepared+'.hva')
             if not vp.exists():
-                vp.write_bytes(vxl); hp.write_bytes(hva)
+                vp.write_bytes(shaded); hp.write_bytes(hva)
             out = self.folder/'frame.bin'
             request = [vp, hp, facing, *offsets, angle, out]
             self.process.stdin.write('\t'.join(map(str, request))+'\n'); self.process.stdin.flush()
@@ -120,9 +127,11 @@ class VoxelRenderer:
             raw = out.read_bytes()
             w,h,x,y,sw,sh,sx,sy = struct.unpack_from('<8i', raw)
             body = np.frombuffer(raw[32:32+w*h], dtype=np.uint8).reshape(h,w).copy()
-            shadow = Image.frombytes('L', (sw,sh), raw[32+w*h:]).point(lambda a: 128 if a else 0) if sw and sh else None
+            # The editor DLL projects every section onto its lowest plane.
+            # RA2/YR instead selects one section and its own bottom face.
+            shadow, sx, sy = footprint(vxl, hva, facing, offsets, angle, shadow_section, shadow_scale)
             # The DLL uses a 256 x 256 virtual canvas, coordinates relative to its centre.
-            self.cache[key] = body, shadow, x-128, y-128, sx-128, sy-128
+            self.cache[key] = body, shadow, x-128, y-128, sx, sy
         body,shadow,x,y,sx,sy = self.cache[key]
         rgba = np.zeros((*body.shape,4), dtype=np.uint8)
         rgba[:,:,:3] = np.asarray(colors,dtype=np.uint8)[body]

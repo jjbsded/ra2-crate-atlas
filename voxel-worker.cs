@@ -30,6 +30,9 @@ class VoxelWorker {
         Console.OutputEncoding = new UTF8Encoding(false);
         try {
             SetDllDirectory(args[0]); CncImgCreate(); CncImgSetMaxFacing(32);
+            // The Python bridge now pre-shades normals through the game's VPL
+            // and supplies identity pages. This legacy editor light is then a
+            // no-op; retained for comparison with old unprocessed VXL inputs.
             CncImgSetLightingSource(-1,1,1);
             if(!CncImgLoadVPLFile(File.ReadAllBytes(args[1]))) throw new Exception("Invalid VPL");
             Console.WriteLine("READY"); string line;

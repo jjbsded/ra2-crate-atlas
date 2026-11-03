@@ -83,8 +83,8 @@
   $('opacityInfo').textContent=preview?_t('外观预览不计算概率。'):$('opacityInfo').textContent;
   $('mapImageStatus').textContent=preview?_t('地图图片：完整地图高清 JPEG；包含当前建筑／单位图层，未计算概率。'):_t('完整地图 JPEG：自动标注符合当前筛选条件的倍率；1× 标签与图层沿用当前设置。');
   $('mapImageExport').title=preview?_t('导出当前地图外观；建筑／单位显示沿用当前设置。'):_t('导出完整地图 JPEG，标注符合当前筛选条件的倍率；1× 标签和图层沿用当前设置。');
-  for(const key of ['heatmap','markers','potentialMarkers','values','baselineValues','palette','filter','opacity','opacityRange','threshold','thresholdRange','cellFraction'])$(key).disabled=preview;
-  for(const key of ['markers','potentialMarkers'])$(key).disabled=preview||approximate;
+  for(const key of ['heatmap','markers','values','baselineLayer','baselineValues','palette','filter','opacity','opacityRange','threshold','thresholdRange','cellFraction'])$(key).disabled=preview;
+  for(const key of ['markers'])$(key).disabled=preview||approximate;
   $('cellFraction').textContent=approximate?_t('下载选中格子的近似模型分数'):_t('下载选中格子的精确分数');
   for(const key of ['rockDownload','potentialDownload'])$(key).hidden=preview||approximate;
   $('jsonDownload').textContent=preview?_t('下载外观预览 JSON'):approximate?_t('下载近似概率 JSON'):_t('下载精确概率 JSON');

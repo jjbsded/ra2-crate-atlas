@@ -158,10 +158,10 @@
   canvasButton(m.buttons.minimize,m.minimized?'□':'−');canvasButton(m.buttons.close,'×');
   if(m.minimized){ctx.restore();return;}
   const artwork=$('objects').checked&&state.objectImage?state.objectImage:state.image;
-  let small=miniArtwork.get(artwork);if(!small){small=document.createElement('canvas');small.width=Math.ceil(im.w);small.height=Math.ceil(im.h);CrateMapArtwork.draw(small.getContext('2d'),artwork,0,0,small.width,small.height);miniArtwork.set(artwork,small);}
+  let small=miniArtwork.get(artwork);const mw=Math.ceil(im.w*pixelRatio),mh=Math.ceil(im.h*pixelRatio);if(!small||small.width!==mw||small.height!==mh){small=document.createElement('canvas');small.width=mw;small.height=mh;CrateMapArtwork.draw(small.getContext('2d'),artwork,0,0,small.width,small.height);miniArtwork.set(artwork,small);}
   ctx.drawImage(small,im.x,im.y,im.w,im.h);
   regions.minimap(ctx,im);
-  for(const [coords,enabled,color]of [[state.data.markers,$('markers').checked,'#ff77c6'],[state.data.potentialMarkers||[],$('potentialMarkers').checked,'#ed9dca']])if(enabled){ctx.fillStyle=color;for(const p of coords){const c=state.lookup.get(p.join(','));ctx.fillRect(im.x+c.px*im.scale-1.5,im.y+c.py*im.scale-1.5,3,3);}}
+  for(const [coords,enabled,color]of [[state.data.markers,$('markers').checked,'#ff77c6'],[state.data.potentialMarkers||[],$('markers').checked,'#ed9dca']])if(enabled){ctx.fillStyle=color;for(const p of coords){const c=state.lookup.get(p.join(','));ctx.fillRect(im.x+c.px*im.scale-1.5,im.y+c.py*im.scale-1.5,3,3);}}
   const v=minimap.viewport(m,area,state,r);if(v){ctx.fillStyle='rgba(255,255,255,.12)';ctx.fillRect(v.x,v.y,v.w,v.h);ctx.strokeStyle='#0b1720';ctx.lineWidth=4;ctx.strokeRect(v.x,v.y,v.w,v.h);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(v.x,v.y,v.w,v.h);}
   if(state.selected){ctx.beginPath();ctx.arc(im.x+state.selected.px*im.scale,im.y+state.selected.py*im.scale,3,0,Math.PI*2);ctx.fillStyle='#ffe18f';ctx.fill();ctx.strokeStyle='#332916';ctx.lineWidth=1;ctx.stroke();}
   if($('players').checked)CratePlayerStarts.draw(ctx,state,im,{radius:8,clip:im,regionStyles:regions.playerStyles()});
@@ -178,7 +178,8 @@
  }
  function mapOptions({snapshotRegions=false}={}){
   const options={filter:$('filter').value,palette:$('palette').value,opacity:Number($('opacity').value)||0,threshold:Number($('threshold').value)||0};
-  for(const key of ['heatmap','blocked','objects','grid','potentialMarkers','markers','coords','values','baselineValues','players'])options[key]=$(key).checked;
+  for(const key of ['heatmap','blocked','objects','grid','markers','coords','values','baselineLayer','baselineValues','players'])options[key]=$(key).checked;
+  options.potentialMarkers=options.markers;
   if(state.data?.metadata.previewOnly)for(const key of ['heatmap','values','baselineValues','markers','potentialMarkers'])options[key]=false;
   if(state.data?.metadata.approximate)options.markers=options.potentialMarkers=false;
   if(regions.active){options.regionLayer=snapshotRegions?regions.snapshotLayer():(ctx,view,cells)=>regions.render(ctx,view,cells);options.regionLabels=snapshotRegions?options.regionLayer.labels:regions.labels;options.playerRegionStyles=regions.playerStyles();}
@@ -354,15 +355,16 @@
  window.addEventListener('blur',()=>selectionKeyboard.cancel());
  document.addEventListener('visibilitychange',()=>{if(document.hidden)selectionKeyboard.cancel();});
  function resizeViewport(){
-  if(!platform){schedule();return;}
   const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
-  const nextCompact=matchMedia('(max-width:760px), (pointer: coarse) and (max-width:1100px), (orientation:landscape) and (max-height:600px) and (max-width:1200px)').matches,nextW=nextCompact?Math.round(rect.width):1600,nextH=nextCompact?Math.round(rect.height):1050,ratio=nextCompact?Math.min(2,devicePixelRatio||1):1;
+  const nextCompact=!!platform&&matchMedia('(max-width:760px), (pointer: coarse) and (max-width:1100px), (orientation:landscape) and (max-height:600px) and (max-width:1200px)').matches,nextW=nextCompact?Math.round(rect.width):1600,nextH=nextCompact?Math.round(rect.height):1050;
+  const ratio=Math.min(rect.width/nextW,rect.height/nextH)*(devicePixelRatio||1);
   if(nextW===W&&nextH===H&&compact===nextCompact&&pixelRatio===ratio){schedule();return;}
   const center=state.data?{x:(area.x+area.w/2-state.x)/state.scale,y:(area.y+area.h/2-state.y)/state.scale}:null;
   const oldFit=state.data?Math.min(area.w/state.data.rendering.width,area.h/state.data.rendering.height):0;
   const fitted=oldFit>0&&Math.abs(state.scale/oldFit-1)<.01;
+  const layoutChanged=nextW!==W||nextH!==H||compact!==nextCompact;
   W=nextW;H=nextH;compact=nextCompact;pixelRatio=ratio;canvas.width=Math.round(W*ratio);canvas.height=Math.round(H*ratio);
-  Object.assign(area,compact?{x:8,y:8,w:W-16,h:H-16}:{x:24,y:70,w:1552,h:820});miniState.position=null;controlsKey='';
+  Object.assign(area,compact?{x:8,y:8,w:W-16,h:H-16}:{x:24,y:70,w:1552,h:820});if(layoutChanged)miniState.position=null;controlsKey='';
   if(center){
    // A fitted overview follows the new viewport. Deliberately zoomed views keep
    // their scale and center when rotating or opening/closing full-screen view.
@@ -372,9 +374,23 @@
   schedule();
  }
  new ResizeObserver(resizeViewport).observe(canvas);
+ window.addEventListener('resize',resizeViewport);
+ // Moving between monitors can change DPR without resizing the CSS viewport.
+ // Re-arm after every change: the old resolution query only describes one DPR.
+ let resolutionQuery,watchedDPR;
+ function pixelRatioChanged(){if(watchedDPR!==(devicePixelRatio||1)){resizeViewport();watchPixelRatio();}}
+ function watchPixelRatio(){
+  resolutionQuery?.removeEventListener('change',pixelRatioChanged);
+  watchedDPR=devicePixelRatio||1;resolutionQuery=matchMedia(`(resolution: ${watchedDPR}dppx)`);
+  resolutionQuery.addEventListener('change',pixelRatioChanged);
+ }
+ watchPixelRatio();
+ // Some embedded Chromium environments update DPR without media-query events.
+ // This inexpensive visible-page check also covers that case without repainting.
+ setInterval(()=>{if(!document.hidden)pixelRatioChanged();},1000);
  $('fit').onclick=frame;$('zoomIn').onclick=()=>zoom(1.5);$('zoomOut').onclick=()=>zoom(1/1.5);
  $('goto').onclick=()=>{const c=state.lookup.get(`${Number($('gotoX').value)},${Number($('gotoY').value)}`);if(c){message('',true);if(regions.active){state.scale=Math.max(state.scale,2.5);centerCell(c);}else focus(c);}else message(_t('该坐标不在完整地图内。'),true);};
- for(const id of ['heatmap','palette','filter','markers','potentialMarkers','blocked','objects','coords','values','baselineValues','grid','players'])$(id).addEventListener('change',schedule);
+ for(const id of ['heatmap','palette','filter','markers','blocked','objects','coords','values','baselineLayer','baselineValues','grid','players'])$(id).addEventListener('change',schedule);
  function sync(range,input,max){
   $(range).addEventListener('input',()=>{$(input).value=fixed(Number($(range).value));schedule();});
   $(input).addEventListener('input',()=>{const v=Number($(input).value);if(Number.isFinite(v))$(range).value=Math.max(0,Math.min(max(),v));schedule();});

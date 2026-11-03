@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from realmap_bridges import HIGH_NAMES, sprite_frame
 
-VERSION = 13
+VERSION = 19
 # Compatibility exports; shared sprite code lives below both renderers.
 from realmap_sprites import palette, sprite_spec, shadow_frame, SHADOW_ALPHA
 
@@ -155,17 +155,32 @@ def mark_bridge_stencil(im, x, y, level, stencil, *, high=False):
         part[alpha[top-y:bottom-y, left-x:right-x] != 0] = 128 | min(level+4, 127)
 
 
-def render(cells, res, theater, tmps, folder, meta, progress):
+def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=True):
     from realmap_sprites import tile_parts, shp_frame
-    from realmap_format import yes
+    from realmap_format import yes, ini, sha
+    # Lighting is display data, kept outside the gameplay parser/cache identity.
+    # Reopened reports and Toy capture may provide this context explicitly.
+    if 'mapLighting' not in theater:
+        theater = dict(theater)
+        source = folder/'source.map'
+        if source.is_file() and meta.get('sourceSha256'):
+            raw = source.read_bytes()
+            if sha(raw) != meta['sourceSha256']:
+                raise ValueError('光照读取的地图原文件与报告哈希不一致')
+            theater['mapLighting'] = ini(raw).get('LIGHTING', {})
     colors = palette(theater['palette'])
+    from realmap_terrain_variants import TerrainVariants
+    variants = TerrainVariants(res, theater, tmps)
     ordered = sorted(cells.values(), key=lambda c: (c['x']+c['y'], c['x']))
     minx = min(30*(c['x']-c['y'])-30 for c in ordered)-90
     miny = min(15*(c['x']+c['y']-c['level'])-15 for c in ordered)-180
     maxx = max(30*(c['x']-c['y'])+30 for c in ordered)+90
     maxy = max(15*(c['x']+c['y']-c['level'])+15 for c in ordered)+90
     width, height = maxx-minx, maxy-miny
-    factor = min(1, 9000/max(width, height))
+    # Keep native TMP/SHP pixels even on large maps. Display zoom belongs to
+    # the viewport; reducing each sprite here permanently loses detail and
+    # creates differently resampled duplicates in the Toy sprite atlases.
+    factor = 1
     canvas = Image.new('RGB', (round(width*factor), round(height*factor)), '#18232b')
     from realmap_objects import ObjectPainter
     painter = ObjectPainter(res, theater, folder)
@@ -212,7 +227,8 @@ def render(cells, res, theater, tmps, folder, meta, progress):
                       if any(bridge_overlay(c) for c in ordered) else None)
     for ident, c in enumerate(ordered, 1):
         draw_objects(c['x']+c['y'])
-        key = c['file'], c['subTile']
+        visual_file = variants.file(c)
+        key = visual_file, c['subTile']
         if key not in tiles:
             if c.get('terrainError'):
                 # Saved height survives, but this is explicitly unknown ground.
@@ -223,7 +239,7 @@ def render(cells, res, theater, tmps, folder, meta, progress):
                 pen.line([(17, 15), (30, 8), (43, 15), (30, 22), (17, 15)], fill='#e4b4c9')
                 parts = [(im, 0, 0)]
             else:
-                parts = tile_parts(tmps[c['file']], c['subTile'], colors)
+                parts = tile_parts(tmps[visual_file], c['subTile'], colors)
             ground_parts = parts if c['slope'] else parts[:1]
             bx = min(dx for im, dx, dy in ground_parts)
             by = min(dy for im, dx, dy in ground_parts)
@@ -239,7 +255,7 @@ def render(cells, res, theater, tmps, folder, meta, progress):
         if has_high_bridges and key not in tile_heights:
             from terrain_depth import tile_pixel_heights
             tile_heights[key] = ([None]*len(parts) if c.get('terrainError') else
-                                tile_pixel_heights(tmps[c['file']], c['subTile'], parts))
+                                tile_pixel_heights(tmps[visual_file], c['subTile'], parts))
         cx, cy = 30*(c['x']-c['y'])-minx, 15*(c['x']+c['y']-c['level'])-miny
         records.append((ident, c, cx, cy, mask, dx, dy, full))
         for i, (im, px, py) in enumerate(parts):
@@ -355,13 +371,15 @@ def render(cells, res, theater, tmps, folder, meta, progress):
         c['visibleBand'] = (bool(camera_pixels.any()) and not c['usable'] and
                             cy <= 15*(meta['size'][2]+2*meta['visibleRect'][1]+1)-miny)
     progress('保存真实地形与表面轮廓', 91)
-    from map_images import save_layers
-    filename, scene_filename = save_layers(canvas, scene, folder, VERSION)
+    filename = scene_filename = None
+    if save_images:
+        from map_images import save_layers
+        filename, scene_filename = save_layers(canvas, scene, folder, VERSION)
     (folder/'object-audit.json').write_text(json.dumps(object_info, ensure_ascii=False, indent=2), 'utf8')
     object_info.pop('records')
     shadow_info = dict(objects=shadow_count, pixels=shadow_pixels, alpha=SHADOW_ALPHA,
                        source='original paired SHP frames', receiver='same-level ground, clipped by terrain and solid objects')
-    (folder/'render-audit.json').write_text(json.dumps(dict(version=VERSION, sprites=audit, fullyHidden=hidden, partiallyHidden=partial, shadows=shadow_info), ensure_ascii=False, indent=2), 'utf8')
+    (folder/'render-audit.json').write_text(json.dumps(dict(version=VERSION, sprites=audit, fullyHidden=hidden, partiallyHidden=partial, shadows=shadow_info, terrainVariants=variants.metadata()), ensure_ascii=False, indent=2), 'utf8')
     return dict(version=VERSION, width=width, height=height, origin=[-minx, -miny], image=filename, objectImage=scene_filename, objects=object_info, shadows=shadow_info,
                 cameraRect=bounds, rasterScale=factor, missingSprites=sorted(missing),
                 fullyHidden=hidden, partiallyHidden=partial,

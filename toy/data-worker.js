@@ -24,9 +24,9 @@ self.onmessage=async({data})=>{
    const target=new URL(path,url),base=new URL('./',self.location.href);
    if(target.origin!==base.origin||!target.pathname.startsWith(base.pathname))throw Error('CODEC_BASE_URL');
    return read(target.href,'json',controller.signal);
-  }):CrateStaticCodec.search(raw);
+  }):type==='artwork'?CrateStaticCodec.artwork(raw):CrateStaticCodec.search(raw);
   controller.signal.throwIfAborted();
-  if(type==='json')self.postMessage({id,value});
+  if(type==='json'||type==='artwork')self.postMessage({id,value});
   else self.postMessage({id,value},[value]);
  }catch(error){self.postMessage({id,error:error.message});}
  finally{requests.delete(id);}

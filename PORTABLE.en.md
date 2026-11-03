@@ -39,7 +39,11 @@ Legacy MIX imports under `data/resources` no longer participate in default loadi
 
 Keep the launcher window open. If the default port is occupied, run `"Start Crate Atlas.cmd" --port 8777`. Do not run from inside the ZIP. The tool does not write the registry or modify game files.
 
-For an upgrade, extract into a new folder and close the old launcher window first. If the port is serving another installation or older code, startup reports it instead of silently opening the old tool. A second launch of the same installation and code can reuse the existing server. **Start Demo.cmd** opens the probability demo directly. **Height demo** at the top opens the isolated-high-cell example. The 3D views require WebGL.
+Extract upgrades into a new folder. The current source and subsequent builds automatically replace an identified older Crate Atlas service on the same port, including another installation. Launching the same installation and code reuses its service. Servers with the shutdown interface finish active calculations, uploads and exports first. Startup waits up to 60 seconds; a timeout leaves the old service running, so retry later. Unidentified applications are never terminated; use `--port 8777` instead.
+
+Windows v0.2–v0.5 servers lack this interface. Migration verifies their health response, known server source, listening PID, Python command, executable and process creation time before terminating that process. These versions cannot report all active jobs, so unfinished work may be interrupted. If verification fails, the process is left running with an explanatory message. The published v0.5.0 archive does not include this improvement unless locally patched.
+
+Handover does not migrate another installation's `output` or configuration. Reopen the map if an old tab references results from the previous folder. Browser region selections remain available on the same port. **Start Demo.cmd** opens the probability demo directly. **Height demo** at the top opens the isolated-high-cell example. The 3D views require WebGL.
 
 The release's `.zip.sha256` checks the download. `release-files.json` records each packaged file's size and SHA-256. `portable-build.json` records the version, build time and runtime versions without the build machine's absolute paths.
 
@@ -64,3 +68,9 @@ The server root opens the map page. Use `index.html` or `--page demo` for the pr
 New desktop reports and CSV downloads are stored as gzip while retaining their existing `.json` / `.csv` URLs. Older results remain readable without migration. Map images use lossless WebP with unchanged dimensions, color and transparent pixels; identical ground/object layers share one image. Images exceeding the encoder's dimension limit retain PNG. Idle recompression further reduces storage without changing pixels or probabilities. Developer scripts calling the analysis CLI still receive plain JSON/CSV files.
 
 Portable builds create both ZIP and smaller 7z packages by default, each with SHA-256 checksums and identical extracted contents. Install 7-Zip on the build machine or pass `--seven-zip`; use `--archive-format zip` for ZIP only. Users need a compatible extractor for the 7z package; running Crate Atlas itself does not require 7-Zip.
+
+## Launch and browser caching
+
+Each launch opens a fresh document URL with the current build fingerprint and a unique launch token. Full-edition HTML, JavaScript and CSS responses use `Cache-Control: no-store` and always return current bytes, including for old conditional requests. Local script/style references also include the current build fingerprint so the first upgrade bypasses previously cached assets.
+
+This does not clear browser storage, saved regions, analysis results or normal PNG/WebP map-image caching. Existing tabs are not forcibly reloaded; launching again opens the current UI. Toy static hosting has its own resource hashes and cache policy. Checks: `verify-server-cache.py` and `verify-server-lifecycle.py`.

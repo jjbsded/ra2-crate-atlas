@@ -19,7 +19,7 @@
   const raw=typeof navigation.flags==='string'?Uint8Array.from(atob(navigation.flags),c=>c.charCodeAt(0)):navigation.flags;
   if(raw.length!==count)throw Error('REGION_NAVIGATION_LENGTH');return raw;
  }
- async function partition({cells,navigation,starts,eligible,settings}, {signal,onProgress=()=>{},yieldControl=()=>new Promise(resolve=>setTimeout(resolve,0))}={}){
+ async function partition({cells,navigation,starts,eligible,settings,display}, {signal,onProgress=()=>{},yieldControl=()=>new Promise(resolve=>setTimeout(resolve,0))}={}){
   const config=options(settings),bits=flags(navigation,cells.length),nodes=[],at=new Map();let work=0,tick=Date.now();
   async function pause(){signal?.throwIfAborted();if(Date.now()-tick>12){await yieldControl();tick=Date.now();signal?.throwIfAborted();}}
   for(let i=0;i<cells.length;i++){
@@ -114,8 +114,17 @@
    if((++work&1023)===0){onProgress(20+65*visited/Math.max(1,nodes.length));await pause();}
   }
   const regions=groups.map(g=>({...g,keys:[]}));
+  function qualifies(members,area){
+   if(area>35)return true;
+   const baseline=display?.baselineNumerator;if(!(baseline>0n))return false;
+   // Match the statistics table's combined total, including shore/deck cells.
+   // Count each coordinate once and compare exact numerators before rounding.
+   const seen=new Set();let total=0n;
+   for(const id of members){const node=nodes[id],k=key(node.c);if(seen.has(k))continue;seen.add(k);total+=display.get(node.c).numerator;}
+   return total>50n*baseline;
+  }
   // Split remaining unowned land again: a player's territory can divide an
-  // otherwise connected island. Never aggregate disconnected scraps into >35.
+  // otherwise connected island. Never aggregate disconnected scraps to qualify.
   const extra=[],seen=new Set();
   const vacant=id=>!nodes[id].water&&owner[nodes[id].index]<0;
   for(const c of components)if(!c.players.length)for(const id of c.members){
@@ -126,13 +135,13 @@
     for(const[next,,via]of a.edges)if(!seen.has(next)&&vacant(next)&&(!via||via.every(side=>side.some(vacant)))){seen.add(next);members.push(next);}
     if((++work&2047)===0)await pause();
    }
-   if(core.size>35)extra.push({members,area:core.size});
+   if(qualifies(members,core.size))extra.push({members,area:core.size});
   }
   extra.sort((a,b)=>b.area-a.area||key(nodes[a.members[0]].c)-key(nodes[b.members[0]].c));
   for(const c of extra){
    const available=c.members.filter(id=>owner[nodes[id].index]<0);
    const core=new Set(available.filter(id=>nodes[id].core&&!nodes[id].shore).map(id=>key(nodes[id].c)));
-   if(core.size<=35)continue;
+   if(!qualifies(available,core.size))continue;
    const id=regions.length;regions.push({kind:'land',number:regions.length-groups.length+1,keys:[]});
    for(const node of available)owner[nodes[node].index]=id;
   }
@@ -148,7 +157,7 @@
     for(const[next,,via]of a.edges)if(!waterSeen.has(next)&&vacantWater(next)&&(!via||via.every(side=>side.some(vacantWater)))){waterSeen.add(next);members.push(next);}
     if((++work&2047)===0)await pause();
    }
-   if(members.length>35)waters.push({members,first});
+   if(qualifies(members,members.length))waters.push({members,first});
   }
   waters.sort((a,b)=>b.members.length-a.members.length||a.first-b.first);
   for(const water of waters){

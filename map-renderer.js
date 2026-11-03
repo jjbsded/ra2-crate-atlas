@@ -150,7 +150,7 @@
    ctx.restore();
   }else for(const c of visible)if(!c.usable){cellPath(c);ctx.fillStyle='rgba(5,16,25,.27)';ctx.fill('evenodd');}
   ctx.save();cameraClip();
-  for(const c of visible)if(options.heatmap&&c.terms.length&&inFilter(c)&&thresholdPass(c)){
+  for(const c of visible)if(options.heatmap&&(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&inFilter(c)&&thresholdPass(c)){
    cellPath(c);ctx.globalAlpha=display.cellAlpha(c,{opacity:1-options.opacity/100});ctx.fillStyle=CrateProbability.color(multiplier(c),options.palette,display.maxMultiplier);ctx.fill('evenodd');ctx.globalAlpha=1;if(surface(c).length)colored++;
   }
   if(options.blocked)for(const c of visible)if(occupancy.mapCell(c)){
@@ -249,26 +249,30 @@
   let cache=null,view=null;
   return {clear(){cache=null;view=null;},render(ctx,state,area,display,options){
    const r=state.data.rendering,pad=40,w=Math.ceil(r.width*state.scale)+2*pad,h=Math.ceil(r.height*state.scale)+2*pad;
-   const full=w*h<=8000000&&w<=8192&&h<=8192;
-   const settings=JSON.stringify(['filter','palette','opacity','threshold','heatmap','blocked','objects','grid','potentialMarkers','markers'].map(k=>options[k]));
-   const key=[state.scale,full?0:state.x,full?0:state.y,area.x,area.y,area.w,area.h,settings].join('|');
+   const transform=ctx.getTransform(),ratio=Math.hypot(transform.a,transform.b);
+   const full=w*h*ratio*ratio<=8000000&&w*ratio<=8192&&h*ratio<=8192;
+   const cw=full?w:Math.ceil(area.w),ch=full?h:Math.ceil(area.h);
+   const settings=JSON.stringify(['filter','palette','opacity','threshold','heatmap','baselineLayer','blocked','objects','grid','potentialMarkers','markers'].map(k=>options[k]));
+   const key=[ratio,state.scale,full?0:state.x,full?0:state.y,area.x,area.y,area.w,area.h,settings].join('|');
    let cacheRebuilt=false;
    if(!cache||cache.data!==state.data||cache.image!==state.image||cache.objects!==state.objectImage||cache.display!==display||cache.key!==key){
     const image=cache?.imageBuffer||makeCanvas();
-    image.width=full?w:Math.ceil(area.w);image.height=full?h:Math.ceil(area.h);
+    image.width=Math.ceil(cw*ratio);image.height=Math.ceil(ch*ratio);
     const target=image.getContext('2d');target.fillStyle='#101c25';target.fillRect(0,0,image.width,image.height);
+    target.setTransform(ratio,0,0,ratio,0,0);
     const baseState={...state,x:full?pad:state.x-area.x,y:full?pad:state.y-area.y};
-    render(target,baseState,{x:0,y:0,w:image.width,h:image.height},display,{...options,baseOnly:true,visibleCells:null});
+    render(target,baseState,{x:0,y:0,w:cw,h:ch},display,{...options,baseOnly:true,visibleCells:null});
     cache={data:state.data,image:state.image,objects:state.objectImage,display,key,imageBuffer:image};view=null;cacheRebuilt=true;
    }
    ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();
    ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
    if(full&&r.cameraRect){ctx.fillStyle='rgba(5,16,25,.48)';ctx.fillRect(area.x,area.y,area.w,area.h);}
-   ctx.drawImage(cache.imageBuffer,full?state.x-pad:area.x,full?state.y-pad:area.y);ctx.restore();
+   ctx.imageSmoothingEnabled=false;
+   ctx.drawImage(cache.imageBuffer,full?state.x-pad:area.x,full?state.y-pad:area.y,cache.imageBuffer.width/ratio,cache.imageBuffer.height/ratio);ctx.restore();
    const viewKey=[state.x,state.y,state.scale,area.x,area.y,area.w,area.h].join('|');
    if(!view||view.key!==viewKey){
     const cells=visibleCells(state,area);
-    const colored=options.heatmap?cells.filter(c=>c.terms.length&&surface(c).length&&(options.filter==='all'||(options.filter==='water'?c.land===2:c.land!==2))&&display.meetsThreshold(c,options.threshold||0)).length:0;
+    const colored=options.heatmap?cells.filter(c=>(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&surface(c).length&&(options.filter==='all'||(options.filter==='water'?c.land===2:c.land!==2))&&display.meetsThreshold(c,options.threshold||0)).length:0;
     view={key:viewKey,cells,colored};
    }
    return {...render(ctx,state,area,display,{...options,foregroundOnly:true,visibleCells:view.cells,colored:view.colored}),cacheRebuilt};

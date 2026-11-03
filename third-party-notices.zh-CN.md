@@ -24,3 +24,5 @@
 `resource_context/ra2map.py` 和 `resource_context/ra2mod.py` 源自本机 ra2yr-map v0.9 的只读解析工具，保留原文件头。对象绘制参考 FA2SPHE 的帧和锚点惯例，不内嵌编辑器可执行程序。`runtime/voxel` 包含现有 `CncVxlRenderText.dll` 及 x86 Microsoft Visual C++ 运行库依赖，因此渲染无需安装编辑器。组件哈希和本地来源记录位于 `runtime/voxel/provenance.json`。该目录保留上游 FA2SPHE README 和许可证作为项目说明，不将其许可归属于独立的 Microsoft 或游戏组件。
 
 Mod 美术只读取用户选择的可选游戏目录，不随代码或发布包提供。
+
+`realmap_voxel_normals.py` 包含来自 [CNCMaps VXL 解析器](https://github.com/zzattack/ccmaps-net/blob/56712d7c9c5048afbfe9bddb01c0ec43f6fc008a/CNCMaps.FileFormats/VxlFile.cs) 的标准法线数值表，文件内保留 WAE 对 CNCMaps 的来源许可声明；源项目完整 `COPYING` 另保存在 `runtime/voxel/CNCMaps-COPYING.txt`。光照公式与验证范围见 `RENDERING.md`。

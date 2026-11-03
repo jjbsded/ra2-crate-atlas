@@ -127,4 +127,5 @@ def resource_context(report, path):
             if not key.endswith('PACK') and key != 'ISOMAPPACK5':
                 rules.setdefault(key, {}).update(value)
     theater['effectiveRules'] = rules
+    theater['mapLighting'] = ini(data).get('LIGHTING', {}) if data is not None else {}
     return res, theater

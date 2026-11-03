@@ -1,7 +1,38 @@
 """Semantic object records for Toy's shared procedural materials, display only."""
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2
+
+UNIT_SYMBOLS = {'INFANTRY': 'soldier', 'UNITS': 'vehicle', 'AIRCRAFT': 'aircraft'}
+
+
+def unit_visual_symbols(base_rules, base_art):
+    """Classify base artwork, before a map overrides gameplay flags.
+
+    Natural/NotHuman can be set on human infantry for gameplay reasons. They
+    must not change its fallback appearance. Image aliases inherit the visual
+    family of their base art; ambiguous aliases keep the normal type fallback.
+    """
+    from realmap_format import yes
+    result = {}
+    for section, types in (('INFANTRY', 'INFANTRYTYPES'), ('UNITS', 'VEHICLETYPES'), ('AIRCRAFT', 'AIRCRAFTTYPES')):
+        identities, images = {}, {}
+        for kind in base_rules.get(types, {}).values():
+            kind = kind.upper()
+            cfg = base_rules.get(kind, {})
+            image = cfg.get('IMAGE', kind).upper()
+            sequence = base_art.get(image, {}).get('SEQUENCE', '').upper()
+            symbol = ('animal' if sequence in {'DOGSEQUENCE', 'ANIMALSEQUENCE', 'TREXSEQUENCE', 'BRONTSEQUENCE'} else
+                      'civilian' if yes(cfg.get('CIVILIAN', 'no')) else UNIT_SYMBOLS[section])
+            identities[kind] = symbol
+            images.setdefault(image, set()).add(symbol)
+        result[section] = dict(types=identities, images={image: next(iter(kinds)) for image, kinds in images.items() if len(kinds) == 1})
+    return result
+
+
+def unit_symbol(section, kind, cfg, visual_symbols):
+    scope = visual_symbols[section]
+    return scope['images'].get(cfg.get('IMAGE', kind).upper(), scope['types'].get(kind, UNIT_SYMBOLS[section]))
 
 
 def scene(report, folder):
@@ -12,6 +43,7 @@ def scene(report, folder):
     path = Path(folder)/'result.json'
     resource, theater = resource_context(report, path)
     rules = theater['effectiveRules']
+    visual_symbols = unit_visual_symbols(resource.rules, resource.art)
     records = object_records(ini(source_bytes(report, path, required=True)))
     cells = {(c['x'], c['y']): c for c in report['cells']}
     objects = []
@@ -43,12 +75,8 @@ def scene(report, folder):
                 symbol = 'tech'
             else:
                 symbol = 'building'
-        elif yes(cfg.get('ANIMAL', 'no')) or yes(cfg.get('NATURAL', 'no')):
-            symbol = 'animal'
-        elif yes(cfg.get('CIVILIAN', 'no')):
-            symbol = 'civilian'
         else:
-            symbol = {'INFANTRY': 'soldier', 'UNITS': 'vehicle', 'AIRCRAFT': 'aircraft'}[section]
+            symbol = unit_symbol(section, kind, cfg, visual_symbols)
         level = c['bridge']['deckLevel'] if obj['aboveGround'] and (c.get('bridge') or {}).get('kind') == 'high' else c['level']
         objects.append([obj['x'], obj['y'], level, symbol, w, h, obj['subcell']])
     return dict(version=VERSION, style='cell-materials', objects=objects)

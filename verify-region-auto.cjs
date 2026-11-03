@@ -4,6 +4,7 @@ const key=(x,y)=>x*1024+y;
 function grid(w,h){const cells=Array.from({length:w*h},(_,i)=>({x:i%w+1,y:Math.floor(i/w)+1,level:0,slope:0}));return {cells,navigation:{version:2,count:cells.length,flags:new Uint8Array(cells.length).fill(17)},starts:[{number:1,x:1,y:1}]};}
 function change(g,x,y,mask,props={}){const i=g.cells.findIndex(c=>c.x===x&&c.y===y);g.navigation.flags[i]=mask;Object.assign(g.cells[i],props);}
 const run=(g,settings={})=>A.partition({...g,settings},{yieldControl:async()=>{}}),owns=(r,region,x,y)=>r.regions[region]?.keys.includes(key(x,y));
+function weigh(g,numerators,baseline=1n){g.display={baselineNumerator:baseline,get:c=>({numerator:numerators[g.cells.indexOf(c)]??0n})};return g;}
 (async()=>{
  let g=grid(8,8),r=await run(g,{exclusive:false,maxPath:Math.SQRT2});assert.ok(owns(r,0,2,2));assert.ok(!owns(r,0,3,1));
  r=await run(g,{exclusive:false,maxPath:1.4});assert.ok(!owns(r,0,2,2),'Diagonal costs sqrt(2)');
@@ -22,6 +23,23 @@ const run=(g,settings={})=>A.partition({...g,settings},{yieldControl:async()=>{}
  g=grid(26,8);for(let y=1;y<=8;y++){change(g,6,y,2);change(g,16,y,2);}r=await run(g);
  assert.equal(r.regions.length,3);assert.equal(r.regions[0].keys.length,40);assert.equal(r.regions[1].keys.length,80);assert.equal(r.regions[2].keys.length,72,'Unowned land sorts by decreasing core area');
  g=grid(5,8);g.starts=[];for(let y=1;y<=8;y++)change(g,5,y,5);r=await run(g);assert.equal(r.regions.length,0,'Coast does not push 32 land cells over the >35 threshold');
+ // The multiplier alternative is strict and exact, independent of displayed
+ // rounding and legacy cell.multiplier values. It applies to both land/water.
+ for(const mask of [17,2]){
+  const base=10n**30n;g=grid(5,1);g.starts=[];g.navigation.flags.fill(mask);
+  for(const c of g.cells)c.multiplier=9999;
+  weigh(g,[50n*base],base);r=await run(g);assert.equal(r.regions.length,0,'Exactly 50x does not qualify');
+  weigh(g,[50n*base-1n],base);r=await run(g);assert.equal(r.regions.length,0,'Below 50x does not qualify');
+  weigh(g,[50n*base+1n],base);r=await run(g);assert.equal(r.regions.length,1,'An exact amount above 50x qualifies even when displayed as 50x');assert.equal(r.regions[0].kind,mask===2?'water':'land');assert.equal(r.regions[0].keys.length,5);
+  g=grid(36,1);g.starts=[];g.navigation.flags.fill(mask);weigh(g,[]);r=await run(g);assert.equal(r.regions.length,1,'Area alone still qualifies with zero probability');
+  g=grid(3,1);g.starts=[];g.navigation.flags.fill(mask);change(g,2,1,0);weigh(g,[30n,999n,30n]);r=await run(g);assert.equal(r.regions.length,0,'Disconnected scraps cannot sum their multipliers');
+  weigh(g,[51n,999n,30n]);r=await run(g);assert.equal(r.regions.length,1);assert.deepEqual(r.regions[0].keys,[key(1,1)]);
+  g.eligible=new Set([key(3,1)]);r=await run(g);assert.equal(r.regions.length,0,'Ineligible cells never contribute');
+ }
+ g=grid(2,1);g.starts=[];change(g,2,1,5);weigh(g,[1n,50n]);r=await run(g);assert.equal(r.regions[0].keys.length,2,'The combined total includes shore just like the statistics table');
+ g=grid(2,1);g.starts=[];for(const c of g.cells)change(g,c.x,c.y,25,{bridge:{kind:'high',deckLevel:0}});weigh(g,[20n,20n]);r=await run(g);assert.equal(r.regions.length,0,'Ground/deck at one coordinate count only once');
+ weigh(g,[26n,25n]);r=await run(g);assert.equal(r.regions.length,1);assert.equal(r.regions[0].keys.length,2);
+ g=grid(3,1);weigh(g,[0n,100n,100n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,1);assert.equal(r.regions[0].keys.length,1,'A player-containing landmass still cannot create leftover land regions');
  // Standalone water ignores the player's sea-crossing cap, but keeps physical
  // connectivity, category boundaries and coordinate ownership restrictions.
  g=grid(6,6);g.starts=[];g.navigation.flags.fill(2);r=await run(g,{maxSea:0});assert.equal(r.regions[0].kind,'water');assert.equal(r.regions[0].keys.length,36);
@@ -76,12 +94,12 @@ const run=(g,settings={})=>A.partition({...g,settings},{yieldControl:async()=>{}
    for(const [version,variant]of Object.entries(entry.variants)){
     const file=path.join(root,variant.reports.ore),folder=path.dirname(file),read=p=>JSON.parse(zlib.gunzipSync(fs.readFileSync(p)));
     const data=await codec.report(read(file),async p=>read(path.resolve(folder,p))),starts=P.positions({data,lookup:new Map(data.cells.map(c=>[c.x+','+c.y,c]))});
-    const eligible=new Set(data.cells.filter(c=>R.canSelect(c,data.rendering)).map(R.key)),result=await A.partition({cells:data.cells,navigation:data.regionNavigation,starts,eligible});
+    const display=require('./probability-display.js').map(data),eligible=new Set(data.cells.filter(c=>R.canSelect(c,data.rendering)).map(R.key)),result=await A.partition({cells:data.cells,navigation:data.regionNavigation,starts,eligible,display});
     assert.deepEqual(result.regions.slice(0,starts.length).map(r=>r.number),starts.map(p=>p.number));
     const assigned=result.regions.flatMap(r=>r.keys);assert.equal(new Set(assigned).size,assigned.length);
     const indices=new Map(data.cells.map((c,i)=>[R.key(c),i])),mask=Buffer.from(data.regionNavigation.flags,'base64');
     for(const region of result.regions)for(const k of region.keys){assert.ok(eligible.has(k));assert.ok(mask[indices.get(k)]&(region.kind==='water'?2:9),'Water regions use water; default player/land routes use ground or decks');}
-    for(const region of result.regions.filter(p=>p.kind==='water'))assert.ok(region.keys.length>35);
+    for(const region of result.regions.filter(p=>p.kind==='water'))assert.ok(region.keys.length>35||region.keys.reduce((sum,k)=>sum+display.get(data.cells[indices.get(k)]).numerator,0n)>50n*display.baselineNumerator);
     console.log('PASS official partition',entry.label,version,'players',starts.length,'assigned',assigned.length,'water regions',result.regions.filter(p=>p.kind==='water').length);
    }
   }

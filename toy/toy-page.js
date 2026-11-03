@@ -1,25 +1,25 @@
 /* Presentation changes only. The shared model and workspace remain authoritative. */
 (()=>{
  'use strict';
- const $=id=>document.getElementById(id),t=s=>CrateI18n.t(s),maps=!!$('map');
+ const $=id=>document.getElementById(id),t=s=>CrateI18n.t(s),maps=!!$('map'),original=!!CrateWebConfig.originalArt;
  document.body.classList.add('toy');
  for(const link of document.querySelectorAll('a[data-doc-en]')){link.href='about.html';link.removeAttribute('data-doc-en');}
  const nav=document.querySelector('.page-links'),help=document.createElement('a');help.href='about.html';help.textContent=t('网页版说明');nav?.prepend(help);
  if(maps){
-  document.title=t('官方地图概率图集 · 低清简化版（非完整版）')+' · Crate Atlas';
+  document.title=t(original?'官方地图概率图集 · 原版贴图轻量版（非完整版）':'官方地图概率图集 · 低清简化版（非完整版）')+' · Crate Atlas';
   document.querySelector('.eyebrow').textContent='CRATE ATLAS / WEB EDITION';
-  document.querySelector('h1').textContent=t('官方地图概率图集 · 低清简化版');
-  document.querySelector('.app-header p').textContent=t('低清简化版，非完整版 · 底图降低清晰度，保留模型内精确概率与初始静态布局');
+  document.querySelector('h1').textContent=t(original?'官方地图概率图集 · 原版贴图轻量版':'官方地图概率图集 · 低清简化版');
+  document.querySelector('.app-header p').textContent=t(original?'轻量网页版，非完整版 · 原版像素素材按地图加载；模型内精确概率与初始静态布局':'低清简化版，非完整版 · 底图降低清晰度，保留模型内精确概率与初始静态布局');
   $('version').value='yr';
   for(const selector of ['#dropzone .file-label','#dropzone>div','#dropzone>label','#resourcesOpen','#resourceSummary'])document.querySelector(selector)?.setAttribute('hidden','');
   $('terrain3dRelief').closest('label').hidden=true;
-  $('terrain3dDialog').querySelector('.eyebrow').textContent=t('TOY / 简化 3D');
-  $('terrain3dLoading').textContent=t('正在生成附近的简化 3D 地形…');
+  $('terrain3dDialog').querySelector('.eyebrow').textContent=t(original?'TOY / 原版贴图 3D':'TOY / 简化 3D');
+  $('terrain3dLoading').textContent=t(original?'正在生成附近的原版贴图 3D 地形…':'正在生成附近的简化 3D 地形…');
   document.querySelector('.terrain3d-gesture').textContent=t('单指旋转 · 双指平移 / 缩放 · 轻点选格 · 滚轮缩放 · 右键平移');
   const decorationLabel=$('terrain3dDecorations').closest('label');
-  for(const child of [...decorationLabel.childNodes])if(child.nodeType===3)child.textContent=t('桥梁 / 对象符号');
+  for(const child of [...decorationLabel.childNodes])if(child.nodeType===3)child.textContent=t(original?'桥梁 / 地形对象 / 建筑单位':'桥梁 / 对象符号');
   const scope=$('terrain3dRiskScope').nextElementSibling;
-  scope.textContent=t('蓝色仅示高差条件，未标色不代表可通行；外观为简化符号，不演示完整寻路。');
+  scope.textContent=t(original?'蓝色仅示高差条件，未标色不代表可通行；3D 几何仅作地形示意，不演示完整寻路。':'蓝色仅示高差条件，未标色不代表可通行；外观为简化符号，不演示完整寻路。');
   // Collapsible controls/details preserve a useful viewport on narrow screens
   // and in phone landscape; desktop keeps both expanded.
   const compact3d=matchMedia('(max-width:760px), (pointer:coarse), (max-height:600px)').matches;
@@ -35,7 +35,7 @@
    if(data.scope?.completeModes&&data.scope.modes.length===2&&data.scope.modes.includes('standard')&&data.scope.modes.includes('teamgame'))document.querySelector('.official-maps-note').textContent=t('本版收录全部作战和小队联盟官方地图；其他模式未收录。');
    if(data.artwork?.compact){
     const note=document.createElement('p');note.className='hint';note.id='toyArtworkNote';
-    note.textContent=t(data.artwork.style==='tiles'?'逐格简绘版：保留高度与坡形，共用简化地表和对象符号；概率、来源百分比和区域统计精度不变。':'50MB 轻量版：底图清晰度已降低，概率、来源百分比和区域统计精度不变。');
+    note.textContent=t(data.artwork.style==='original'?'原版素材逐格拼接，无损共享图集按地图加载；小地图、3D、区域裁图和图片导出使用同一套素材。':data.artwork.style==='tiles'?'逐格简绘版：保留高度与坡形，共用简化地表和对象符号；概率、来源百分比和区域统计精度不变。':'50MB 轻量版：底图清晰度已降低，概率、来源百分比和区域统计精度不变。');
     document.querySelector('.official-maps-note').after(note);
     if(data.artwork.style==='tiles'){
      document.querySelector('.app-header p').textContent=t('低清简化版，非完整版 · 逐格拼接简化素材，保留模型内精确概率与初始静态布局');
@@ -58,14 +58,14 @@
   if(matchMedia('(pointer: coarse)').matches)$('minimap').checked=false;
   navigator.setAttribute('aria-pressed',String($('minimap').checked));
  }else{
-  document.title=t('概率演示 · 低清简化版（非完整版）')+' · Crate Atlas';
-  document.querySelector('h1').textContent=t('概率演示 · 低清简化版（非完整版）');
+  document.title=t(original?'概率演示 · 轻量网页版（非完整版）':'概率演示 · 低清简化版（非完整版）')+' · Crate Atlas';
+  document.querySelector('h1').textContent=t(original?'概率演示 · 轻量网页版（非完整版）':'概率演示 · 低清简化版（非完整版）');
   $('exportAll').hidden=$('exportCurrent').hidden=true;
   $('exportStatus').textContent=t('轻量网页版只读取预计算地图；自定义地图、Mod 和视频导出请使用本地完整版。');
   const info=$('exportAll').parentElement.nextElementSibling;if(info?.tagName==='P')info.hidden=true;
   document.querySelector('.page-switch strong').textContent=t('官方地图概率图集');
   document.querySelector('.page-switch').setAttribute('aria-label',t('官方地图概率图集'));
  }
- document.querySelector('footer').textContent=t('低清简化版，非完整版。只读取预计算地图，支持简化 3D；自定义地图、Mod、原贴图精细 3D 和视频导出请使用本地完整版。');
+ document.querySelector('footer').textContent=t(original?'原版贴图轻量网页版，非完整版。只读取预计算地图，3D 使用原版贴图与简化几何；自定义地图、Mod、精细 3D 和视频导出请使用本地完整版。':'低清简化版，非完整版。只读取预计算地图，支持简化 3D；自定义地图、Mod、原贴图精细 3D 和视频导出请使用本地完整版。');
 })();
 

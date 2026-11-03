@@ -1,6 +1,7 @@
 """Serve only the generated static Toy package, under a Toy-like subpath."""
 import argparse
 import hashlib
+import json
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -56,15 +57,18 @@ class StaticHandler(SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     output = Path(__file__).resolve().parent/'output'
-    default_root = next((output/name for name in ['toy-official-3d','toy-official-regions','toy-official-vegetation','toy-official-tiles','toy-official-50mb','toy-official-all','toy-official','toy-web']
-                         if (output/name/'build-manifest.json').is_file()), output/'toy-web')
+    default_root = output/'toy'
+    latest = output/'latest-release.json'
+    if latest.is_file():
+        published = json.loads(latest.read_text('utf8'))
+        default_root = output/published['toy']
     parser.add_argument('--root', type=Path, default=default_root)
     parser.add_argument('--port', type=int, default=8787)
     parser.add_argument('--open', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     if not (root/'build-manifest.json').is_file():
-        parser.error('Build the Toy package first with build-toy.py --output output/toy-web')
+        parser.error('Publish Toy first with build-toy-live.py; see TOY.md')
     url = f'http://127.0.0.1:{args.port}{PREFIX}index.html'
     try:
         server = StaticServer(('127.0.0.1', args.port), partial(StaticHandler, directory=str(root)))

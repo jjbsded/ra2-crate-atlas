@@ -19,6 +19,24 @@ Other theaters use their corresponding stock palettes. Decoding already preserve
 
 Six-bit palette channels expand as `(v << 2) | (v >> 4)`; index zero is transparent. Colors and frames are static; game lighting and animation at a particular moment are not reproduced.
 
+## Initial vehicle lighting repair (versions 14–15 history, 2026-11-03)
+
+The following records the initial implementation. Renderer 18 supersedes its light-coordinate approximation; see [the latest native-lighting changes](docs/vehicle-brightness-native.md). Current regression coverage is 11 model types / 352 facings; the old model identifier and 192-case count below describe the initial release.
+
+Reusable interfaces, coordinate conventions, cache requirements and validation are documented in [the voxel-lighting integration guide](docs/voxel-lighting.md) (Chinese).
+
+The full edition now computes diffuse and specular lighting from original VXL normals and the unit facing, then looks up the active `voxels.vpl`. The old DLL used an angular `acos` ramp under the fixed editor light `(-1,1,1)`. `realmap_voxel_lighting.py` instead uses `max(n·l,0) + max((n·h)/(3-2(n·h)),0)`, with `h=normalize(l+(0,0,1))`, multiplied by 16 and truncated to a VPL page. Reserved normals 253–255 use neutral page 16. Bridge facing is converted back to the map convention before computing light.
+
+Only temporary VXL copies are recolored; an identity VPL prevents the geometry DLL from shading them a second time. Projection, HVA, part ordering and shadows retain the existing path. Object audits identify `ra2-vpl-diffuse-specular-v1`. Render version 14 and the renderer fingerprint invalidate old stock image caches while retaining gameplay precomputation. Existing reports need reanalysis or an explicit render refresh.
+
+References: [World-Altering Editor](https://github.com/CnCNet/WorldAlteringEditor/blob/f01be61e460c1fe5d76c827ed0f4eb1adaa2bf92/src/TSMapEditor/Rendering/ObjectRenderers/VxlRenderer.cs), [CNCMaps](https://github.com/zzattack/ccmaps-net/blob/56712d7c9c5048afbfe9bddb01c0ec43f6fc008a/CNCMaps.Engine/Rendering/VxlRenderer.cs), and the [DLL's angular approximation](https://github.com/handama/CncVxlRenderText/blob/755dbb6e9bf751d7c3c4c1c2dc07ac8bb094d1d0/src/vxlfile.cpp). Numerical normal tables from CNCMaps match WAE; their source notice is retained in `realmap_voxel_normals.py`.
+
+`python -B verify-voxel-lighting.py --integration` covers four normal modes, 32 facings, reserved normals, transparency and malformed inputs, plus 192 real stock model/facing comparisons. Alpha, anchors and shadows are unchanged; RA2 temperate and YR snow fixtures retain pixel-identical ground and identical probability fields. Evidence is in `output/voxel-lighting-verification/`; each vehicle's upper row is old, lower row new.
+
+Render version 15 adds `realmap_palette_lighting.py`: after VPL shading and owner remapping, apply `Ambient - Ground + Level * cell.level + ExtraUnitLight / ExtraAircraftLight`, quantized to intensity rows 0–62 (neutral 31). Stock vehicles on neutral ground use row 37. Special indices 240–254, alpha and shadows retain their values; the part cache includes the intensity row. Building voxel turrets receive ambient/height lighting without vehicle extra light. Official Toy atlases bake final pixels; live Toy keeps baked VPL indices and applies the same intensity row after owner recoloring.
+
+This is a game-style approximation for standing models, not a same-scene in-game pixel comparison. Map RGB tint, lamps, flashes, tilted/animated section normals and Phobos light overrides remain outside this model. SHP lighting is outside this change. Applied to the local full edition, portable build inputs and Toy's build-time baking. New local Toy ZIPs are recorded in the [release guide](docs/toy-lighting-release.md); they have not been published remotely.
+
 ## Original shadows
 
 Paired SHP shadows use frame `totalFrames / 2 + bodyFrame`, the same canvas / crop / anchor, and opacity `128/255`. Trees usually have two frames; a 22-frame drill uses body 0 and shadow 11. Shadow pixels use palette index 1 as a black mask, not a unit-palette color.
@@ -174,3 +192,14 @@ Brushes and picking first narrow candidates using projected / game-coordinate in
 ## Language and exported annotations
 
 Canvas text uses the same explicit translation catalog as the controls. Full-map JPEG and demo MP4 capture the chosen language; probabilities, geometry, image assets and source identifiers stay unchanged. Layouts constrain long captions and reserve separate spaces for legends. User-entered map / region names are never translated. See [localization boundaries](ARCHITECTURE.en.md#localization).
+
+## Terrain variants and voxel shadows (2026-11-03)
+
+Renderer 17 selects compatible letter-suffixed TMP variants with a stable coordinate lattice. Voxel shadows now select ShadowIndex, omit separate turret/barrel casters, and use half size for ConsideredAircraft. Body pixels and gameplay data are unchanged. See [integration details](docs/terrain-shadows.md).
+
+## Vehicle brightness (renderer 18, 2026-11-03)
+
+The former horizontal-light approximation omitted the elevated world light and inverse isometric camera transform, overlighting some vehicle surfaces. `ra2-native-vpl-v2` uses numerical outputs from original game functions for four normal modes and 32 directions, preserving native fast-math rounding. Mode 4 normal 241 also has its X sign corrected. Original unit/aircraft extra light remains enabled; ground exposure is unchanged. Full, 3D and Toy artwork/index caches must be rebuilt. See [reproduction and integration](docs/vehicle-brightness-native.md).
+# Deployed artwork (renderer 19)
+
+Map objects with the `Unload` mission now show the static deployed pose for GI, Guardian GI, Desolator and Siege Chopper. The chopper selects the SCHD body/turret and its own shadow settings. Full and Toy share the selection rules; native lighting and gameplay calculations stay unchanged. See [integration notes](docs/deployed-art.md).

@@ -14,9 +14,9 @@
 
 **v0.5.0 Windows 64 位完整版：[ZIP 包](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip) · [7z 包（下载更小）](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z)**。两种包内容完全相同；7z 需要支持该格式的解压工具。完整解压后双击 **启动工具.cmd**（英文文件名 **Start Crate Atlas.cmd** 也可），默认进入真实地图概率计算。无需安装 Python、Node.js 或游戏；自带运行环境、官方地图和经过哈希校验的原版资源。游戏目录为可选项，用于读取其他安装或 Mod；发布包不携带任何具体 Mod 配置或美术素材。
 
-[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.5.0) · SHA-256 校验文件：[ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip.sha256) / [7z](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z.sha256)。升级时请先关闭旧版启动窗口，并解压到新目录；区域划分迁移见 [使用与迁移](PORTABLE.md)。
+[发布说明与附件](https://github.com/jjbsded/ra2-crate-atlas/releases/tag/v0.5.0) · SHA-256 校验文件：[ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.zip.sha256) / [7z](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.5.0/CrateAtlas-v0.5.0-Windows-x64.7z.sha256)。升级时解压到新目录。当前源码已支持自动接管确认身份的旧服务；已发布的 v0.5.0 启动器仍需手动关闭旧服务。区域划分迁移见 [使用与迁移](PORTABLE.md)。
 
-另提供 [v0.4.0 Toy 网页 ZIP](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Toy-Web.zip)（[SHA-256](https://github.com/jjbsded/ra2-crate-atlas/releases/download/v0.4.0/CrateAtlas-v0.4.0-Toy-Web.zip.sha256)）。这是**低清简化版，非完整版**，可直接上传 Toy，或解压后使用 HTTP 静态服务预览；收录全部 131 项官方作战／小队联盟地图，ZIP 小于 50 MB。此包不含 Windows 启动器和自定义地图分析服务，使用方式见 [网页版说明](TOY.md)。
+当前源码的 Toy 统一为一个版本，包含官方地图和自定义地图本地计算、原生无损贴图与 Windows 双击入口。源码已更新至绘图版本 19，包含地图纹理变体、原生 VPL 光照、载具阴影及四种单位部署外观；这些源码更新晚于上方的 v0.5.0 完整版和 v0.4.0 Toy 下载。使用与构建见 [Toy 说明](TOY.md)，跨工具移植见 [统一渲染接入文档](docs/rendering-porting-guide.md)。
 
 v0.5.0 新增经过校验的官方地图预计算、可复用的地图绘制缓存、报告与图像无损压缩，以及更小的 7z 完整包。概率精度、原版素材分辨率、3D 与导出功能保持不变。本次更新 Windows 完整版；已发布的 Toy 下载仍为 v0.4.0。
 
@@ -46,7 +46,7 @@ v0.5.0 新增经过校验的官方地图预计算、可复用的地图绘制缓�
 
 ## 源码与开发
 
-Toy 网页版是 **低清简化版，非完整版**，包含全部官方作战／小队联盟地图，支持区域自动划分、连通填充与总概率标签；默认逐格拼接简化地表和对象符号，配合无损概率数据，适配 50MB ZIP 上限。本地构建、触控操作与验证见 [网页版说明](TOY.md)。已构建时可双击 **启动Toy网页版.cmd**，使用独立的纯静态预览服务器。
+Toy 网页版包含官方作战／小队联盟地图和自定义地图本地计算，保留原生无损图集与精确概率数据；仅缺失的显示素材退回简绘，ZIP 上限为 50,000,000 字节。构建后可双击包内 **Start Toy.cmd**；工作区配置 `output/latest-release.json` 后，也可用 **启动Toy网页版.cmd** 打开指定的最新包。构建、触控与验证见 [Toy 说明](TOY.md)。
 
 Git 保存核心源码、示例地图、机制文档、纯逻辑验证脚本和必要的小型本地组件。大型资源与完整运行环境不进入 Git；分析结果、截图、视频、缓存、旧版导入 MIX、本机 Mod 目录均不提交。
 
@@ -57,7 +57,7 @@ cd ra2-crate-atlas
 
 开发时使用 Python 3.11+ 并安装 requirements.txt；将自己安装的原版 ra2.mix 和 ra2md.mix 放入 assets/original（程序会校验哈希），或使用已准备好的本地依赖。以下为配置了内嵌 Python 的启动示例：
 
-源码目录可双击「启动工具.cmd」测试完整版地图分析，「启动演示.cmd」只进入概率演示，「启动Toy网页版.cmd」测试已构建的 Toy 网页。三个入口共用 `run-python.cmd`，优先使用本目录内嵌 Python，也支持 `CRATE_ATLAS_PYTHON`、项目 `.venv`、工作区相对路径下已有的便携运行时和 PATH 中的有效 Python；跳过 Windows 商店的占位快捷方式。运行时只复用解释器，加载的仍是当前工程代码。
+源码目录可双击「启动工具.cmd」测试完整版地图分析，「启动演示.cmd」只进入概率演示；这两个入口通过 `run-python.cmd` 优先使用内嵌 Python，也支持 `CRATE_ATLAS_PYTHON`、项目 `.venv`、工作区相对路径下已有的便携运行时和 PATH 中的有效 Python，并跳过 Windows 商店占位程序。运行时只复用解释器，加载当前工程代码。Toy 包的双击入口使用 Windows 自带 PowerShell/.NET，不需要 Python。
 
 ```powershell
 .\runtime\python\python.exe -B server.py --open
@@ -154,3 +154,5 @@ cd ra2-crate-atlas
 重建命令：`run-python.cmd -B build-official-precomputed.py --output official-precomputed-new --jobs 3`。验证：`run-python.cmd -B verify-official-precomputed.py --data official-precomputed-new --render`。验证后停服替换数据目录；构建器不会覆盖已有目录。便携包只收录清单中校验通过的原版计算数据，不打包个人区域、生成画面或 Mod 数据。
 
 当前构建使用 XZ 无损压缩内置概率、gzip 保存新生成的分析结果，并以逐像素无损 WebP 保存底图；相同图层共用图片，空闲时进一步压缩。现有结果链接和旧 PNG／JSON 报告保持兼容，概率精度及素材分辨率不变。便携构建默认生成 ZIP 和更小的 7z 两种完整包，详见[存储与打包说明](PORTABLE.md)。
+
+自动划分新增面积或倍率条件：无玩家的剩余连通陆地、剩余连通水域，在非海岸面积超过 35 格，或候选区域综合总倍率严格大于 50× 时单独建区。倍率与统计表共用本图 1× 基准，按精确分子比较，同一坐标仅计一次；50× 整不触发。连通、归属和排序规则保持不变，已有划分需点击“重新自动划分”应用。

@@ -92,6 +92,21 @@ def verify(root, cache, modes=None, cases_path=None):
                     assert simplified['version']==1 and simplified['style']=='cell-materials'
                     assert not report['rendering'].get('image') and not report['rendering'].get('objectImage')
                     assert all(len(obj)==7 and obj[3] in {'building','repair','oil','hospital','armory','lab','tech','civilian','animal','soldier','vehicle','aircraft'} for obj in simplified['objects'])
+                elif manifest.get('artworkStyle') == 'original':
+                    descriptor=report['rendering']['original']
+                    assert descriptor['version']==1 and descriptor['layout']==layout
+                    assert not report['rendering'].get('simplified')
+                    index=(path.parent/descriptor['index']).resolve()
+                    assert index.is_relative_to(root.resolve()) and index.is_file()
+                    from toy_atlas_codec import decode as decode_artwork
+                    art=decode_artwork(index.read_bytes())
+                    assert art['version']==1 and len(art['layers'])==4
+                    for atlas in art['atlases']:
+                        source=(index.parent/atlas['file']).resolve()
+                        assert source.is_relative_to(root.resolve()) and source.is_file()
+                        assert source.stat().st_size==atlas['bytes']
+                        entry_art.add(source)
+                    entry_art.add(index)
                 for field in ['probability', 'cells', 'markers', 'potentialMarkers', 'clearance']:
                     assert report[field] == original[field], (relative, field)
                 search = (path.parent/report['precomputed']['search']).resolve()

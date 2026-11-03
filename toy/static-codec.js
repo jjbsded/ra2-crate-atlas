@@ -80,5 +80,22 @@
   for(let i=0;i<count;i++)if(indices[i]){const list=lists[indices[i]];write(list.length);for(const target of list)write(target);}else{write(1);write((Math.floor(i/maximum)+1)*512+i%maximum+1);}
   return result;
  }
- const api={ratio,report,search};root.CrateStaticCodec=api;if(typeof module!=='undefined')module.exports=api;
+ function artwork(buffer){
+  const bytes=new Uint8Array(buffer),view=new DataView(buffer);let offset=8;
+  if(bytes.length<12||new TextDecoder().decode(bytes.subarray(0,8))!=='CATLAS1\0')throw Error('CODEC_ATLAS_VERSION');
+  const uint=()=>{if(offset+4>bytes.length)throw Error('CODEC_ATLAS_EOF');const n=view.getUint32(offset,true);offset+=4;return n;};
+  const length=uint();if(length>bytes.length-offset)throw Error('CODEC_ATLAS_METADATA');
+  const value=JSON.parse(new TextDecoder().decode(bytes.subarray(offset,offset+length)));offset+=length;
+  const read=()=>{let n=0;for(let i=0;i<5;i++){if(offset>=bytes.length)throw Error('CODEC_ATLAS_EOF');const b=bytes[offset++];n+=(b&127)*2**(7*i);if(b<128){if(n>0xffffffff)throw Error('CODEC_ATLAS_VARINT');return n;}}throw Error('CODEC_ATLAS_VARINT');};
+  const arrays=[];
+  for(let i=0;i<8;i++){
+   const count=uint();if(count>2000000)throw Error('CODEC_ATLAS_COUNT');const array=new Array(count);let at=0;
+   while(at<count){const run=i>=3&&i<7?read():1;if(!run||run>count-at)throw Error('CODEC_ATLAS_RUN');const n=read(),signed=n%2?-(n+1)/2:n/2;array.fill(signed,at,at+run);at+=run;}
+   arrays.push(array);
+  }
+  if(offset!==bytes.length||arrays[7].length%5)throw Error('CODEC_ATLAS_LENGTH');
+  value.commands=arrays.slice(0,3);value.layers=arrays.slice(3,7);const n=arrays[7].length/5;
+  value.assets=Array.from({length:n},(_,i)=>Array.from({length:5},(_,j)=>arrays[7][i+j*n]));return value;
+ }
+ const api={ratio,report,search,artwork};root.CrateStaticCodec=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

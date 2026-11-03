@@ -11,6 +11,7 @@ const {chromium,devices}=require('playwright');
  ]){
   const context=await browser.newContext(mobile?{...devices['iPhone 13'],locale:'zh-CN'}:{viewport:{width:1440,height:1000},locale:'zh-CN'}),page=await context.newPage(),errors=[],apis=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(new URL(r.url()).pathname.includes('/api/'))apis.push(r.url());});
+  await page.addInitScript(()=>{let api;Object.defineProperty(window,'CrateRegionAuto',{configurable:true,get:()=>api,set(value){api=value;const partition=value.partition;api.partition=(args,options)=>{if(!(args.display?.baselineNumerator>0n))throw Error('Automatic partition did not receive exact probabilities');return partition(args,options);};}});});
   await page.goto(url);await page.waitForFunction(()=>window.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:60000});
   assert.equal(await page.locator('#regionAutoStraight').inputValue(),'40');
   assert.equal(await page.locator('#regionAutoPath').inputValue(),'70');
@@ -19,7 +20,7 @@ const {chromium,devices}=require('playwright');
   const initial=await read(),players=await page.evaluate(()=>CratePlayerStarts.positions(CrateMapViewer.state));
   const water=initial.regions.filter(r=>r.generatedName?.kind==='water');
   assert.ok(initial.regions.filter(r=>!r.cells.length&&!r.generatedName).length>=2,'At least two unused regions remain');
-  for(const r of water){assert.equal(r.name,'水域'+r.id.slice(1));assert.ok(r.cells.length>35);}
+  for(const r of water){assert.equal(r.name,'水域'+r.id.slice(1));assert.ok(r.cells.length>35||await page.evaluate(keys=>{const d=CrateMapViewer.state.data,display=CrateProbabilityDisplay.map(d),cells=new Map(d.cells.map(c=>[c.x*1024+c.y,c]));return keys.reduce((sum,k)=>sum+display.get(cells.get(k)).numerator,0n)>50n*display.baselineNumerator;},r.cells));}
   if(process.env.EXPECT_WATER)assert.ok(water.length>0,'This sea map must allocate standalone water areas');
   assert.equal(initial.autoOptions.maxSea,0);assert.equal(initial.autoOptions.maxStraight,40);assert.equal(initial.autoOptions.maxPath,70);assert.equal(initial.autoOptions.exclusive,true);
   assert.deepEqual(initial.regions.slice(0,players.length).map(r=>r.generatedName?.number),players.map(p=>p.number));
@@ -46,7 +47,7 @@ const {chromium,devices}=require('playwright');
   await page.locator('#regionAutoSettings').evaluate(e=>e.open=false);
   const download=page.waitForEvent('download');await page.locator('#mapImageExport').click();await(await download).saveAs(path.join(out,name+'-full.jpg'));
   await page.reload();await page.waitForFunction(()=>window.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:60000});await page.waitForTimeout(500);assert.deepEqual((await read()).regions,after.regions,'Saved regions are restored, not regenerated');
-  if(name!=='desktop'){assert.match(await page.title(),/低清简化版.*非完整版/);assert.match(await page.locator('h1').textContent(),/低清简化版/);assert.match(await page.locator('.app-header p').first().textContent(),/非完整版/);assert.deepEqual(apis,[]);}
+  if(name!=='desktop'){assert.match(await page.title(),/^Toy · /);assert.match(await page.locator('h1').textContent(),/Toy/);assert.deepEqual(apis,[]);}
   // An intentional empty selection stays empty on the next load.
   await page.evaluate(()=>{const key='crate-atlas.regions.v1.'+CrateMapViewer.state.data.metadata.sourceSha256,d=JSON.parse(localStorage.getItem(key));for(const r of d.regions)r.cells=[];d.autoHandled=true;localStorage.setItem(key,JSON.stringify(d));});
   await page.reload();await page.waitForFunction(()=>window.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:60000});await page.waitForTimeout(500);assert.ok((await read()).regions.every(r=>!r.cells.length));

@@ -3,18 +3,21 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import argparse
 import hashlib
+import html
 import io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import threading
 import uuid
 import webbrowser
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, parse_qsl, urlencode
 import original_resources as resource_store
 import i18n_settings
+from server_lifecycle import Lifecycle, StartupError, bind_or_reuse
 from map_jobs import MapJobs, BusyError
 
 ROOT = Path(__file__).resolve().parent
@@ -28,6 +31,27 @@ def instance_id():
 
 
 INSTANCE_ID = instance_id()
+
+
+def browser_page_url(base, page):
+    # A fresh navigation must not reuse an old tab/document cached at maps.html.
+    name = 'maps.html' if page == 'maps' else 'index.html'
+    return base+'/'+name+'?'+urlencode({'build': INSTANCE_ID[:20], 'launch': uuid.uuid4().hex})
+
+
+def frontend_html(data):
+    # The first launch after upgrading must also bypass previously cached JS/CSS
+    # whose old responses did not yet include our no-store policy.
+    def version_asset(match):
+        value = urlsplit(html.unescape(match[2]))
+        if value.scheme or value.netloc or not value.path.lower().endswith(('.js', '.css')):
+            return match[0]
+        query = [(key, val) for key, val in parse_qsl(value.query, keep_blank_values=True) if key != 'build']
+        query.append(('build', INSTANCE_ID[:20]))
+        return match[1]+html.escape(value._replace(query=urlencode(query)).geturl(), quote=True)+match[3]
+    return re.sub(r'((?:src|href)=[\"\x27])([^\"\x27]+)([\"\x27])', version_asset, data.decode('utf8')).encode('utf8')
+
+
 JOBS = {}
 LOCK = threading.Lock()
 MAPS = MapJobs()
@@ -38,6 +62,10 @@ class LocalServer(ThreadingHTTPServer):
     # Windows SO_REUSEADDR allows two listeners to share the same port; requests
     # can then keep reaching an older process after restarting the application.
     allow_reuse_address = os.name != 'nt'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lifecycle = Lifecycle(self, INSTANCE_ID, service_busy)
 
 
 def clean_timing(value):
@@ -81,6 +109,19 @@ class Handler(SimpleHTTPRequestHandler):
     def send_head(self):
         from map_storage import storage_path, read_bytes, accepts_gzip, COMPRESSED_DOWNLOADS
         path = Path(self.translate_path(self.path)).resolve()
+        if (path.is_relative_to(ROOT) and not path.is_relative_to(ROOT/'output') and
+                path.suffix.lower() in ('.html', '.js', '.css') and path.is_file()):
+            data = path.read_bytes()
+            if path.suffix.lower() == '.html':
+                data = frontend_html(data)
+            # Always return current UI bytes, even when an old browser sends a
+            # matching/future If-Modified-Since. Map imagery keeps normal caching.
+            self.send_response(200)
+            self.send_header('Content-Type', self.guess_type(str(path))+'; charset=utf-8')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            return io.BytesIO(data)
         if path.name in COMPRESSED_DOWNLOADS and path.is_relative_to(ROOT/'output'):
             stored = storage_path(path).resolve()
             if stored.is_relative_to(ROOT/'output') and stored.suffix == '.gz':
@@ -115,6 +156,11 @@ class Handler(SimpleHTTPRequestHandler):
             pass  # A local viewer may close or change its 3D patch while loading.
 
     def do_GET(self):
+        if urlsplit(self.path).path == '/api/server/identity':
+            return self.server.lifecycle.control(self)
+        return self.server.lifecycle.dispatch(self, self.get_application)
+
+    def get_application(self):
         route = urlsplit(self.path)
         if route.path == '/language-settings.js':
             data = ('globalThis.CrateLanguageSettings='+json.dumps(i18n_settings.settings(initialize=True))+';').encode('utf8')
@@ -191,6 +237,11 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if urlsplit(self.path).path == '/api/server/shutdown':
+            return self.server.lifecycle.control(self, shutdown=True)
+        return self.server.lifecycle.dispatch(self, self.post_application)
+
+    def post_application(self):
         route = urlsplit(self.path)
         if route.path == '/api/preferences/language':
             expected = f'http://{self.headers.get("Host", "")}'
@@ -354,32 +405,39 @@ def main():
     parser.add_argument('--open', action='store_true')
     parser.add_argument('--page', choices=['demo','maps'], default='maps')
     args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error('--port must be between 1 and 65535')
     url = f'http://127.0.0.1:{args.port}'
-    try:
-        server = LocalServer(('127.0.0.1', args.port), Handler)
-    except OSError:
-        # Reopening the launcher should reuse this application's existing server.
-        from urllib.request import urlopen
-        try:
-            with urlopen(url+'/api/maps/health', timeout=2) as response:
-                existing = json.load(response)
-                if existing.get('feature') != 'real-maps-v1':
-                    raise RuntimeError('This port is occupied by another application. Choose another port with --port.' if i18n_settings.language() == 'en' else '该端口已被其他程序占用，请用 --port 选择其他端口。')
-                if existing.get('instance') != INSTANCE_ID:
-                    raise RuntimeError('This port serves another installation or older code. Close its launcher, or start this version with --port 8777.' if i18n_settings.language() == 'en' else '该端口运行的是另一个目录或旧版本的工具。请关闭旧启动窗口，或用 --port 8777 启动此版本。')
-            if args.open:
-                webbrowser.open(url+('/maps.html' if args.page == 'maps' else '/index.html'))
-            print(f'Existing crate demo: {url}', flush=True)
-            return
-        except Exception as error:
-            raise RuntimeError(f'Cannot open {url}: {error}') from error
+    page_url = browser_page_url(url, args.page)
+    def create_server():
+        return LocalServer(('127.0.0.1', args.port), Handler)
+    server = bind_or_reuse(create_server, args.port, INSTANCE_ID, ROOT,
+                           english=i18n_settings.language() == 'en')
+    if server is None:
+        if args.open:
+            webbrowser.open(page_url)
+        print(f'Existing Crate Atlas: {url}', flush=True)
+        return
     print(f'Crate demo: {url}', flush=True)
     if args.open:
-        webbrowser.open(url+('/maps.html' if args.page == 'maps' else '/index.html'))
+        webbrowser.open(page_url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        pass
+    finally:
         server.server_close()
 
+
+def service_busy():
+    with LOCK:
+        exporting = any(not j.get('done') and not j.get('error') for j in JOBS.values())
+    return exporting or not MAPS._idle() or PICKER_LOCK.locked()
+
+
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except (StartupError, OSError) as error:
+        print(str(error), flush=True)
+        raise SystemExit(1)

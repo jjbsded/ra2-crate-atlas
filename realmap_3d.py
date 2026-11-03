@@ -20,7 +20,7 @@ from realmap_bridges import HIGH_NAMES, sprite_frame
 from terrain_depth import relief_mesh
 
 LOCK = threading.Lock()
-VERSION = 5
+VERSION = 7
 # Top/right/bottom/left height deltas, as documented by FA2SPHE's RampTypes.
 # These are visual vertex offsets only; Cell.Level still drives the cliff test.
 RAMPS = [(0,0,0,0), (0,1,1,0), (0,0,1,1), (1,0,0,1), (1,1,0,0),
@@ -230,6 +230,8 @@ def build_patch(report, lookup, path, x, y, radius):
     res,theater = resource_context(report,path)
     colors = palette(theater['palette'])
     textures,tiles,raws,sprites,missing,parts_cache = {},{},{},{},set(),{}
+    from realmap_terrain_variants import TerrainVariants
+    variants = TerrainVariants(res,theater,raws)
     reliefs = {}
     def put_texture(image):
         url = data_url(image); ident = sha(url.encode())[:16]
@@ -237,7 +239,7 @@ def build_patch(report, lookup, path, x, y, radius):
         return ident
     records = []
     for c in nearby:
-        name,sub = c['file'],c['subTile']; key = (name,sub)
+        name,sub = variants.file(c),c['subTile']; key = (name,sub)
         if key not in tiles:
             try:
                 if c.get('terrainError'):
