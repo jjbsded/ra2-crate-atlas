@@ -1,4 +1,4 @@
-/* Exact enumeration for the demo's static flat world; no scripted retry points. */
+/* Exact geometric finite retries for the demo static flat world. */
 (function(root){
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
@@ -9,7 +9,7 @@
  const PALETTES=['multi','warm','cool'];
  const PALETTE_NAMES={multi:_t('多色'),warm:_t('暖色'),cool:_t('冷色')};
  const MAX_MULTIPLIER=(M.MAP.w+M.MAP.h-1)**2;
- const cache=new Map(),randomCache=new Map(),exactForCell=new WeakMap(),exactCache=new Map();
+ const cache=new Map(),randomCache=new Map(),exactCache=new Map(),exactForCell=new WeakMap();
  const gcd=(a,b)=>b?gcd(b,a%b):a;
  function fraction(numerator,denominator){
   let a=numerator,b=denominator;while(b){const r=a%b;a=b;b=r;}
@@ -77,7 +77,7 @@
    cell.multiplier=cell.probability*N;
    maxMultiplier=Math.max(maxMultiplier,cell.multiplier);
   }
-  const result={worldId:world.id,frame,limit,sampleCount:N,baseline:1/N,successCount,failures,
+  const result={model:'finite-retry-v2',worldId:world.id,frame,limit,sampleCount:N,baseline:1/N,successCount,failures,
    successPerAttempt,failedPerAttempt:q,finalSuccess,finalFailure:successCount?Math.pow(q,limit):1,maxMultiplier,
    method:'exhaustive-exact-rational',framePolicy:'fixed',
    exact:{representation:'shared-denominator',denominator:String(exact.denominator),perHitNumerator:String(exact.perHitNumerator),failureNumerator:String(exact.failureNumerator),
@@ -125,7 +125,7 @@
    exactForCell.set(cell,{denominator,multiplierNumerator:numerators[i]*BigInt(N),thresholds:new Map()});
   });
   const successCount=totalSuccess/period;
-  const result={worldId:world.id,frame:null,framePolicy:'uniform-cycle',limit,sampleCount:N,baseline:1/N,
+  const result={model:'finite-retry-v2',worldId:world.id,frame:null,framePolicy:'uniform-cycle',limit,sampleCount:N,baseline:1/N,
    successCount,successCountRange:[Math.min(...groups.keys()),Math.max(...groups.keys())],failures:{overlay:totalOverlay/period,'no-candidate':totalNoCandidate/period},
    successPerAttempt:totalSuccess/(period*N),failedPerAttempt:1-totalSuccess/(period*N),finalSuccess,finalFailure,maxMultiplier,
    method:'exhaustive-exact-rational-frame-average',
@@ -142,7 +142,7 @@
   trace.probability=computeRandom(trace.world);
   const duration=10,start=trace.duration;
   trace.steps.push({i:trace.steps.length,phase:'heatmap',title:_t('最终落点 · 概率倍率热力图'),
-   text:_t('1× = 仅直接抽中、无邻格转入的基准格。保留随机帧与最多 1000 轮重抽的精确概率，统一归一化倍率；格子之间的最终概率比例不变。'),
+   text:_t('1× = 仅直接抽中、无邻格转入的基准格。枚举起点并对随机帧精确平均，按统一基准显示倍率。'),
    candidates:[],visits:[],start,end:start+duration,duration});
   trace.duration+=duration;return trace;
  }
@@ -153,19 +153,56 @@
   return opacity;
  }
  const stops=[[0,[24,34,46]],[1,[44,119,167]],[2,[39,190,198]],[4,[116,211,151]],[8,[242,213,105]],[16,[247,145,79]],[32,[231,76,100]],[169,[217,119,237]]];
- const ramps={warm:[[0,[255,247,188]],[.35,[254,196,79]],[.7,[227,74,51]],[1,[128,0,38]]],cool:[[0,[235,249,255]],[.35,[158,202,225]],[.7,[49,130,189]],[1,[8,48,107]]]};
- function color(value,palette='multi',maximum=MAX_MULTIPLIER){
-  const ramp=ramps[palette]||stops;
-  const position=ramps[palette]?(maximum>0?Math.log1p(Math.max(0,value))/Math.log1p(maximum):0):value;
+ const paletteDefaults=Object.freeze({warmStart:'#fff080',warmMax:'#ff2e1f',coolStart:'#ebf9ff',coolMax:'#1499ff',opacityZero:.6,opacityStart:.3,opacity50:.5,opacity75:.6,opacityMax:.9,baselineFactor:1,labelMinRatio:.3,labelBase:'#fef371',labelMix:.5,labelStrokeRatio:.35});
+ let paletteConfig={...paletteDefaults};
+ const rgbCache=new Map(),validHex=value=>typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);
+ function rgb(value){if(!rgbCache.has(value)){rgbCache.set(value,value.slice(1).match(/../g).map(v=>parseInt(v,16)));if(rgbCache.size>256)rgbCache.delete(rgbCache.keys().next().value);}return rgbCache.get(value);}
+ function configurePalette(value){let changed=false;for(const key of Object.keys(paletteDefaults)){
+  const raw=value?.[key],next=typeof paletteDefaults[key]==='number'?typeof raw==='number'&&Number.isFinite(raw)?Math.max(0,Math.min(1,raw)):undefined:validHex(raw)?raw.toLowerCase():undefined;
+  if(next!==undefined&&paletteConfig[key]!==next){paletteConfig[key]=next;changed=true;}
+ }return changed;}
+ const paletteSettings=()=>({...paletteConfig});
+ const rangePosition=(value,maximum)=>value<=1||maximum<=1?0:Math.max(0,Math.min(1,Math.log(value)/Math.log(maximum)));
+ const opacityCurves=new Map();
+ function opacityCurve(maximum,configuration=paletteConfig){
+  maximum=Number.isFinite(maximum)?Math.max(0,maximum):0;
+  const values=['opacityZero','opacityStart','opacity50','opacity75','opacityMax'].map(key=>typeof configuration?.[key]==='number'&&Number.isFinite(configuration[key])?Math.max(0,Math.min(1,configuration[key])):paletteDefaults[key]);
+  const key=maximum+'|'+values.join(',');if(opacityCurves.has(key))return opacityCurves.get(key);
+  const points=[[0,values[0]],[1,values[1]]];
+  for(const [x,y]of [[maximum*.5,values[2]],[maximum*.75,values[3]],[maximum,values[4]]])if(!points.some(p=>Math.abs(p[0]-x)<=1e-10*Math.max(1,x)))points.push([x,y]);
+  points.sort((a,b)=>a[0]-b[0]);for(const point of points)Object.freeze(point);Object.freeze(points);
+  const slopes=points.slice(1).map((p,i)=>(p[1]-points[i][1])/(p[0]-points[i][0]));
+  const curve=value=>{if(!(value>0))return points[0][1];for(let i=1;i<points.length;i++)if(value<=points[i][0])return Math.max(0,Math.min(1,points[i-1][1]+(value-points[i-1][0])*slopes[i-1]));return points.at(-1)[1];};curve.points=points;
+  if(opacityCurves.size>=32)opacityCurves.delete(opacityCurves.keys().next().value);opacityCurves.set(key,curve);return curve;
+ }
+ const paletteOpacity=(value,maximum,configuration=paletteConfig)=>opacityCurve(maximum,configuration)(value);
+ function labelSize(scale,base=12,configuration=paletteConfig){const ratio=typeof configuration?.labelMinRatio==='number'?Math.max(0,Math.min(1,configuration.labelMinRatio)):paletteDefaults.labelMinRatio;return Math.max(base,30*scale*ratio);}
+ function labelStrokeWidth(size,configuration=paletteConfig){const ratio=typeof configuration?.labelStrokeRatio==='number'&&Number.isFinite(configuration.labelStrokeRatio)?Math.max(0,Math.min(1,configuration.labelStrokeRatio)):paletteDefaults.labelStrokeRatio;return Math.max(3,size*ratio);}
+ function heatStyle(configuration=paletteConfig){const {labelMinRatio,labelBase,labelMix,labelStrokeRatio,...heat}=configuration;return heat;}
+ function color(value,palette='multi',maximum=MAX_MULTIPLIER,configuration=paletteConfig){
+  if(palette==='warm'||palette==='cool'){
+   const pick=suffix=>{const key=palette+suffix;return rgb(validHex(configuration?.[key])?configuration[key]:paletteDefaults[key]);};
+   const start=pick('Start'),end=pick('Max'),t=value<=1?Math.max(0,value):rangePosition(value,maximum);
+   const a=value<=1?[54,211,125]:start,b=value<=1?start:end;
+   return '#'+a.map((v,k)=>Math.round(v+(b[k]-v)*t).toString(16).padStart(2,'0')).join('');
+  }
+  const ramp=stops,position=value;
   let i=1;while(i<ramp.length-1&&position>ramp[i][0])i++;
-  const [lo,a]=ramp[i-1],[hi,b]=ramp[i],fraction=ramps[palette]?(position-lo)/(hi-lo):(Math.log1p(position)-Math.log1p(lo))/(Math.log1p(hi)-Math.log1p(lo));
+  const [lo,a]=ramp[i-1],[hi,b]=ramp[i],fraction=(Math.log1p(position)-Math.log1p(lo))/(Math.log1p(hi)-Math.log1p(lo));
   const t=Math.max(0,Math.min(1,fraction));
   return '#'+a.map((v,k)=>Math.round(v+(b[k]-v)*t).toString(16).padStart(2,'0')).join('');
+ }
+ function labelColor(value,palette,maximum,enabled=true,configuration=paletteConfig){
+  const base=validHex(configuration?.labelBase)?configuration.labelBase.toLowerCase():paletteDefaults.labelBase;
+  if(!enabled)return base;
+  const mix=typeof configuration?.labelMix==='number'&&Number.isFinite(configuration.labelMix)?Math.max(0,Math.min(1,configuration.labelMix)):paletteDefaults.labelMix;
+  if(!mix)return base;const target=color(value,palette,maximum,configuration);if(mix===1)return target;
+  const a=rgb(base),b=rgb(target);return '#'+a.map((v,k)=>Math.round(v+(b[k]-v)*mix).toString(16).padStart(2,'0')).join('');
  }
  function legend(palette,maximum){return palette==='multi'?stops.map(s=>s[0]):Array.from({length:8},(_,i)=>Math.expm1(Math.log1p(Math.max(0,maximum))*i/7));}
  const format=value=>value===0?'0':value>=10?value.toFixed(1):value.toFixed(2).replace(/\.?0+$/,'');
  function settings(value={}){return {enabled:value.enabled!==false,showBaselineValues:value.showBaselineValues===true,showBlocked:value.showBlocked!==false,opacity:typeof value.opacity==='number'&&Number.isFinite(value.opacity)?Math.max(0,Math.min(1,value.opacity)):.55,filter:FILTERS.includes(value.filter)?value.filter:'all',palette:PALETTES.includes(value.palette)?value.palette:'warm',minMultiplier:typeof value.minMultiplier==='number'&&Number.isFinite(value.minMultiplier)?Math.max(0,Math.min(MAX_MULTIPLIER,value.minMultiplier)):0};}
- function clearCache(){cache.clear();randomCache.clear();exactCache.clear();I.clearCache();}
- const api={compute,computeRandom,decorate,exactFraction,meetsThreshold,clearCache,matches,alpha,color,legend,format,settings,FILTERS,PALETTES,PALETTE_NAMES,MAX_MULTIPLIER};
+ function clearCache(){cache.clear();randomCache.clear();I.clearCache();}
+ const api={compute,computeRandom,decorate,exactFraction,meetsThreshold,clearCache,matches,alpha,color,labelColor,paletteDefaults,paletteSettings,configurePalette,paletteOpacity,opacityCurve,labelSize,labelStrokeWidth,heatStyle,legend,format,settings,FILTERS,PALETTES,PALETTE_NAMES,MAX_MULTIPLIER};
  if(typeof module!=='undefined')module.exports=api;root.CrateProbability=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

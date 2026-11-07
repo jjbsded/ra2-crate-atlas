@@ -5,27 +5,38 @@
  const local=url=>/\/live-results\//.test(new URL(url,document.baseURI).pathname),canonical=url=>new URL(url,document.baseURI).href;
  function changed(){root.dispatchEvent(new Event('crate-live-busy'));}
  function cancel(){if(!pending)return;worker?.terminate();worker=null;const job=pending;pending=null;changed();job.reject(new DOMException('已取消 / Cancelled','AbortError'));}
- function compute(record,minerals,onProgress){
-  if(record.states.has(minerals))return Promise.resolve(record.states.get(minerals));
+ function compute(record,minerals,onProgress,plan=null,force=false){
+  const stateKey=plan?JSON.stringify(plan):String(minerals);
+  if(!force&&record.states.has(stateKey))return Promise.resolve(record.states.get(stateKey));
   if(pending)return Promise.reject(Error('已有计算进行中 / An analysis is already running'));
   if(!worker){
    worker=new Worker(new URL('live/worker.js?v='+root.CrateWebConfig.liveVersion,document.baseURI));
    worker.onerror=()=>{const job=pending;pending=null;worker?.terminate();worker=null;changed();job?.reject(Error('浏览器计算线程异常 / Analysis worker failed'));};
    worker.onmessage=({data})=>{
     const job=pending;if(!job||data.id!==job.id)return;
-    if(data.progress!==undefined){job.onProgress?.(data);return;}
+    if(data.progress!==undefined){job.onProgress?.({...data,message:root.CrateI18n?.message(data.message)||data.message});return;}
     pending=null;changed();if(data.error){root.dispatchEvent(new CustomEvent('crate-live-error',{detail:data.errorDetails||{message:data.error}}));job.reject(Error(data.error));return;}
-    const path=`live-results/${data.report.metadata.sourceSha256}-${job.record.version}/${job.minerals?'ore':'clear'}/result.json`;
+    const path=`live-results/${data.report.metadata.sourceSha256}-${job.record.version}/${job.plan?'simulation-'+job.id:job.minerals?'ore':'clear'}/result.json`;
     data.report.precomputed={search:'search.bin'};
-    job.record.states.set(job.minerals,path);records.set(canonical(path),job.record);results.set(canonical(path),data);job.resolve(path);
+    job.record.source=data.source;delete data.source;job.record.states.set(job.stateKey,path);records.set(canonical(path),job.record);results.set(canonical(path),data);if(!job.plan)job.record.originalUrl=canonical(path);
+    const kept=[...results.keys()].filter(url=>records.get(url)===job.record&&url!==job.record.originalUrl);
+    while(kept.length>8){const old=kept.shift();results.delete(old);records.delete(old);for(const[k,v]of job.record.states)if(canonical(v)===old)job.record.states.delete(k);}
+    job.resolve(path);
    };
   }
-  return new Promise((resolve,reject)=>{const id=++serial;pending={id,record,minerals,resolve,reject,onProgress};changed();const copy=record.bytes.slice();worker.postMessage({id,bytes:copy.buffer,version:record.version,minerals,filename:record.filename},[copy.buffer]);});
+  return new Promise((resolve,reject)=>{const id=++serial;pending={id,record,minerals,resolve,reject,onProgress,plan,stateKey};changed();const copy=record.bytes?.slice();worker.postMessage({id,bytes:copy?.buffer,version:record.version,minerals,filename:record.filename,source:record.source,plan,force},copy?[copy.buffer]:[]);});
+ }
+ async function simulationSource(url){const known=records.get(canonical(url));if(known?.source)return known.source;const report=await original.readJSON(url),m=report.metadata;
+  const [recipe,stock]=await Promise.all([original.readJSON(new URL('live/simulation/'+m.sourceSha256+'-'+m.version+'.json.gz',document.baseURI).href),original.readJSON(new URL('live/stock-'+m.version+'.json.gz',document.baseURI).href)]);
+  const rules={...stock.rules};for(const[section,patch]of Object.entries(recipe.rules))rules[section]={...stock.rules[section],...patch};
+  const source={schema:1,sourceSha256:m.sourceSha256,version:m.version,map:{...recipe.map,WAYPOINTS:recipe.map.WAYPOINTS||m.waypoints||{}},rules,art:stock.art,cells:report.cells};records.set(canonical(url),{source,version:m.version,filename:m.filename,states:new Map()});return source;
  }
  Object.assign(base,{
   live:true,preload:false,
+  simulationSource,
+  simulate:async(url,plan,onProgress,force=false)=>{await simulationSource(url);return compute(records.get(canonical(url)),true,onProgress,plan,force);},
   terrain3dPatch:(context,options)=>context.data.metadata.liveComputed?root.CrateLiveArtwork.patch(context.data,context.cell,options):original.terrain3dPatch(context,options),
-  upload:async(file,version,minerals,onProgress)=>{if(!/\.(map|yrm|mpr)$/i.test(file.name)||file.size>16*1024*1024)throw Error('请选择 16 MB 以内的 .map/.yrm/.mpr / Choose a text map under 16 MB');if(!['ra2','yr'].includes(version))version=/\.mpr$/i.test(file.name)?'ra2':'yr';const record={bytes:new Uint8Array(await file.arrayBuffer()),filename:file.name,version,states:new Map()};const result=await compute(record,minerals,onProgress);
+  upload:async(file,version,minerals,onProgress)=>{cancel();if(!/\.(map|yrm|mpr)$/i.test(file.name)||file.size>16*1024*1024)throw Error('请选择 16 MB 以内的 .map/.yrm/.mpr / Choose a text map under 16 MB');if(!['ra2','yr'].includes(version))version=/\.mpr$/i.test(file.name)?'ra2':'yr';const record={bytes:new Uint8Array(await file.arrayBuffer()),filename:file.name,version,states:new Map()};const result=await compute(record,minerals,onProgress);
    // Keep only this custom map's paired layouts. The viewer retains its active
    // prepared result during a failure; successful new imports release old data.
    for(const[url,value]of records)if(value!==record){records.delete(url);results.delete(url);}return result;},

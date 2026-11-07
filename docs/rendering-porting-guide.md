@@ -197,6 +197,8 @@ parts = painter.parts(display_obj)
 
 需要同步 `toy_original.py`、`toy_build_inputs.py`、`toy_live_materials.py`、`toy_live_objects.py`，以及 `toy/terrain-variants.js`、`toy-live/parser.js`、`toy-live/objects.js`、`toy-live/artwork.js` 和 `toy-live/mixed-painter.js` 的对应调用。地形元数据保存 `terrainVariants`；对象签名保留 SCHP 的 `UNLOAD`、`ISSIMPLEDEPLOYER`、`UNLOADINGCLASS` 和实际强度行，模板键则独立于所属色和强度行。
 
+后续源码另增加 `toy_object_components.py` 与 `toy-live/components.js`，支持地图内 rules 的常规底座／炮塔组合。它们仅用于 Toy 的素材导出和浏览器组装，完整版仍使用 `ObjectPainter`。接入顺序、缓存和参数边界见 [炮塔组合说明](toy-turret-components.md)；这项增量尚未包含在 v0.6.0 发布包中。
+
 更新构建指纹及脚本 URL 版本，替换旧图集/索引。渲染版本 19 的 Toy ZIP 为 **47,648,424 字节**，比上一版增加 9,769 字节；82 页对象图集仍逐字节相同，新增部署状态复用了已有 SCHD 像素。这是该次成品测量，每次重建仍须检查 50,000,000 字节上限。
 
 ## 9. 移植完成后的验收

@@ -1,5 +1,13 @@
 const assert=require('node:assert/strict');
 const {height,decorationSurface,bridgeFold,viewHalfSize,relationships,riskCategory,description,probabilityCells}=require('./terrain3d.js');
+{
+ const D=require('./probability-display.js'),cells=[{x:1,y:1,land:0,terms:[[0,1]]},{x:2,y:1,land:0,terms:[[0,2]]}],display=D.map({cells,probability:{exact:{denominator:'100',coefficients:[{n:1,r:0,numerator:'1'}]}}}),lookup=new Map(cells.map(c=>[`${c.x},${c.y}`,c]));
+ for(const factor of [0,.5,1]){
+  const entries=probabilityCells(cells.map(c=>({...c})),{display,lookup,options:{filter:'all',opacity:35,paletteColors:{baselineFactor:factor}}});
+  assert(Math.abs(entries[0].alpha-D.alpha(.65,true,factor))<1e-12);assert.equal(entries[1].alpha,.65);
+ }
+ console.log('PASS: 3D receives baseline factor; 0/50/100 affect only exact 1x.');
+}
 const low={x:99,y:105,level:2,corners:[0,0,0,0],land:7,postLand:3,marked:true,higher:[[98,106,6]],affected:[]};
 const high={x:98,y:106,level:6,corners:[0,0,0,0],land:3,higher:[],affected:[[99,105,2]]};
 const lookup=new Map([['99,105',low],['98,106',high]]),original=JSON.stringify([...lookup]);
@@ -23,11 +31,11 @@ assert.deepEqual(relationships(low,lookup),{higher:[high],affected:[]});
 assert.deepEqual(relationships(high,lookup),{higher:[],affected:[low]});
 assert.deepEqual(relationships(low,new Map()),{higher:[],affected:[]});
 for(const [u,v,expected] of [[0,0,2],[1,0,3],[1,1,3],[0,1,2],[.5,.5,2.5]])assert.equal(height({...low,corners:[0,1,1,0]},u,v),expected);
-assert.match(description(low,{predictionEnabled:true}),/Rough/);
-assert.match(description(low,{predictionEnabled:true},true),/Rough → Rock/);
-assert.match(description(low,{previewOnly:true,predictionEnabled:false}),/未验证/);
-assert.match(description(low,{predictionEnabled:false}),/未启用/);
-assert.match(description(high,{predictionEnabled:true}),/当前地面已禁行/);
+assert.match(description(low,{predictionEnabled:true}),/放箱后无法通行/);
+assert.match(description(low,{predictionEnabled:true},true),/放箱后无法通行/);
+assert.equal(description(low,{previewOnly:true,predictionEnabled:false}),'外观预览');
+assert.equal(description(low,{predictionEnabled:false}),'粗糙地面');
+assert.equal(description(high,{predictionEnabled:true}),'不可通行地面');
 const blocked={...low,marked:false,potentialMarked:true,probability:0,occupied:true};
 const shadowed={...low,marked:false,probability:0,primary:false,clearance:{supported:false}};
 assert.equal(riskCategory(low),'current');
@@ -36,9 +44,9 @@ assert.equal(riskCategory(shadowed),'zero');
 assert.equal(riskCategory({...low,probability:0}),'current','exact risk flags take precedence over rounded probability');
 assert.equal(riskCategory({...shadowed,probability:1e-4}),'other','unclassified Rough must not be claimed to have zero probability');
 assert.equal(riskCategory(high),null);
-assert.match(description(blocked,{predictionEnabled:true}),/当前落箱概率为 0；清空对象后可随机落箱/);
-assert.match(description({...blocked,land:3},{predictionEnabled:true}),/清空对象后可随机落箱/,'clearance risks must also describe cells whose current overlay already makes them Rock');
-assert.match(description(shadowed,{predictionEnabled:true}),/高度投影判定未选中此低格；清空对象后仍无随机落箱路径/);
+assert.match(description(blocked,{predictionEnabled:true}),/清空对象后放箱将无法通行/);
+assert.match(description({...blocked,land:3},{predictionEnabled:true}),/清空对象后放箱将无法通行/,'clearance risks remain distinct when the current overlay makes the cell Rock');
+assert.equal(description(shadowed,{predictionEnabled:true}),'粗糙地面');
 assert.equal(JSON.stringify([...lookup]),original,'inspection must not mutate map cells');
 for(const radius of [4,6,8,10,15])for(const [w,h]of [[320,380],[736,410],[1180,460]]){
  const half=viewHalfSize(radius,1,w,h);assert.ok(Number.isFinite(half)&&half>0);
@@ -70,6 +78,8 @@ if(process.argv[2]){
   assert.equal(e.label,display.showLabel(source,false)?value.multiplier.toFixed(1)+'×':null);
  }
  const water=probabilityCells(patch,{...context,options:{...options,filter:'water',threshold:2}});
+ const baseSource=cells.find(c=>display.get(c).isBaseline);assert(baseSource);
+ for(const factor of [0,.5,1]){const [entry]=probabilityCells([{...baseSource}],{...context,options:{...options,paletteColors:{baselineFactor:factor}}});assert.equal(entry.alpha,display.cellAlpha(baseSource,{opacity:.55,baselineFactor:factor}));}
  assert.ok(water.every(e=>e.cell.land===2&&display.meetsThreshold(lookup.get(`${e.cell.x},${e.cell.y}`),2)));
  const allLabels=probabilityCells(patch,{...context,options:{...options,baselineValues:true,opacity:100}});
  assert.ok(allLabels.every(e=>e.label&&e.alpha===0));

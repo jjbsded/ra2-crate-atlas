@@ -2,6 +2,8 @@
 
 # Architecture and maintenance boundaries
 
+Current probability model: **up to 1000 finite retries integrated with exact mathematical weights, reporting final creation success or failure**. Candidate searches remain incremental. See [the model contract](docs/probability-model.md).
+
 Crate Atlas combines a local Python HTTP service with plain JavaScript pages. There is no frontend build step. Launchers, existing result URLs and region-storage keys remain stable; modules are separated by responsibility.
 
 ## Analysis and results
@@ -28,9 +30,9 @@ Crate Atlas combines a local Python HTTP service with plain JavaScript pages. Th
 | `original_resources.py`, `resource_context/` | Stock validation, low-level directory reads and provenance |
 | `i18n_settings.py` | Windows display-language detection and atomic installation-local language preference |
 
-`map_jobs` and `map_results` load only the standard library and lightweight resource entry points at import time. Ore/tree switching, report reads and 2D refresh must not import the entire 3D renderer just for shared utilities. Dependencies flow from orchestration to parser, resource and format layers. Native-tool validation / compilation occurs when entering probability calculation. `parse_map()` works without a compiler, Pillow, NumPy or the solver.
+`map_jobs` and `map_results` load only the standard library and lightweight resource entry points at import time. Ore/tree switching, report reads and 2D refresh must not import the entire 3D renderer just for shared utilities. Dependencies flow from orchestration to parser, resource and format layers. Native-tool validation / compilation occurs when entering probability calculation. `parse_map()` works without a compiler, Pillow, NumPy or the solver. It can read incremental thread options without loading numerical dependencies; those are imported when a probability store is created.
 
-Stock and directory resources share cell parsing and sprite decoding. `realmap.py` retains old function imports for compatibility. New code should import the owning module directly. The dependency-cycle check includes function-local imports, excluding only the explicit delayed compatibility forwarders `realmap_mod.preview` and `realmap_render.refresh_result`. Business modules must remain acyclic. Shared sprite functions belong in `realmap_sprites`, not reverse imports of the renderer.
+Stock and directory resources share cell parsing and sprite decoding. `realmap.py` retains old function imports for compatibility. New code should import the owning module directly. The dependency-cycle check includes function-local imports, excluding the explicit delayed compatibility forwarders `realmap_mod.preview` and `realmap_render.refresh_result`, plus simulation application’s delayed reuse of the parser’s pure `is_tree` predicate. Business modules must remain acyclic. Shared sprite functions belong in `realmap_sprites`, not reverse imports of the renderer.
 
 The job manager retains at most 64 polling records, never evicting active / queued jobs. Eviction does not delete disk results. One analysis runs at a time. A foreground request can await an already-running matching preload; incompatible requests return busy. Identical in-flight layouts reuse jobs; readers get locked state snapshots.
 
@@ -85,7 +87,7 @@ Region route labels retain source-specific distance/sea states, while coordinate
 
 `build-toy.py` computes exact reports at build time and preserves integer fractions, geometry and origins. By default, `toy_artwork.py` adds semantic object descriptors and `toy/terrain-artwork.js` assembles shared colors, simple textures and symbols per cell. Spatial buckets bound drawing work; the existing view cache avoids repainting terrain while editing regions. `map-artwork.js` gives original images and procedural artwork one coordinate contract across thumbnails, minimaps, origin restoration and exports. Optional raster mode still deduplicates WebP images. `serve-toy.py` exposes only static files under a subpath; browser tests forbid analysis API requests. The source-only Toy launcher is excluded from ordinary Windows portable packages. See [TOY.en.md](TOY.en.md).
 
-Static transport is independent of the analysis model: `toy_codec.py` emits shared cell columns, layout differences, finite-retry arithmetic recipes and origin dictionaries. `toy/static-codec.js` restores the original report schema in a Worker or the direct fallback. BigInt restores exact integers; nearest-even IEEE 754 rounding restores floating-point probabilities. Shared rendering and statistics interfaces stay unchanged. Content hashes deduplicate assets and the builder enforces a ZIP budget; only artwork is reduced lossily. Python and JavaScript verification independently compare every restored cell and original search byte.
+Static transport is independent of the analysis model: `toy_codec.py` emits shared cell columns, layout differences, fixed candidate-coefficient recipes and origin dictionaries. `toy/static-codec.js` restores the original report schema in a Worker or the direct fallback. BigInt restores exact integers; nearest-even IEEE 754 rounding restores floating-point probabilities. Shared rendering and statistics interfaces stay unchanged. Content hashes deduplicate assets and the builder enforces a ZIP budget; only artwork is reduced lossily. Python and JavaScript verification independently compare every restored cell and original search byte.
 
 `region_navigation.py` reads validated rules and emits a routing mask in original report cell order. The desktop API serves it at `/api/maps/region-navigation`; Toy packages the same mask at build time without changing the probability fingerprint. Shared async `region-auto.js` uses separate deck/ground nodes, matching ramp edges, diagonals without corner cutting, and nondominated path/continuous-crossing states. It yields and supports cancellation; map changes, edits or cross-tab updates discard stale jobs. Region documents retain parameters and a once-only marker, with backward-compatible storage and one-step undo. Probability labels are independent of fill raster caches; exports freeze their text, color, size and center.
 
@@ -112,3 +114,5 @@ Static transport is independent of the analysis model: `toy_codec.py` emits shar
 | `verify-cliff-demo.py` | Six asymmetric high-cell offsets, Rough transition, source and texture completeness, entry links |
 
 The parser, resource, details and export splits preserve the existing launcher, result format, probability core and region-storage keys.
+
+The module-boundary check records five deferred browser relationships: simulation factories read artwork, region, resource and transfer APIs after all scripts load, and the Buff expectation UI reads the viewer when a task starts. Other provider ordering remains strict.

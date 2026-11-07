@@ -1,3 +1,5 @@
+> 范围说明：当前工具已恢复有限重抽，并用数学权重合并；实现范围与约定以 [probability-model.md](probability-model.md) 为准。
+
 [English](random-crate-generation.en.md) | **简体中文**
 
 # 红警 2 随机工具箱的坐标生成与失败处理

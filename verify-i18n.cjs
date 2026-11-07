@@ -28,7 +28,7 @@ assert.equal(I.officialLabel({name:'冰天雪地',modeName:'作战',version:'yr'
 assert.equal(I.mapName({displayName:'我的地图'}),'我的地图');
 for(const warning of [
  '外部 INI 未找到或无法读取：testsw.ini；仅使用成功加载的定义。',
- '部分加载：新增 A12DROP 的 Image=TYSJ 缺少原版 art 定义，可能依赖外部模组资产。已保留可读取的地形和对象；缺失规则可能影响全图的附近搜索及重抽，未计算概率或禁行风险。'
+ '部分加载：新增 A12DROP 的 Image=TYSJ 缺少原版 art 定义，可能依赖外部模组资产。已保留可读取的地形和对象；缺失规则可能影响全图的附近搜索及放置判定，未计算概率或禁行风险。'
 ])assert.equal(/[\u3400-\u9fff]/u.test(I.message(warning)),false,I.message(warning));
 const R=require('./region-statistics.js');
 assert.equal(R.displayName({id:'r2',name:'区域 2'}),'Region 2');

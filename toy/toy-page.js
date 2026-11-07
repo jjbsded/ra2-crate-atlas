@@ -6,10 +6,8 @@
  for(const link of document.querySelectorAll('a[data-doc-en]')){link.href='about.html';link.removeAttribute('data-doc-en');}
  const nav=document.querySelector('.page-links'),help=document.createElement('a');help.href='about.html';help.textContent=t('网页版说明');nav?.prepend(help);
  if(maps){
-  document.title=t(original?'官方地图概率图集 · 原版贴图轻量版（非完整版）':'官方地图概率图集 · 低清简化版（非完整版）')+' · Crate Atlas';
-  document.querySelector('.eyebrow').textContent='CRATE ATLAS / WEB EDITION';
-  document.querySelector('h1').textContent=t(original?'官方地图概率图集 · 原版贴图轻量版':'官方地图概率图集 · 低清简化版');
-  document.querySelector('.app-header p').textContent=t(original?'轻量网页版，非完整版 · 原版像素素材按地图加载；模型内精确概率与初始静态布局':'低清简化版，非完整版 · 底图降低清晰度，保留模型内精确概率与初始静态布局');
+  document.title=document.querySelector('h1').textContent=t('红警2地图箱子概率计算器');
+  document.querySelector('.app-header .eyebrow').hidden=true;document.querySelector('.app-header p').hidden=true;
   $('version').value='yr';
   for(const selector of ['#dropzone .file-label','#dropzone>div','#dropzone>label','#resourcesOpen','#resourceSummary'])document.querySelector(selector)?.setAttribute('hidden','');
   $('terrain3dRelief').closest('label').hidden=true;
@@ -29,12 +27,12 @@
   }
   document.querySelector('.terrain3d-header').after($('terrain3dError'));
   $('reanalyzeResources').parentElement.hidden=true;
-  $('officialMapAnalyze').textContent=t('打开预计算地图');
+  $('officialMapAnalyze').textContent=t('打开地图');
   document.querySelector('.official-maps-note').textContent=t('此列表仅含网页版已预计算的地图，并非完整官方地图目录。');
   CrateMapPlatform.catalog().then(data=>{
    if(data.scope?.completeModes&&data.scope.modes.length===2&&data.scope.modes.includes('standard')&&data.scope.modes.includes('teamgame'))document.querySelector('.official-maps-note').textContent=t('本版收录全部作战和小队联盟官方地图；其他模式未收录。');
    if(data.artwork?.compact){
-    const note=document.createElement('p');note.className='hint';note.id='toyArtworkNote';
+    const note=document.createElement('p');note.className='hint';note.id='toyArtworkNote';note.hidden=true;
     note.textContent=t(data.artwork.style==='original'?'原版素材逐格拼接，无损共享图集按地图加载；小地图、3D、区域裁图和图片导出使用同一套素材。':data.artwork.style==='tiles'?'逐格简绘版：保留高度与坡形，共用简化地表和对象符号；概率、来源百分比和区域统计精度不变。':'50MB 轻量版：底图清晰度已降低，概率、来源百分比和区域统计精度不变。');
     document.querySelector('.official-maps-note').after(note);
     if(data.artwork.style==='tiles'){
@@ -49,11 +47,10 @@
    }
   }).catch(()=>{});
   $('mapInteractionHint').textContent=t('单指拖动平移，轻点选格；双指缩放。编辑区域时可切换移动／画笔，双指始终移动缩放。');
-  document.querySelector('.view-controls').nextElementSibling.textContent=t('矿石/树木开关读取两套预计算布局，切换后来源、区域统计和导出同步更新。');
   const toolbar=document.querySelector('.canvas-tools'),settings=document.createElement('details'),summary=document.createElement('summary');settings.id='toyDisplaySettings';summary.textContent=t('图层与显示设置');settings.append(summary);settings.open=!matchMedia('(max-width:760px), (pointer: coarse) and (max-width:1100px), (orientation:landscape) and (max-height:600px) and (max-width:1200px)').matches;
   const children=[...$('workspace').children],start=children.indexOf($('probabilityNote')),end=children.indexOf(toolbar);
   toolbar.before(settings);for(const child of children.slice(start,end))settings.append(child);
-  const navigator=document.createElement('button');navigator.type='button';navigator.id='webNavigator';navigator.textContent=t('地图导航');navigator.onclick=()=>{$('minimap').click();};toolbar.insertBefore(navigator,$('fullscreen'));
+  const navigator=document.createElement('button');navigator.type='button';navigator.id='webNavigator';navigator.textContent=t('地图导航');navigator.onclick=()=>{$('minimap').click();};$('fullscreen').before(navigator);
   $('minimap').addEventListener('change',()=>navigator.setAttribute('aria-pressed',String($('minimap').checked)));
   if(matchMedia('(pointer: coarse)').matches)$('minimap').checked=false;
   navigator.setAttribute('aria-pressed',String($('minimap').checked));
@@ -66,6 +63,6 @@
   document.querySelector('.page-switch strong').textContent=t('官方地图概率图集');
   document.querySelector('.page-switch').setAttribute('aria-label',t('官方地图概率图集'));
  }
- document.querySelector('footer').textContent=t(original?'原版贴图轻量网页版，非完整版。只读取预计算地图，3D 使用原版贴图与简化几何；自定义地图、Mod、精细 3D 和视频导出请使用本地完整版。':'低清简化版，非完整版。只读取预计算地图，支持简化 3D；自定义地图、Mod、原贴图精细 3D 和视频导出请使用本地完整版。');
+ document.querySelector('footer').hidden=true;
 })();
 

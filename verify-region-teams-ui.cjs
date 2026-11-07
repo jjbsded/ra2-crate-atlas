@@ -16,7 +16,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
   assert.deepEqual(initial.appliedTeams,{});assert.deepEqual(initial.autoOptions.teams,{});
   assert.equal(await page.locator('.language-control span[aria-hidden=true]').textContent(),'🌐');
   await page.evaluate(()=>{window.qaPlayers=[];window.qaLabels=[];const original=CratePlayerStarts.draw;CratePlayerStarts.draw=(ctx,state,view,options)=>{qaPlayers.push({canvas:ctx.canvas.id||'thumbnail',styles:options?.regionStyles||null});return original(ctx,state,view,options);};const stroke=CanvasRenderingContext2D.prototype.strokeText;CanvasRenderingContext2D.prototype.strokeText=function(text,...args){if(this.canvas.id==='map'&&(/%$|:$/.test(String(text)))){const m=this.measureText(text);qaLabels.push({text,stroke:this.strokeStyle,width:this.lineWidth,size:parseFloat(this.font.split(' ')[1]),centerY:args[1]-(m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2});}return stroke.call(this,text,...args);};});
-  await page.locator('#regionToggle').click();await page.locator('#regionAutoSettings').evaluate(e=>e.open=true);
+  await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();await page.locator('#regionAutoSettings').evaluate(e=>e.open=true);
   assert.equal(await page.locator('#regionAutoTeams select').count(),starts.length);
   for(const p of starts)assert.equal(await page.locator('#regionTeam'+p.number).inputValue(),'neutral');
   const one=page.locator('#regionTeam'+starts[0].number),two=page.locator('#regionTeam'+starts[1].number),empty=page.locator('#regionTeam'+starts[2].number);
@@ -32,7 +32,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
   await page.evaluate(()=>{document.getElementById('minimap').checked=true;qaPlayers=[];CrateMapViewer.draw();});
   const marks=await page.evaluate(()=>qaPlayers.find(p=>p.canvas==='map')?.styles);assert.equal(marks[starts[0].number].team,'A');assert.equal(marks[starts[0].number].color,marks[starts[1].number].color);assert.equal(marks[starts[2].number].empty,true);
   assert.ok(await page.evaluate(()=>qaPlayers.filter(p=>p.canvas==='map'&&p.styles).length>=2),'Map and minimap use the same team state');
-  const labels=await page.evaluate(()=>{qaLabels=[];CrateMapViewer.draw();return qaLabels;});assert.ok(labels.some(l=>l.text.includes(locale==='en-US'?'Team A:':'小队A:')));
+  const labels=await page.evaluate(()=>{qaLabels=[];CrateMapViewer.draw();return qaLabels;});assert.ok(labels.some(l=>l.text.includes(locale==='en-US'?'Team A:':'小队 A:')));
   const firstName=labels.findIndex(l=>l.text.endsWith(':')),nameLabel=labels[firstName],probabilityLabel=labels[firstName+2];assert.match(probabilityLabel.text,/%$/);assert.ok(Math.abs(nameLabel.size/probabilityLabel.size-.7)<1e-4,'Region names use 70% of probability size');assert.ok(Math.abs(nameLabel.centerY-probabilityLabel.centerY)<1e-6,'Actual glyph bounds are vertically centered');
   await page.locator('#regionName').fill('Alpha');await page.locator('#regionName').blur();
   for(const [color,outer,inner]of [['#ffff00','#ffffff','#050a0b'],['#121b4c','#ffffff','#050a0b']]){
@@ -45,9 +45,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
   await page.evaluate(()=>{qaPlayers=[];});const download=page.waitForEvent('download');await page.locator('#mapImageExport').click();await(await download).saveAs(path.join(out,name+'-map.jpg'));
   assert.ok(await page.evaluate(()=>qaPlayers.some(p=>p.canvas==='thumbnail'&&p.styles&&Object.values(p.styles).some(p=>p.empty))),'Export retains the inactive start marker');
   const saved=await read();await page.locator('#mineralToggle').click();await page.waitForFunction(()=>!CrateMapViewer.state.busy&&CrateMapViewer.state.data.metadata.treesEnabled===false,null,{timeout:120000});assert.deepEqual((await read()).appliedTeams,saved.appliedTeams);assert.deepEqual((await read()).regions,saved.regions);
-  await page.locator('#regionToggle').click();assert.ok(await page.evaluate(()=>{qaPlayers=[];CrateMapViewer.draw();return qaPlayers.filter(p=>p.canvas==='map').every(p=>p.styles===null);}),'Normal view keeps original player marks');
+  await page.locator('#viewMode').click();assert.ok(await page.evaluate(()=>{qaPlayers=[];CrateMapViewer.draw();return qaPlayers.filter(p=>p.canvas==='map').every(p=>p.styles===null);}),'Normal view keeps original player marks');
   await page.reload();await ready();await page.waitForTimeout(400);assert.deepEqual((await read()).regions,saved.regions);assert.deepEqual((await read()).appliedTeams,saved.appliedTeams);
-  if(mobile){await page.locator('#regionToggle').click();await page.setViewportSize({width:844,height:390});await page.locator('#regionAutoSettings').evaluate(e=>e.open=true);await page.locator('#regionAutoSettings').screenshot({path:path.join(out,'mobile-landscape-settings.png')});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
+  if(mobile){await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();await page.setViewportSize({width:844,height:390});await page.locator('#regionAutoSettings').evaluate(e=>e.open=true);await page.locator('#regionAutoSettings').screenshot({path:path.join(out,'mobile-landscape-settings.png')});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
   assert.deepEqual(errors,[]);if(name.startsWith('toy'))assert.deepEqual(apis,[]);results.push({name,starts:starts.length,partitionMs:elapsed,groups:after.regions.filter(r=>r.generatedName?.kind==='team').length});await context.close();console.log('PASS team UI',name);
  }}finally{await browser.close();}
  await fs.writeFile(path.join(out,'verification.json'),JSON.stringify(results,null,2));

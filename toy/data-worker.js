@@ -1,6 +1,6 @@
 /* Static data loading stays off the UI thread. No server or external CDN. */
 'use strict';
-importScripts('static-codec.js');
+importScripts('finite-retry.js','static-codec.js');
 const requests=new Map();
 async function read(url,type,signal){
  const response=await fetch(url,{signal,cache:'force-cache'});

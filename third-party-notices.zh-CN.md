@@ -4,6 +4,8 @@
 
 便携包保留 Python 的 `LICENSE.txt`、各 Python 包 `*.dist-info` 下的许可证，并包含应用和 C 扫描器源码。原版游戏档案来自本机原版安装，复制到 `assets/original` 前按固定 SHA-256 校验。
 
+城市气候缺少的七种树木素材（`TREE29–TREE35`）来自本机游戏的 `cncnet.mix`。逐文件和归档哈希见 `assets/urban-trees/provenance.json`；Toy 携带对应静态像素及 `live/urban-trees-provenance.json`。已有原版素材和显式选择的目录资源保持原优先级。
+
 | 组件 | 许可与来源 |
 | --- | --- |
 | Python 3.12 | Python Software Foundation 许可；https://www.python.org/ |

@@ -44,9 +44,8 @@
    $('officialMapSelected').textContent=label(selected);
    $('officialMapAnalyze').disabled=!!source.unsupportedReason;
    $('officialMapDetails').classList.toggle('unavailable',!!source.unsupportedReason);
-   $('officialMapDetails').textContent=precomputed?_t('预计算静态初始布局 · 选择后按需下载，不进行在线分析。'):
-    source.unsupportedReason?_t('暂不能精确分析：')+(_i18n?.message(source.unsupportedReason)||source.unsupportedReason):
-    _t`${source.file} · 将使用${versions[version]}规则分析初始布局。${selected.shared?_t('两版与箱子有关的静态内容相同；预览与 AI 差异不拆分。'):''}`;
+   $('officialMapDetails').textContent=source.unsupportedReason?(_i18n?.message(source.unsupportedReason)||source.unsupportedReason):'';
+   $('officialMapDetails').hidden=!source.unsupportedReason;
   }
   function choose(entry,focus=false){
    const previous=selected&&$('officialMapAnalysisVersion').value;

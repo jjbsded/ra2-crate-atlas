@@ -10,7 +10,9 @@ async function main(){
  const read=createReader({Image:Picture,fetch:async url=>{
   calls.push(url);return {ok:true,json:async()=>data,arrayBuffer:async()=>new ArrayBuffer(4)};
  },createSources:(_data,buffer)=>({bytes:buffer.byteLength})});
- const prepared=read('/output/a/result.json');await settle();
+ let warmed=false;
+ const prepared=read('/output/a/result.json',{onMetadata:(url,value)=>{assert.equal(url,'/output/a/result.json');assert.equal(value,data);assert.equal(images.length,0);warmed=true;}});await settle();
+ assert(warmed,'Native warmup starts before image decoding');
  assert.equal(images.length,2,'ground and object artwork should decode concurrently');
  images[0].resolve();images[1].resolve();const entry=await prepared;
  const one=entry.getSources(),two=entry.getSources();assert.equal(one,two);
@@ -26,6 +28,18 @@ async function main(){
  loader.invalidate();assert.equal(newer.current(),false);
  const cached=loader.request(entry.url,entry);assert.equal(await cached.ready,entry);assert.equal(cached.current(),true);
  console.log('PASS: stale completion guard, abort on replacement, and cached result activation.');
+
+ const upgrades=[],versionReads=[],signal=new AbortController().signal;
+ const upgradeReader=createReader({Image:class{decode(){return Promise.resolve();}},fetch:async url=>{
+  versionReads.push(url);return {ok:true,json:async()=>({...data,probability:{model:url.includes('/new/')?'finite-retry-v2':'legacy'}})};
+ },upgrade:async(url,options)=>{upgrades.push(url);assert.equal(options.signal,signal);return '/new/result.json';}});
+ assert.equal((await upgradeReader('/old/result.json',{signal})).url,'/new/result.json');
+ assert.deepEqual(upgrades,['/old/result.json']);assert.deepEqual(versionReads,['/old/result.json','/new/result.json']);
+ const staleReader=createReader({fetch:async()=>({ok:true,json:async()=>({...data,probability:{model:'legacy'}})}),upgrade:async()=>'/still-old/result.json'});
+ await assert.rejects(staleReader('/old/result.json'),/分析结果需要重新计算/);
+ const stopped=new AbortController(),cancelReader=createReader({fetch:async()=>({ok:true,json:async()=>({...data,probability:{model:'legacy'}})}),upgrade:async()=>{stopped.abort();return '/new/result.json';}});
+ await assert.rejects(cancelReader('/old/result.json',{signal:stopped.signal}),{name:'AbortError'});
+ console.log('PASS: old-model upgrade, repeated stale result rejection, and upgrade cancellation.');
 
  let attempts=0;
  const retryReader=createReader({Image:class{decode(){return Promise.resolve();}},fetch:async url=>{

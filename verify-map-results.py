@@ -63,6 +63,14 @@ class ResultChecks(unittest.TestCase):
                 for i in range(3):
                     other = folder/str(i); other.mkdir(); (other/'source.map').write_bytes(data)
                     map_results.resource_context(report, other/'result.json')
+                self.assertEqual(len(map_results._contexts), 1, 'Equivalent output folders share the same map context')
+                for i in range(3):
+                    other = folder/('different-'+str(i)); other.mkdir()
+                    changed = data.replace(b'Name=Cache', ('Name=Cache'+str(i)).encode())
+                    (other/'source.map').write_bytes(changed)
+                    context = ModResources(root, other/'source.map')
+                    other_meta = {**meta, 'sourceSha256':sha(changed), 'rulesSha256':sha(context.rules_bytes)}
+                    map_results.resource_context(dict(metadata=other_meta), other/'result.json')
                 self.assertEqual(len(map_results._contexts), 2)
             map_results._contexts.clear()
 

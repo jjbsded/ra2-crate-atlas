@@ -1,0 +1,30 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+const base=process.env.SIM_BASE,toy=process.env.SIM_EDITION==='toy',qa=path.resolve('output/region-units-20261104');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1400,height:1000}}),errors=[];let navRequests=0;
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().includes('/api/maps/region-navigation'))navRequests++;});
+ await page.addInitScript(()=>{let api;Object.defineProperty(globalThis,'CrateRegionAuto',{configurable:true,get:()=>api,set(v){api=v;const fn=v.partition;v.partition=async(args,options)=>{const result=await fn(args,options);globalThis.lastUnitRegionRun={result,version:args.navigation.version,flags:args.navigation.flags};return result;};}});});
+ if(!toy)await page.route('**/output/region-unit-fixture-20261104/result.json',async route=>{if(new URL(route.request().url()).pathname!=='/output/region-unit-fixture-20261104/result.json')return route.continue();const response=await route.fetch(),report=await response.json();report.regionNavigation={version:2,count:report.cells.length,flags:Buffer.alloc(report.cells.length).toString('base64')};await route.fulfill({response,json:report});});
+ const ready=()=>page.waitForFunction(()=>globalThis.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:120000});
+ await page.goto(base+(toy?'index.html':'maps.html?result=/output/region-unit-fixture-20261104/result.json'));await ready();
+ if(toy){await page.waitForFunction(()=>globalThis.lastUnitRegionRun?.version===3);await page.locator('#mapFile').setInputFiles(path.join(qa,'units.map'));await page.waitForFunction(()=>CrateMapViewer.state.data.metadata.filename==='units.map'&&!CrateMapViewer.state.busy,null,{timeout:120000});}
+ await page.waitForFunction(()=>globalThis.lastUnitRegionRun?.result.regions[0]?.keys.includes(20*1024+20),null,{timeout:120000});
+ assert.deepEqual(await page.evaluate(()=>lastUnitRegionRun.result.unreachablePlayers),[]);
+ assert.equal(await page.evaluate(()=>lastUnitRegionRun.version),3);
+ assert(await page.evaluate(()=>CrateMapViewer.state.lookup.get('20,20').occupied));
+ const originalProbability=await page.evaluate(()=>JSON.stringify(CrateMapViewer.state.data.probability));
+ await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();await page.locator('#regionAutoSettings').evaluate(el=>el.open=true);
+ await page.locator('#regionAutoRun').click();await page.waitForFunction(()=>!document.getElementById('regionAutoFields').disabled,null,{timeout:120000});
+ assert.equal(await page.evaluate(()=>JSON.stringify(CrateMapViewer.state.data.probability)),originalProbability);
+ await page.locator('#simulationPlaceTab').click();await page.waitForFunction(()=>CrateMapViewer.simulation.model);
+ await page.evaluate(()=>{const m=CrateMapViewer.simulation.model;if(!m.place('MTNK',21,20))throw Error('Fixture placement blocked');});
+ await page.locator('#recompute').click();await page.waitForFunction(()=>CrateMapViewer.state.data.metadata.simulationPlan?.placements.length===1&&!CrateMapViewer.state.busy,null,{timeout:120000});
+ await page.locator('#regionToggle').click();await page.locator('#regionAutoSettings').evaluate(el=>el.open=true);await page.evaluate(()=>{lastUnitRegionRun=null;});
+ await page.locator('#regionAutoRun').click();await page.waitForFunction(()=>globalThis.lastUnitRegionRun?.result.regions[0]?.keys.includes(21*1024+20),null,{timeout:120000});
+ assert(await page.evaluate(()=>CrateMapViewer.state.lookup.get('21,20').occupied));
+ assert.deepEqual(await page.evaluate(()=>lastUnitRegionRun.result.unreachablePlayers),[]);
+ assert(toy?navRequests===0:navRequests>=2);assert.deepEqual(errors,[]);
+ await page.screenshot({path:path.join(qa,(toy?'toy':'full')+'-regions.png')});
+ fs.writeFileSync(path.join(qa,(toy?'toy':'full')+'-ui.json'),JSON.stringify({status:'PASS',unitStart:true,simulatedUnit:true,crateOccupationRetained:true,staleNavigationRefetched:!toy,navRequests,errors},null,2));
+ console.log('PASS',toy?'Toy':'Full','unit start, simulated unit, automatic partitions and unchanged probability');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

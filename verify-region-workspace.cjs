@@ -7,7 +7,7 @@ const listeners={},windowListeners={},nodes=new Map(),memory=new Map();
 function element(tag='div'){
  const e=tag==='canvas'?createCanvas(180,90):{};
  return Object.assign(e,{value:'',checked:false,hidden:false,disabled:false,children:[],style:{setProperty(){}},classList:{toggle(){}},
-  setAttribute(){},append(...items){this.children.push(...items);},replaceChildren(){this.children=[];},
+  setAttribute(){},append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},
   addEventListener(type,fn){this['on'+type]=fn;},click(){if(!this.disabled)this.onclick?.();},closest(){return null;}});
 }
 const $=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
@@ -18,10 +18,10 @@ const display={baselineNumerator:1n,get:()=>({numerator:1n})};
 const stored=R.defaults();stored.regions[0].cells.add(R.key(cells[0]));delete stored.selectionBoundsVersion;
 const storageKey='crate-atlas.regions.v1.fixture';memory.set(storageKey,R.encode(stored));
 $('regionTool').value='brush-ellipse';$('regionOperation').value='add';$('regionWidth').value=$('regionHeight').value='1';$('regionSort').value='all.total';$('players').checked=true;
-const context={CrateRegionStatistics:R,CrateMapRenderer:M,CratePlayerStarts:P,Path2D,console,
+const context={CrateRegionStatistics:R,CrateRegionLabelLayout:require('./region-label-layout.js'),CrateMapRenderer:M,CratePlayerStarts:P,Path2D,console,
  document:{getElementById:$,createElement:element,createTextNode:s=>s,addEventListener:(k,v)=>listeners[k]=v,activeElement:null,querySelector(){return null;}},
  window:{addEventListener:(k,v)=>windowListeners[k]=v},localStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v)},setTimeout:()=>1,clearTimeout(){}};
-vm.createContext(context);vm.runInContext(fs.readFileSync('region-statistics-ui.js','utf8'),context);
+vm.createContext(context);vm.runInContext(fs.readFileSync('region-overlay-cache.js','utf8'),context);vm.runInContext(fs.readFileSync('region-statistics-ui.js','utf8'),context);
 let pointedCell=cells[0];
 const ui=context.CrateRegionStatisticsUI.create({getState:()=>state,getDisplay:()=>display,schedule(){},pick:()=>pointedCell,area,onMode(){}});
 ui.load();ui.setMode(true);
@@ -43,7 +43,7 @@ const second=snapshot();$('regionUndo').click();
 listeners.keydown({ctrlKey:true,key:'Z',shiftKey:true,preventDefault(){},target:{closest(){return null;}}});
 assert.deepEqual(snapshot().regions[0].cells,second.regions[0].cells);
 $('regionTransparency').value='25';$('regionTransparency').oninput();$('regionTransparency').onchange();assert.equal(snapshot().transparency,25);
-$('regionUndo').click();assert.equal(snapshot().transparency,50);$('regionRedo').click();assert.equal(snapshot().transparency,25);
+$('regionUndo').click();assert.equal(snapshot().transparency,80);$('regionRedo').click();assert.equal(snapshot().transparency,25);
 $('regionClear').click();const old=lookup.get('1,1');$('regionTool').value='box-screen';ui.down({x:old.px,y:old.py});ui.up();
 assert.equal(snapshot().regions[0].cells.length,0,'Click fallback must not add forbidden cells.');
 $('regionTool').value='box-game';ui.down({x:20,y:20});ui.move({x:590,y:300});ui.up();
@@ -149,13 +149,14 @@ patternCtx.fillStyle='#153d6d';patternCtx.fillRect(0,0,600,330);
 patternCtx.fillStyle='#d17628';patternCtx.fillRect(300,0,300,330);
 patternCtx.fillStyle='#2ca86f';patternCtx.fillRect(200,90,200,150);
 const resized=createCanvas(240,99);resized.getContext('2d').drawImage(pattern,0,0,240,99);
-const regionFixture=R.defaults();regionFixture.regions[0].cells=new Set(['5,5','5,6','6,5']);
+const regionFixture=R.defaults();regionFixture.regions[0].cells=new Set(['5,5','5,6','6,5'].map(k=>R.key(lookup.get(k))));
 $('players').checked=false;$('objects').checked=false;state.image=pattern;
 resetSelection(regionFixture);ui.setMode(true);
 const thumbnailPixels=()=>$('regionRows').children[0].children[1].children.map(button=>{
  const cv=button.children[0];return cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data;
 });
 const referenceThumbs=thumbnailPixels();
+for(const button of $('regionRows').children[0].children[1].children){const cv=button.children[0],ctx=cv.getContext('2d');for(const [x,y]of [[0,0],[cv.width-1,0],[0,cv.height-1],[cv.width-1,cv.height-1]])assert.notDeepEqual([...ctx.getImageData(x,y,1,1).data].slice(0,3),[10,21,30],'Thumbnail content fills the frame without an artificial margin');}
 for(const useObjects of [false,true]){
  state.image=useObjects?pattern:resized;state.objectImage=useObjects?resized:null;$('objects').checked=useObjects;
  ui.load({preserve:true});const actualThumbs=thumbnailPixels();
@@ -165,18 +166,91 @@ for(const useObjects of [false,true]){
  }
 }
 console.log('PASS: terrain crop / overview align for native and resized ground/object artwork.');
+// A live shape/elevation change must match a complete region reload. Ordinary
+// occupancy/probability edits retain geometry and the resident overlay.
+const beforeShapeCells=state.cells;
+resetSelection(regionFixture);ui.setMode(true);ui.leave();
+const regionPixels=()=>{const cv=createCanvas(600,330);ui.render(cv.getContext('2d'),state);return cv.toBuffer('image/png');};
+const oldRegionPixels=regionPixels(),changedShape={...lookup.get('5,5'),py:135,level:1,visibleSurface:[[[0,-15],[30,0],[0,15]]]};
+state.cells=state.cells.map(c=>c.x===5&&c.y===5?changedShape:c);ui.updateCells([changedShape]);
+const localShapePixels=regionPixels();assert.notDeepEqual(localShapePixels,oldRegionPixels);
+ui.load({preserve:true});ui.leave();assert.deepEqual(regionPixels(),localShapePixels,'Live geometry must match a full reload');
+state.cells=beforeShapeCells;ui.load({preserve:true});ui.leave();
+console.log('PASS: local terrain geometry/elevation changes invalidate region pixels without relying on a full reload.');
 (async()=>{
  const A=require('./region-auto.js'),D=require('./probability-display.js');context.CrateRegionAuto=A;context.CrateProbabilityDisplay=D;context.AbortController=AbortController;
- data.cells=cells;data.probability={exact:{denominator:'100'}};data.regionNavigation={version:2,count:cells.length,flags:Buffer.alloc(cells.length,17).toString('base64')};
+ data.cells=cells;data.probability={exact:{denominator:'100'}};data.regionNavigation={version:3,count:cells.length,flags:Buffer.alloc(cells.length,17).toString('base64')};
  const empty=R.defaults();empty.autoHandled=true;resetSelection(empty);ui.setMode(true);const colors=snapshot().regions.map(r=>r.color);
  await ui.autoPartition();let automatic=snapshot();assert.ok(automatic.regions.some(r=>r.cells.length));
  assert.deepEqual(automatic.regions.slice(0,3).map(r=>r.generatedName.number),[1,2,8]);assert.deepEqual(automatic.regions.map(r=>r.color),colors);
  $('regionUndo').click();assert.ok(snapshot().regions.every(r=>!r.cells.length));assert.equal(snapshot().autoHandled,true,'Undoing auto partition must not trigger auto again on reload');$('regionRedo').click();
- const ops=[],measurer=createCanvas(1,1).getContext('2d'),fake={save(){},restore(){},beginPath(){},rect(){},clip(){},measureText(text){measurer.font=this.font;return measurer.measureText(text);},strokeText(text,x,y){ops.push({text,color:this.strokeStyle,width:this.lineWidth,font:this.font});},fillText(){}};
- ui.labels(fake,{x:0,y:0,scale:1});assert.ok(ops.length>0);assert.equal(ops[0].color,'#fff');assert.equal(ops[1].color,'#050a0b');assert.ok(ops[0].width>ops[1].width);
- const font=Number(ops[0].font.split(' ')[1].slice(0,-2));ops.length=0;ui.labels(fake,{x:0,y:0,scale:2});assert.equal(Number(ops[0].font.split(' ')[1].slice(0,-2)),font*2);
- const frozen=ui.snapshotLayer();ops.length=0;frozen.labels(fake,{x:0,y:0,scale:1});const expected=JSON.stringify(ops);
- $('regionClear').click();ops.length=0;frozen.labels(fake,{x:0,y:0,scale:1});assert.equal(JSON.stringify(ops),expected,'Export labels freeze totals and placement');
+ const ops=[],measurer=createCanvas(1,1).getContext('2d'),fake={save(){},restore(){},beginPath(){},rect(){},clip(){},measureText(text){measurer.font=this.font;return measurer.measureText(text);},strokeText(text,x,y){ops.push({text,color:this.strokeStyle,width:this.lineWidth,font:this.font,alpha:this.globalAlpha,x,y});},fillText(){}};
+ const labelViewport={x:0,y:0,w:1400,h:800};
+ ui.labels(fake,{x:0,y:0,scale:1},labelViewport);assert.ok(ops.length>0);assert.equal(ops[0].color,'#fff');assert.equal(ops[1].color,'#050a0b');assert.ok(ops[0].width>ops[1].width);
+ const title=ops[0].text,font=Number(ops[0].font.split(' ')[1].slice(0,-2)),reg=automatic.regions.find(r=>R.displayName(r)+':'===title);
+ assert.equal(font,.74*2*Math.min(34,14+Math.sqrt(reg.cells.length)*.72));
+ for(const scale of [.5,2]){
+  ops.length=0;ui.labels(fake,{x:0,y:0,scale},labelViewport);
+  const label=ops.find(op=>op.text===title);
+  assert.equal(Number(label.font.split(' ')[1].slice(0,-2)),font);
+  assert.equal(label.alpha,scale>1?.78:1);
+ }
+ ops.length=0;ui.labels(fake,{x:5000,y:5000,scale:1});assert.equal(ops.length,0);
+ let clock=0;context.performance={now:()=>clock};
+ const animatedTitle=()=>{ops.length=0;ui.labels(fake,state,labelViewport);return ops.find(op=>op.text===title);};
+ const start=animatedTitle();assert.equal(start.alpha,0);
+ clock=100;assert.equal(animatedTitle().alpha,.5);
+ clock=200;assert.equal(animatedTitle().alpha,1);
+ const initialX=state.x;state.x+=80;
+ clock=210;const accelerating=animatedTitle();assert.equal(accelerating.x,start.x+80,'Camera panning transports the title with no lag');
+ state.x+=80;clock=245;const throttled=animatedTitle();
+ assert.equal(throttled.x,accelerating.x+80,'Repeated pan frames preserve the original world anchor');
+ state.scale=1.2;
+ clock=248;const following=animatedTitle();clock=264;assert.equal(animatedTitle().x,following.x,'No extra chasing animation runs between camera updates');
+ state.scale=1;state.x=initialX;
+ clock=1000;animatedTitle();
+ state.x=5000;clock=1010;assert.equal(animatedTitle(),undefined);
+ state.x=initialX;clock=1020;assert.equal(animatedTitle().alpha,0,'The retained world anchor starts a fresh fade on re-entry');
+ clock=1120;assert.equal(animatedTitle().alpha,.5);
+ clock=1320;assert.equal(animatedTitle().alpha,1);
+ delete context.performance;
+ console.log('PASS: rigid map following, no between-frame chasing, final-anchor re-entry and 200 ms fade.');
+ const frozen=ui.snapshotLayer();ops.length=0;frozen.labels(fake,{x:0,y:0,scale:1,cells});const expected=JSON.stringify(ops);
+ $('regionClear').click();ops.length=0;frozen.labels(fake,{x:0,y:0,scale:1,cells});assert.equal(JSON.stringify(ops),expected,'Export labels freeze totals and placement');
+ const partial=R.defaults();partial.autoHandled=true;partial.regions[0].cells=new Set(['5,5','7,3','8,8'].map(k=>R.key(lookup.get(k))));resetSelection(partial);ui.setMode(true);
+ const partialViewport={x:325,y:0,w:1000,h:220};
+ function titleBox(viewport=partialViewport,view={...state}){
+  ops.length=0;ui.labels(fake,view,viewport);if(!ops.length)return null;
+  const name=ops[0],probability=ops[2],size=Number(probability.font.split(' ')[1].slice(0,-2));
+  measurer.font=probability.font;const right=probability.x+measurer.measureText(probability.text).width;
+  measurer.font=name.font;const metrics=measurer.measureText(name.text);
+  return {size,x:(name.x+right)/2,y:name.y-(metrics.actualBoundingBoxAscent-metrics.actualBoundingBoxDescent)/2,
+   margin:(right-name.x)/2+3+size*.11};
+ }
+ const both=titleBox();assert.equal(both.size,2*(14+Math.sqrt(2)*.72),'A partially visible cell counts as one whole cell');
+ const one=titleBox({...partialViewport,x:331});assert.equal(one.size,2*(14+.72),'Offscreen cells do not contribute to title size');
+ assert(Math.abs(both.x-(partialViewport.x+both.margin))<1e-6,'The anchor is the closest feasible point to the original center');
+ assert(Math.abs(both.y-150)<1e-6);
+ assert(Math.abs(both.x-420)/30+Math.abs(both.y-150)/15<=1+1e-6,'The relocated title anchor stays on its own terrain polygon');
+ let motionClock=0;context.performance={now:()=>motionClock};
+ const anchored=viewport=>titleBox(viewport,state);
+ const original=anchored(labelViewport);motionClock=200;anchored(labelViewport);
+ motionClock=210;assert.equal(anchored(partialViewport).x,original.x);
+ motionClock=259;assert.equal(anchored(partialViewport).x,original.x,'No new anchor is selected before the viewport has been still for 50 ms');
+ motionClock=260;const inFlight=anchored(partialViewport);assert(inFlight.x>original.x&&inFlight.x<both.x,'A settled viewport starts inertial interpolation');
+ for(motionClock=276;motionClock<=3000;motionClock+=16)anchored(partialViewport);
+ assert(Math.abs(anchored(partialViewport).x-both.x)<1e-6);
+ delete context.performance;
+ const corner=R.defaults();corner.autoHandled=true;corner.regions[0].cells.add(R.key(lookup.get('5,5')));resetSelection(corner);
+ assert.equal(titleBox({x:325,y:0,w:1000,h:140}),null,'A diamond bounding-box corner is not a visible cell');
+ const originalCells=state.cells;
+ const concave={...lookup.get('5,5'),visibleSurface:[[[-30,-15],[30,-15],[30,-8],[-15,-8],[-15,8],[30,8],[30,15],[-30,15]]]};
+ state.cells=originalCells.map(c=>R.key(c)===R.key(concave)?concave:c);resetSelection(corner);
+ const edgeTitle=titleBox({x:325,y:0,w:1000,h:300});
+ assert(Math.abs(edgeTitle.x-325)<1e-6);
+ assert(edgeTitle.y<=142+1e-6||edgeTitle.y>=158-1e-6,'A clipped concave surface cannot anchor a title in the gap between its visible pieces');
+ state.cells=originalCells;ui.load();
+ console.log('PASS: visible and partial cell counts, closest in-region title anchors, stationary-camera gating and interpolation.');
  console.log('PASS: automatic player names/colors, undo/redo, once-only handling, probability labels, double outlines, zoom and immutable export labels.');
  // A large partition must keep two genuinely unused slots (not blocked player
  // placeholders); repeated partitioning must not keep growing the list.
@@ -185,7 +259,7 @@ console.log('PASS: terrain crop / overview align for native and resized ground/o
   A.partition=async()=>({regions:waterCells.map((c,i)=>({kind:'water',number:i+1,keys:[R.key(c)]})),players:0,unassigned:0,unreachablePlayers:[],settings:A.options()});
   resetSelection(empty);await ui.autoPartition();const water=snapshot();
   assert.equal(water.regions.length,16);assert.equal(water.regions.filter(r=>!r.cells.length&&!r.generatedName).length,2);
-  assert.equal(water.regions[6].name,'水域7');assert.deepEqual(water.regions[6].generatedName,{kind:'water',number:7});
+  assert.equal(water.regions[6].name,'水域 7');assert.deepEqual(water.regions[6].generatedName,{kind:'water',number:7});
   assert.deepEqual(water.regions.slice(0,12).map(r=>r.color),colors);assert.equal(new Set(water.regions.map(r=>r.color)).size,16);
   $('regionUndo').click();assert.equal(snapshot().regions.length,12);$('regionRedo').click();assert.deepEqual(snapshot().regions,water.regions);
   ui.load();assert.deepEqual(snapshot().regions,water.regions,'Water names and spare regions survive autosave/reload');

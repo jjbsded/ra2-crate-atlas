@@ -1,5 +1,6 @@
 """Lossless on-disk storage behind stable report/download URLs."""
 from functools import wraps
+from concurrent.futures import Future
 import gzip
 import json
 import os
@@ -9,7 +10,36 @@ import uuid
 import zlib
 
 PUBLICATION_LOCK = threading.RLock()
-COMPRESSED_DOWNLOADS = {'result.json', 'cells.csv', 'rock-cells.csv', 'potential-rock-cells.csv'}
+COMPRESSED_DOWNLOADS = {'result.json', 'probability.json', 'cells.csv', 'rock-cells.csv', 'potential-rock-cells.csv'}
+
+
+def singleflight(function):
+    """Concurrent identical reads share work; failures remain retryable."""
+    lock, pending = threading.Lock(), {}
+    @wraps(function)
+    def call(*args, **kwargs):
+        key = args, tuple(sorted(kwargs.items()))
+        with lock:
+            future = pending.get(key)
+            owner = future is None
+            if owner:
+                future = pending[key] = Future()
+        if not owner:
+            return future.result()
+        try:
+            value = function(*args, **kwargs)
+            future.set_result(value)
+            return value
+        except BaseException as error:
+            future.set_exception(error)
+            raise
+        finally:
+            with lock:
+                del pending[key]
+    for name in ('cache_clear', 'cache_info', 'cache_parameters'):
+        if hasattr(function, name):
+            setattr(call, name, getattr(function, name))
+    return call
 
 
 def synchronized(function):
@@ -52,26 +82,28 @@ def atomic_bytes(path, data):
         temporary.unlink(missing_ok=True)
 
 
-@synchronized
 def write_report(path, report, *, compressed=True):
     path = Path(path)
     plain = path.with_suffix('') if path.suffix == '.gz' else path
     target = plain.with_name(plain.name+'.gz') if compressed else plain
     data = json.dumps(report, ensure_ascii=False, separators=(',', ':')).encode('utf8')
-    atomic_bytes(target, gzip.compress(data, 6, mtime=0) if compressed else data)
-    alternate = plain if compressed else plain.with_name(plain.name+'.gz')
-    alternate.unlink(missing_ok=True)
+    data = gzip.compress(data, 6, mtime=0) if compressed else data
+    with PUBLICATION_LOCK:
+        atomic_bytes(target, data)
+        alternate = plain if compressed else plain.with_name(plain.name+'.gz')
+        alternate.unlink(missing_ok=True)
     return target
 
 
-@synchronized
 def compress_downloads(folder):
     for name in COMPRESSED_DOWNLOADS-{'result.json'}:
         path = Path(folder)/name
         if path.is_file():
             raw = path.read_bytes()
-            atomic_bytes(path.with_name(name+'.gz'), gzip.compress(raw, 6, mtime=0))
-            path.unlink()
+            data = gzip.compress(raw, 6, mtime=0)
+            with PUBLICATION_LOCK:
+                atomic_bytes(path.with_name(name+'.gz'), data)
+                path.unlink(missing_ok=True)
 
 
 def accepts_gzip(header):

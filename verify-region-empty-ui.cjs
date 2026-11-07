@@ -28,7 +28,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
    d.autoHandled=true;d.overlap=true;d.regions[0].cells.add(R.key(a));d.regions[2].cells.add(R.key(a));d.regions[1].cells.add(R.key(b));
    localStorage.setItem('crate-atlas.regions.v1.'+s.data.metadata.sourceSha256,R.encode(d));return{a:{x:a.x,y:a.y},b:{x:b.x,y:b.y},ka:R.key(a),kb:R.key(b)};
   });
-  await page.reload();await ready();await page.locator('#regionToggle').click();
+  await page.reload();await ready();await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();
   await page.locator('#regionTool').selectOption('brush-game');await page.locator('#regionWidth').fill('1');await page.locator('#regionHeight').fill('1');
   await choose('empty');assert.equal((await read()).active,'empty');assert.equal(await page.locator('#regionOptions [role=option]').count(),13);assert.equal(await page.locator('#regionRows tr').count(),12);
   assert.match(await page.locator('#regionActiveText').textContent(),locale==='en-US'?/^Empty/:/^空/);
@@ -49,7 +49,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
    await page.locator('#mineralToggle').click();await page.waitForFunction(()=>!CrateMapViewer.state.busy&&CrateMapViewer.state.data.metadata.treesEnabled===false,null,{timeout:120000});
    assert.equal((await read()).active,'empty');assert.deepEqual((await read()).regions,erased.regions);
   }
-  if(mobile){await page.locator('#regionToggle').click();await page.setViewportSize({width:844,height:390});await page.locator('#regionEditor').scrollIntoViewIfNeeded();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.locator('#regionEditor').screenshot({path:path.join(out,'mobile-landscape-empty.png')});}
+  if(mobile){await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();await page.setViewportSize({width:844,height:390});await page.locator('#regionEditor').scrollIntoViewIfNeeded();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.locator('#regionEditor').screenshot({path:path.join(out,'mobile-landscape-empty.png')});}
   assert.deepEqual(errors,[]);if(name.startsWith('toy'))assert.deepEqual(apis,[]);
   results.push({name,emptyErasesOverlaps:true,pickerRestoresTool:true,persists:true,undoRedo:true});await context.close();console.log('PASS Empty UI',name);
  }}finally{await browser.close();}

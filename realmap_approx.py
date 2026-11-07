@@ -9,14 +9,21 @@ from realmap_format import number, yes
 from realmap_resources import resources
 
 
-POLICY = 'unknown-landing-retry-v1'
+POLICY = 'unknown-landing-failure-v2'
 
 
 def prepare(cells, res, theater, meta, reason=None):
     rules = theater['effectiveRules']
     base_version = 'ra2' if meta.get('engineVersion', meta['version']) == 'ra2' else 'yr'
-    stock = resources(base_version).rules
-    fallbacks = set()
+    prepared = theater.get('_layoutPrepared')
+    dirty = theater.get('_layoutDirty', cells.keys())
+    interactive = prepared is not None and prepared.get('liveEditor')
+    stock = prepared.get('approxStock') if interactive else None
+    if stock is None:
+        stock = resources(base_version).rules
+        if interactive:
+            prepared['approxStock'] = stock
+    fallbacks = set(prepared.get('approxFallbacks', ())) if prepared else set()
     def numeric(section, key, default):
         try:
             return number(rules.get(section, {}).get(key, str(default)))
@@ -28,8 +35,9 @@ def prepare(cells, res, theater, meta, reason=None):
         fallbacks.add('未知 CliffBackImpassability，使用原版模式 2')
         cliff = 2
     meta['cliffBackImpassability'] = int(cliff)
-    unknown_cells = []
-    for p, c in cells.items():
+    unknown_points = prepared.setdefault('approxUnknown', set()) if interactive else None
+    for p in dirty:
+        c = cells[p]
         causes = []
         if c.get('unknownObjects'):
             causes.append('不明物体：'+', '.join(sorted(set(c['unknownObjects']))))
@@ -73,12 +81,20 @@ def prepare(cells, res, theater, meta, reason=None):
         c['ghostReason'] = 'terrain' if c['terrain'] else 'slope' if c['slope'] > 4 else None
         c['status'] = 'retry' if causes or c['overlay'] != 255 else 'ghost' if c['ghostReason'] else 'crate'
         c.update(postLand=None, rockTransition=False)
-        if causes:
-            unknown_cells.append([c['x'], c['y']])
+        if unknown_points is not None:
+            if causes:
+                unknown_points.add(p)
+            else:
+                unknown_points.discard(p)
+    unknown_cells = ([list(p) for p in sorted(unknown_points, key=lambda p:(p[1],p[0]))]
+                     if unknown_points is not None else [[c['x'],c['y']] for c in cells.values() if c.get('assumedRetry')])
+    if prepared is not None:
+        prepared['previous'] = (meta.get('simulationPlan'), dict(cells))
+        prepared['approxFallbacks'] = fallbacks
     assumptions = [
-        '不明物体所在格按可读地形参与附近搜索；选中该格时假定放箱失败并重抽，不生成实体箱。已知障碍、边界和地形通行条件仍生效。',
+        '不明物体所在格按可读地形参与附近搜索；选中该格时假定放箱失败，不生成实体箱。已知障碍、边界和地形通行条件仍生效。',
         '未知建筑有可读基础时使用该范围，否则仅计地图记录的原点一格；真实占地可能更大。',
-        '未知地形按普通平地参与搜索，并在选中时重抽；无法定位的损坏对象记录和无法读取的覆盖物图层仍按告警省略。',
+        '未知地形按普通平地参与搜索，并在选中时判定放置失败；无法定位的损坏对象记录和无法读取的覆盖物图层仍按告警省略。',
         '已知规则沿用原版搜索／放箱框架；未解析的 include、隧道行为及 Mod 扩展可能影响任意格子。未验证禁行风险。'
     ] + sorted(fallbacks)
     meta.update(previewOnly=False, partialAnalysis=True, approximate=True, probabilityQuality='approximate',
@@ -86,7 +102,7 @@ def prepare(cells, res, theater, meta, reason=None):
                     retryCellCount=len(unknown_cells), assumptions=assumptions))
     if reason:
         meta['analysisError'] = reason
-    meta['warnings'].insert(0, f'近似概率，不保证准确：{len(unknown_cells)} 格按不明内容重抽假设处理；其余可读内容继续计算。')
+    meta['warnings'].insert(0, f'近似概率，不保证准确：{len(unknown_cells)} 格按不明内容放置失败假设处理；其余可读内容继续计算。')
     if reason:
         meta['warnings'].append('切换近似计算的原因：'+reason)
     meta['warnings'].extend(assumptions)

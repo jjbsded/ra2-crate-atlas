@@ -9,7 +9,10 @@
  const probabilityDisplay=typeof module!=='undefined'?require('./probability-display.js'):root.CrateProbabilityDisplay;
  const players=typeof module!=='undefined'?require('./player-starts.js'):root.CratePlayerStarts;
  const artwork=typeof module!=='undefined'?require('./map-artwork.js'):root.CrateMapArtwork;
+ const refinement=root.CrateRasterRefinement||(typeof module!=='undefined'?require('./raster-refinement.js'):null);
  const flat=[[[0,-15],[30,0],[0,15],[-30,0]]];
+ const mapEdges=new WeakMap(),colorTables=new WeakMap();
+ const probabilityLabels=new WeakMap();
  const armFraction=1/6;
  function surface(c,whole=false){return (whole?c.surface:c.visibleSurface)??flat;}
  const voidHeightCache=new WeakMap();
@@ -101,6 +104,12 @@
  }
  function render(ctx,state,area,display,options){
   const r=state.data.rendering,fixed=n=>Number(n).toFixed(1);
+  const opacityAt=CrateProbability.opacityCurve(display.maxMultiplier,options.paletteColors);
+  const paletteKey=options.palette+':'+display.maxMultiplier+':'+JSON.stringify(options.paletteColors);
+  let colors=colorTables.get(display);
+  if(!colors||colors.key!==paletteKey){colors={key:paletteKey,values:new Map(),labels:new Map()};colorTables.set(display,colors);}
+  function paletteColor(value){if(!colors.values.has(value))colors.values.set(value,CrateProbability.color(value,options.palette,display.maxMultiplier,options.paletteColors));return colors.values.get(value);}
+  function labelColor(value){const key=value+':'+(options.colorText!==false);if(!colors.labels.has(key))colors.labels.set(key,CrateProbability.labelColor(value,options.palette,display.maxMultiplier,options.colorText!==false,options.paletteColors));return colors.labels.get(key);}
   const labelBoxes=[];
   const multiplier=c=>display.get(c).multiplier;
   const thresholdPass=c=>display.meetsThreshold(c,options.threshold||0);
@@ -110,11 +119,13 @@
  function cellPath(c,whole=false){ctx.beginPath();for(const ring of surface(c,whole)){ring.forEach(([dx,dy],i)=>ctx[i?'lineTo':'moveTo'](state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale));ctx.closePath();}}
  function linesPath(c,lines){ctx.beginPath();for(const line of lines)line.forEach(([dx,dy],i)=>ctx[i?'lineTo':'moveTo'](state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale));}
  function labelText(value,x,y,size){ctx.strokeText(value,x,y);ctx.fillText(value,x,y);if(state.selected){const w=ctx.measureText(value).width;labelBoxes.push({x:x-w/2-4,y:y-size-4,w:w+8,h:size+8});}}
+ const probabilitySize=CrateProbability.labelSize(state.scale,options.labelSize||12,options.paletteColors);
+ function labelStyle(){ctx.textAlign='center';ctx.font=`${options.labelWeight||400} ${probabilitySize}px "Microsoft YaHei",sans-serif`;ctx.lineJoin='round';ctx.lineWidth=CrateProbability.labelStrokeWidth(probabilitySize,options.paletteColors);ctx.strokeStyle='rgba(12,25,34,.8)';ctx.fillStyle='#fff';}
  function cellLabels(c){const x=state.x+c.px*state.scale,y=state.y+c.py*state.scale;
    const coords=options.coords&&rx>=26,values=options.values&&rx>=26&&display.showLabel(c,options.baselineValues)&&inFilter(c)&&thresholdPass(c);
-   if((coords||values)&&surface(c).length){ctx.textAlign='center';ctx.font=`${options.labelWeight||400} ${options.labelSize||12}px "Microsoft YaHei",sans-serif`;ctx.lineWidth=3;ctx.strokeStyle='rgba(12,25,34,.8)';ctx.fillStyle='#fff';
-    if(coords)labelText(`${c.x},${c.y}`,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+(values?-(options.labelSize||12)/3:(options.labelSize||12)/3),options.labelSize||12);
-    if(values){labels++;labelText(fixed(multiplier(c))+'×',x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+(coords?(options.labelSize||12)-1:(options.labelSize||12)/3),options.labelSize||12);}
+   if((coords||values)&&surface(c).length){
+    if(coords){ctx.lineWidth=3;ctx.font=`${options.labelWeight||400} ${options.labelSize||12}px "Microsoft YaHei",sans-serif`;ctx.fillStyle='#fff';labelText(`${c.x},${c.y}`,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+(values?-probabilitySize*.65:(options.labelSize||12)/3),options.labelSize||12);}
+    if(values){labels++;const value=display.get(c);let label=probabilityLabels.get(value);if(label===undefined){label=fixed(value.multiplier)+'×';probabilityLabels.set(value,label);}ctx.font=`${options.labelWeight||400} ${probabilitySize}px "Microsoft YaHei",sans-serif`;ctx.lineWidth=CrateProbability.labelStrokeWidth(probabilitySize,options.paletteColors);ctx.fillStyle=labelColor(value.multiplier);labelText(label,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+probabilitySize/3,probabilitySize);}
    }
  }
  function cameraClip(){const r=state.data.rendering.cameraRect;if(!r)return;ctx.beginPath();ctx.rect(state.x+r[0]*state.scale,state.y+r[1]*state.scale,r[2]*state.scale,r[3]*state.scale);ctx.clip();}
@@ -129,8 +140,13 @@
  }
  function outlineEdge(c,x,y,rx,ry){
   const points=[[x,y-ry],[x+rx,y],[x,y+ry],[x-rx,y]];
-  const neighbors=[[c.x,c.y-1],[c.x+1,c.y],[c.x,c.y+1],[c.x-1,c.y]];
-  for(let i=0;i<4;i++){if(state.lookup.has(neighbors[i].join(',')))continue;
+   let edges=mapEdges.get(c);
+   if(edges===undefined){
+    edges=0;
+    [[c.x,c.y-1],[c.x+1,c.y],[c.x,c.y+1],[c.x-1,c.y]].forEach((p,i)=>{if(!state.lookup.has(p.join(',')))edges|=1<<i;});
+    mapEdges.set(c,edges);
+   }
+   for(let i=0;i<4;i++){if(!(edges&(1<<i)))continue;
    ctx.beginPath();ctx.moveTo(...points[i]);ctx.lineTo(...points[(i+1)%4]);ctx.strokeStyle='#f16b66';ctx.lineWidth=2;ctx.stroke();}
  }
   ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();
@@ -140,10 +156,11 @@
   // only the camera boundary: the usable/top-band transition is whole-cell.
   const camera=r.cameraRect;
   if(!options.foregroundOnly){
-  artwork.draw(ctx,options.objects&&state.objectImage?state.objectImage:state.image,state.x,state.y,r.width*state.scale,r.height*state.scale);
+  if(!options.overlayOnly){options.coordinateSpace?.paint(ctx,state,area);artwork.scene(ctx,state,r,options);}
   if(camera){
    ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);
    ctx.rect(state.x+camera[0]*state.scale,state.y+camera[1]*state.scale,camera[2]*state.scale,camera[3]*state.scale);ctx.clip('evenodd');
+   options.coordinateSpace?.clipTerrain(ctx,state);
    ctx.fillStyle='rgba(5,16,25,.48)';ctx.fillRect(area.x,area.y,area.w,area.h);ctx.restore();
    ctx.save();cameraClip();
    for(const c of visible)if(!c.usable){cellPath(c);ctx.fillStyle=c.visibleBand?'rgba(238,161,47,.25)':'rgba(165,137,80,.22)';ctx.fill('evenodd');}
@@ -151,7 +168,8 @@
   }else for(const c of visible)if(!c.usable){cellPath(c);ctx.fillStyle='rgba(5,16,25,.27)';ctx.fill('evenodd');}
   ctx.save();cameraClip();
   for(const c of visible)if(options.heatmap&&(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&inFilter(c)&&thresholdPass(c)){
-   cellPath(c);ctx.globalAlpha=display.cellAlpha(c,{opacity:1-options.opacity/100});ctx.fillStyle=CrateProbability.color(multiplier(c),options.palette,display.maxMultiplier);ctx.fill('evenodd');ctx.globalAlpha=1;if(surface(c).length)colored++;
+   const value=multiplier(c);
+   cellPath(c);ctx.globalAlpha=display.cellAlpha(c,{opacity:(1-options.opacity/100)*opacityAt(value),baselineFactor:options.paletteColors?.baselineFactor});ctx.fillStyle=paletteColor(value);ctx.fill('evenodd');ctx.globalAlpha=1;if(surface(c).length)colored++;
   }
   if(options.blocked)for(const c of visible)if(occupancy.mapCell(c)){
    const rings=surface(c).map(ring=>ring.map(([dx,dy])=>[state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale]));
@@ -177,10 +195,14 @@
   ctx.restore();
   }
   if(options.baseOnly){ctx.restore();return {colored,labels};}
+  if(options.buffFieldLayer){const counts=options.buffFieldLayer(ctx,state,area);colored+=counts?.colored||0;labels+=counts?.labels||0;}
   options.regionLayer?.(ctx,state,visible);
   if(options.players)players.draw(ctx,state,state,{radius:13,offset:23,clip:area,regionStyles:options.playerRegionStyles});
+  labelStyle();
   for(const c of visible)if(c!==state.selected)cellLabels(c);
-  options.regionLabels?.(ctx,state);
+  if(options.buffFieldLabels){const counts=options.buffFieldLabels(ctx,state,area);labels+=counts?.labels||0;}
+  options.regionLabels?.(ctx,state,area,visible);
+  options.unitBuffLayer?.(ctx,state,area);
   const incoming=state.selected&&state.incoming?.key===transfers.key(state.selected)?state.incoming:null;
   const sourceKeys=new Set(incoming?.sources.map(transfers.key)||[]);
   if(incoming){
@@ -198,7 +220,7 @@
     ctx.clip('evenodd');ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
     const points=sources.flatMap(s=>s.rings.flat()),left=Math.max(area.x,Math.min(...points.map(p=>p[0]))-2),top=Math.max(area.y,Math.min(...points.map(p=>p[1]))-2);
     const right=Math.min(area.x+area.w,Math.max(...points.map(p=>p[0]))+2),bottom=Math.min(area.y+area.h,Math.max(...points.map(p=>p[1]))+2);
-    if(right>left&&bottom>top)artwork.crop(ctx,options.objects&&state.objectImage?state.objectImage:state.image,r,state,{x:left,y:top,w:right-left,h:bottom-top});ctx.restore();
+    if(right>left&&bottom>top)artwork.scene(ctx,state,r,options,{x:left,y:top,w:right-left,h:bottom-top});ctx.restore();
     for(const {s,c,rings}of sources){const color=transfers.style(s.strength);
      ctx.save();cellPath(c);ctx.clip('evenodd');
      occupancy.path(ctx,rings,Math.min(4,3*state.scale));ctx.fillStyle=color.fill;ctx.fill('evenodd');ctx.strokeStyle=color.stroke;ctx.lineWidth=Math.max(1,Math.min(2,state.scale));ctx.stroke();ctx.restore();
@@ -219,7 +241,7 @@
    const edge=outlineParts(c);ctx.save();ctx.lineJoin='round';ctx.lineCap='round';
    if(edge.hidden.length){linesPath(c,edge.hidden);ctx.lineCap='butt';ctx.setLineDash([7,5]);ctx.strokeStyle='rgba(11,28,39,.8)';ctx.lineWidth=3.5;ctx.stroke();ctx.strokeStyle='#e5c88d';ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([]);ctx.lineCap='round';}
    linesPath(c,edge.visible);ctx.strokeStyle='rgba(16,36,48,.85)';ctx.lineWidth=3.5;ctx.stroke();ctx.strokeStyle='#e5c88d';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
-   cellLabels(c);
+   labelStyle();cellLabels(c);
    if(onScreen(c)){
     // Extend inward; vertical arms and their minimum follow the terrain aspect ratio.
     ctx.save();ctx.beginPath();for(const [a,b]of selectionArms(c,state.scale)){ctx.moveTo(x+a[0],y+a[1]);ctx.lineTo(x+b[0],y+b[1]);}
@@ -239,43 +261,283 @@
   return {colored,labels};
  }
  function visibleCells(state,area){
-  if(state.spatialIndex)return state.spatialIndex.query((area.x-80-state.x)/state.scale,(area.y-80-state.y)/state.scale,(area.x+area.w+80-state.x)/state.scale,(area.y+area.h+80-state.y)/state.scale);
-  return state.cells.filter(c=>{const x=state.x+c.px*state.scale,y=state.y+c.py*state.scale;return x>=area.x-80&&x<=area.x+area.w+80&&y>=area.y-80&&y<=area.y+area.h+80;});
+  const margin=state.liveEditing?Math.max(80,128*state.scale):80;
+  if(state.spatialIndex){
+   const cells=state.spatialIndex.query((area.x-margin-state.x)/state.scale,(area.y-margin-state.y)/state.scale,(area.x+area.w+margin-state.x)/state.scale,(area.y+area.h+margin-state.y)/state.scale);
+   return state.liveEditing?cells.map(c=>state.lookup.get(`${c.x},${c.y}`)||c):cells;
+  }
+  return state.cells.filter(c=>{const x=state.x+c.px*state.scale,y=state.y+c.py*state.scale;return x>=area.x-margin&&x<=area.x+area.w+margin&&y>=area.y-margin&&y<=area.y+area.h+margin;});
+ }
+ function coloredCells(cells,display,options){
+  return options.heatmap?cells.filter(c=>(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&surface(c).length&&
+   (options.filter==='all'||(options.filter==='water'?c.land===2:c.land!==2))&&display.meetsThreshold(c,options.threshold||0)).length:0;
  }
  // Cache artwork, heatmap, occupancy and terrain boundaries. Region edits and
  // pointer previews only redraw the foreground; probability labels stay on top.
  // At overview scales cache the complete map so panning is also a bitmap copy.
- function createViewCache(makeCanvas=()=>document.createElement('canvas')){
-  let cache=null,view=null;
-  return {clear(){cache=null;view=null;},render(ctx,state,area,display,options){
-   const r=state.data.rendering,pad=40,w=Math.ceil(r.width*state.scale)+2*pad,h=Math.ceil(r.height*state.scale)+2*pad;
-   const transform=ctx.getTransform(),ratio=Math.hypot(transform.a,transform.b);
-   const full=w*h*ratio*ratio<=8000000&&w*ratio<=8192&&h*ratio<=8192;
-   const cw=full?w:Math.ceil(area.w),ch=full?h:Math.ceil(area.h);
-   const settings=JSON.stringify(['filter','palette','opacity','threshold','heatmap','baselineLayer','blocked','objects','grid','potentialMarkers','markers'].map(k=>options[k]));
-   const key=[ratio,state.scale,full?0:state.x,full?0:state.y,area.x,area.y,area.w,area.h,settings].join('|');
-   let cacheRebuilt=false;
-   if(!cache||cache.data!==state.data||cache.image!==state.image||cache.objects!==state.objectImage||cache.display!==display||cache.key!==key){
-    const image=cache?.imageBuffer||makeCanvas();
-    image.width=Math.ceil(cw*ratio);image.height=Math.ceil(ch*ratio);
-    const target=image.getContext('2d');target.fillStyle='#101c25';target.fillRect(0,0,image.width,image.height);
-    target.setTransform(ratio,0,0,ratio,0,0);
-    const baseState={...state,x:full?pad:state.x-area.x,y:full?pad:state.y-area.y};
-    render(target,baseState,{x:0,y:0,w:cw,h:ch},display,{...options,baseOnly:true,visibleCells:null});
-    cache={data:state.data,image:state.image,objects:state.objectImage,display,key,imageBuffer:image};view=null;cacheRebuilt=true;
+ function createViewCache(makeCanvas=()=>document.createElement('canvas'),schedule=null){
+  let cache=null,view=null,live=null,navigation=null,overview=null,viewport=null,latest=null,refined=false;
+  let overviewSource=null,overviewReadyAt=0,overviewTimer=null;
+  const refiner=root.CrateRasterRefinement?.create({makeCanvas,schedule});
+  const overviewRefiner=root.CrateRasterRefinement?.create({makeCanvas,schedule});
+  const previews=root.CrateRasterPreviewCache?.create({makeCanvas,schedule});
+  const result=value=>{value.refined=refined;refined=false;return value;};
+  function scroll(buffer,pan){
+   if(!pan)return;
+   const target=buffer.getContext('2d');
+   target.save();target.setTransform(1,0,0,1,0,0);target.imageSmoothingEnabled=false;
+   target.globalCompositeOperation='copy';target.drawImage(buffer,pan.dx,pan.dy);target.restore();
+   for(const box of pan.parts)target.clearRect(box.x,box.y,box.w,box.h);
+  }
+  function paintArt(target,base,box,options){
+   target.save();target.beginPath();target.rect(box.x,box.y,box.w,box.h);target.clip();
+   target.fillStyle='#101c25';target.fillRect(box.x,box.y,box.w,box.h);
+   options.coordinateSpace?.paint(target,base,box);artwork.scene(target,base,base.data.rendering,options,box);target.restore();
+  }
+  function paintBase(target,base,box,display,options){
+   target.save();target.beginPath();target.rect(box.x,box.y,box.w,box.h);target.clip();paintArt(target,base,box,options);
+   render(target,base,box,display,{...options,baseOnly:true,overlayOnly:true,visibleCells:null});target.restore();
+  }
+  function updateLive(ctx,state,area,display,options,layout){
+   const {ratio,full,cw,ch,left,top,key,pan}=layout;
+   const r=state.data.rendering,base={...state,x:-left,y:-top};
+   const bounds={x:0,y:0,w:cw,h:ch};
+   const artOptions=JSON.stringify([options.objects,options.objectOpacity??1]);
+   const rebuild=!live||live.geometry!==r||live.key!==key||live.artOptions!==artOptions;
+   if(rebuild){
+    live={geometry:r,key,artOptions,art:makeCanvas(),overlay:makeCanvas()};
+    for(const buffer of [live.art,live.overlay]){
+     buffer.width=Math.ceil(cw*ratio);buffer.height=Math.ceil(ch*ratio);
+     buffer.getContext('2d').setTransform(ratio,0,0,ratio,0,0);
+    }
    }
+   function paintParts(buffer,parts,artOnly){
+    const target=buffer.getContext('2d');
+    for(const part of parts){
+     target.clearRect(part.x,part.y,part.w,part.h);
+     if(artOnly)paintArt(target,base,part,options);
+     else render(target,base,part,display,{...options,baseOnly:true,overlayOnly:true});
+    }
+   }
+   function paint(buffer,boxes,artOnly){
+    const tiles=new Map(),size=256;
+    for(const box of boxes){
+     const l=Math.max(0,Math.floor(box.x*ratio)-2),t=Math.max(0,Math.floor(box.y*ratio)-2);
+     const r=Math.min(buffer.width,Math.ceil((box.x+box.w)*ratio)+2),b=Math.min(buffer.height,Math.ceil((box.y+box.h)*ratio)+2);
+     if(l>=r||t>=b)continue;
+     for(let y=Math.floor(t/size)*size;y<b;y+=size)for(let x=Math.floor(l/size)*size;x<r;x+=size){
+      tiles.set(`${x},${y}`,{x:x/ratio,y:y/ratio,w:Math.min(size,buffer.width-x)/ratio,h:Math.min(size,buffer.height-y)/ratio});
+     }
+    }
+    paintParts(buffer,tiles.values(),artOnly);
+   }
+   const scaled=([x,y,w,h])=>({x:base.x+x*state.scale,y:base.y+y*state.scale,w:w*state.scale,h:h*state.scale});
+   const artworkDirty=state.artworkDirty||[];
+   if(rebuild){
+    const target=live.art.getContext('2d');target.clearRect(0,0,cw,ch);
+    paintArt(target,base,bounds,options);
+   }else{
+    scroll(live.art,pan);
+    if(pan)paintParts(live.art,pan.parts,true);
+    paint(live.art,artworkDirty.map(scaled),true);
+   }
+   const paletteKey=options.palette==='multi'?null:display.maxMultiplier;
+   const globalOverlay=rebuild||live.paletteKey!==paletteKey||live.overlayData!==state.data&&state.overlayDirty==null;
+   const tiles=state.overlayDirty||[];
+   if(globalOverlay){
+    const target=live.overlay.getContext('2d');target.clearRect(0,0,cw,ch);
+    render(target,base,bounds,display,{...options,baseOnly:true,overlayOnly:true});
+   }else{
+    scroll(live.overlay,pan);
+    if(pan)paintParts(live.overlay,pan.parts,false);
+    paint(live.overlay,tiles.map(scaled),false);
+   }
+   live.paletteKey=paletteKey;
+   live.overlayData=state.data;
+   state.artworkDirty=null;state.overlayDirty=null;
    ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();
    ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
    if(full&&r.cameraRect){ctx.fillStyle='rgba(5,16,25,.48)';ctx.fillRect(area.x,area.y,area.w,area.h);}
    ctx.imageSmoothingEnabled=false;
-   ctx.drawImage(cache.imageBuffer,full?state.x-pad:area.x,full?state.y-pad:area.y,cache.imageBuffer.width/ratio,cache.imageBuffer.height/ratio);ctx.restore();
+   const dx=Math.round((state.x+left)*ratio)/ratio,dy=Math.round((state.y+top)*ratio)/ratio;
+   for(const buffer of [live.art,live.overlay])ctx.drawImage(buffer,dx,dy,buffer.width/ratio,buffer.height/ratio);
+   ctx.restore();
+   return {cacheRebuilt:rebuild,globalOverlay,overlayTiles:tiles.length,artworkTiles:artworkDirty.length,panParts:pan?.parts.length||0};
+  }
+  return {get previewStatus(){return previews?.status;},clear(){previews?.clear();refiner?.cancel();overviewRefiner?.cancel();clearTimeout(overviewTimer);overviewTimer=null;overviewSource=null;overviewReadyAt=0;cache=null;view=null;live=null;navigation=null;overview=null;viewport=null;latest=null;refined=false;},render(ctx,state,area,display,options){
+   const r=state.data.rendering,extent=options.coordinateSpace?.bounds||{x:0,y:0,w:r.width,h:r.height},pad=40,w=Math.ceil(extent.w*state.scale)+2*pad,h=Math.ceil(extent.h*state.scale)+2*pad;
+   const transform=ctx.getTransform(),ratio=Math.hypot(transform.a,transform.b);
+   const full=w*h*ratio*ratio<=8000000&&w*ratio<=8192&&h*ratio<=8192;
+   // Keep a bounded margin outside the viewport. Its origin moves in whole
+   // physical pixels, so existing raster pixels can slide without resampling.
+   const budget=8000000/(ratio*ratio),margin=Math.max(0,Math.min(192,(Math.sqrt((area.w-area.h)**2+4*budget)-area.w-area.h)/4));
+   const cw=full?w:(Math.ceil((area.w+2*margin)*ratio)+1)/ratio,ch=full?h:(Math.ceil((area.h+2*margin)*ratio)+1)/ratio;
+   const settings=JSON.stringify([options.coordinateSpace?.key,CrateProbability.heatStyle(options.paletteColors),...['filter','palette','opacity','threshold','heatmap','baselineLayer','blocked','objects','objectOpacity','grid','potentialMarkers','markers'].map(k=>options[k])]);
+   const key=[ratio,state.scale,full,cw,ch,area.x,area.y,area.w,area.h,settings].join('|');
+   latest={state,display,settings,ratio,key};refiner?.check();
+   function refine(){
+    if(!refiner?.available||options.navigation)return;
+    const scale=state.scale,data=state.data,image=state.image,objects=state.objectImage,artworkRevision=state.artworkRevision,usesLive=!!state.liveEditing;
+    const x=state.x,y=state.y,left=Math.floor((full?x+extent.x*state.scale-pad:area.x-margin)*ratio)/ratio-x,top=Math.floor((full?y+extent.y*state.scale-pad:area.y-margin)*ratio)/ratio-y;
+    const base={...state,x:-left,y:-top},width=Math.ceil(cw*ratio),height=Math.ceil(ch*ratio),clipKey=[area.x,area.y,area.w,area.h].join('|');
+    refiner.start({key:key+'|'+usesLive,width,height,ratio,layers:usesLive?2:1,
+     valid:()=>latest?.state===state&&state.scale===scale&&state.data===data&&state.image===image&&state.objectImage===objects&&state.artworkRevision===artworkRevision&&
+      !!state.liveEditing===usesLive&&latest.display===display&&latest.settings===settings&&latest.ratio===ratio&&latest.key===key&&[area.x,area.y,area.w,area.h].join('|')===clipKey&&!state.artworkDirty?.length&&!state.overlayDirty?.length,
+     paint(contexts,part){
+      if(usesLive){paintArt(contexts[0],base,part,options);render(contexts[1],base,part,display,{...options,baseOnly:true,overlayOnly:true});}
+      else paintBase(contexts[0],base,part,display,options);
+     },
+     publish(buffers){
+      if(usesLive){live={geometry:r,key,artOptions:JSON.stringify([options.objects,options.objectOpacity??1]),art:buffers[0],overlay:buffers[1],paletteKey:options.palette==='multi'?null:display.maxMultiplier,overlayData:data};cache=null;}
+      else{cache={data,image,objects,display,key,imageBuffer:buffers[0],artworkRevision};live=null;}
+      viewport={key,left,top};view=null;
+      navigation={buffers,settings,ratio,full,data,display,image,objects,artworkRevision,x,y,scale,left:x+left,top:y+top};if(full){overviewRefiner?.cancel();overview=navigation;}refined=true;
+     }});
+   }
+   const matches=old=>old&&old.data===state.data&&old.display===display&&old.settings===settings&&old.ratio===ratio&&
+    old.image===state.image&&old.objects===state.objectImage&&old.artworkRevision===state.artworkRevision&&!state.artworkDirty?.length&&!state.overlayDirty?.length;
+   const sameOverviewSource=overviewSource&&overviewSource.data===state.data&&overviewSource.display===display&&overviewSource.settings===settings&&overviewSource.ratio===ratio&&
+    overviewSource.image===state.image&&overviewSource.objects===state.objectImage&&overviewSource.artworkRevision===state.artworkRevision&&overviewSource.liveEditing===!!state.liveEditing;
+   if(!sameOverviewSource){
+    // Continuous edits supersede this optional whole-map warmup. Keep exact
+    // viewport patches immediate, and start at most one warmup after settling.
+    overviewReadyAt=overviewSource?performance.now()+250:0;
+    overviewSource={data:state.data,display,settings,ratio,image:state.image,objects:state.objectImage,artworkRevision:state.artworkRevision,liveEditing:!!state.liveEditing};
+    clearTimeout(overviewTimer);overviewTimer=null;
+    if(overviewReadyAt&&!full&&overviewRefiner?.available&&schedule)overviewTimer=setTimeout(()=>{overviewTimer=null;overviewReadyAt=0;schedule();},250);
+   }
+   if(overview&&!matches(overview))overview=null;
+   overviewRefiner?.check();
+   if(!overview&&!full&&!options.navigation&&overviewRefiner?.available&&performance.now()>=overviewReadyAt){
+    // A focused result can arrive without ever drawing a whole-map frame.
+    // Keep newly exposed terrain at twice the previous linear preview resolution.
+    // The sharper resident viewport remains untouched, and warmup stays sliced.
+    const physical=Math.min(Math.sqrt(6000000/(extent.w*extent.h)),4000/extent.w,4000/extent.h),scale=physical/ratio;
+    const width=Math.ceil(extent.w*physical)+8,height=Math.ceil(extent.h*physical)+8,usesLive=!!state.liveEditing;
+    const source={settings,ratio,data:state.data,display,image:state.image,objects:state.objectImage,artworkRevision:state.artworkRevision};
+    const base={...state,x:4/ratio-extent.x*scale,y:4/ratio-extent.y*scale,scale};
+    overviewRefiner.start({key:[settings,ratio,usesLive,width,height].join('|'),width,height,ratio,layers:usesLive?2:1,
+     valid:()=>matches(source)&&!!state.liveEditing===usesLive&&latest?.state===state&&latest.display===display&&latest.settings===settings&&latest.ratio===ratio,
+     paint(contexts,part){
+      if(usesLive){paintArt(contexts[0],base,part,options);render(contexts[1],base,part,display,{...options,baseOnly:true,overlayOnly:true});}
+      else paintBase(contexts[0],base,part,display,options);
+     },
+     publish(buffers){overview={...source,buffers,full:true,x:0,y:0,left:extent.x*scale-4/ratio,top:extent.y*scale-4/ratio,scale};}});
+   }
+   let old=navigation,detail=null;
+   // A complete overview fills newly exposed terrain, while the previous
+   // viewport remains the sharper source for the area it already contains.
+   if(matches(old)&&!old.full&&overview&&state.scale<old.scale){
+    const factor=state.scale/old.scale,l=state.x+(old.left-old.x)*factor,t=state.y+(old.top-old.y)*factor;
+    if(l>area.x||t>area.y||l+old.buffers[0].width/ratio*factor<area.x+area.w||t+old.buffers[0].height/ratio*factor<area.y+area.h){if(old.scale>overview.scale)detail=old;old=overview;}
+   }
+   // Reproject the last complete base. New zoom resolutions refine offscreen;
+   // foreground labels remain screen-sized and edits still invalidate previews.
+   if((options.navigation||refiner?.available)&&old&&(old!==navigation||old.scale!==state.scale)&&old.data===state.data&&old.display===display&&old.settings===settings&&old.ratio===ratio&&
+      old.image===state.image&&old.objects===state.objectImage&&old.artworkRevision===state.artworkRevision&&!state.artworkDirty?.length&&!state.overlayDirty?.length){
+    const factor=state.scale/old.scale,left=state.x+(old.left-old.x)*factor,top=state.y+(old.top-old.y)*factor;
+    const width=old.buffers[0].width/ratio*factor,height=old.buffers[0].height/ratio*factor;
+    if(old.full||left<=area.x&&top<=area.y&&left+width>=area.x+area.w&&top+height>=area.y+area.h||refiner?.available){
+     ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
+     if(old.full&&r.cameraRect){ctx.fillStyle='rgba(5,16,25,.48)';ctx.fillRect(area.x,area.y,area.w,area.h);}
+     ctx.imageSmoothingEnabled=false;
+     const background=()=>{for(const buffer of old.buffers)ctx.drawImage(buffer,left,top,width,height);};
+     let detailSource=null;
+     if(detail){const f=state.scale/detail.scale,x=state.x+(detail.left-detail.x)*f,y=state.y+(detail.top-detail.y)*f,w=detail.buffers[0].width/ratio*f,h=detail.buffers[0].height/ratio*f;detailSource={rect:{x,y,w,h},paint:()=>{for(const buffer of detail.buffers)ctx.drawImage(buffer,x,y,w,h);}};}
+     const usesLive=!!state.liveEditing;
+     const tiled=previews?.render(ctx,state,area,{source:overviewSource,ratio,bounds:extent,layers:usesLive?2:1,basePhysical:old.scale*ratio,background,detail:detailSource,
+      valid:()=>matches(old)&&!!state.liveEditing===usesLive&&latest?.settings===settings&&latest.ratio===ratio,
+      paint(contexts,local,part){const base={...state,...local};if(usesLive){paintArt(contexts[0],base,part,options);render(contexts[1],base,part,display,{...options,baseOnly:true,overlayOnly:true});}else paintBase(contexts[0],base,part,display,options);}});
+     let mixedDetail=tiled?.mixedDetail||false;
+     if(!tiled){if(detailSource&&refinement?.composite)mixedDetail=refinement.composite(ctx,area,detailSource.rect,ratio,background,detailSource.paint);else background();}
+     if(!old.full)for(const part of root.CrateRasterRefinement?.uncovered(area,{x:left,y:top,w:width,h:height})||[])paintBase(ctx,state,part,display,options);
+     ctx.restore();
+     refine();
+     const cells=visibleCells(state,area),colored=coloredCells(cells,display,options);
+     return result({...render(ctx,state,area,display,{...options,foregroundOnly:true,visibleCells:cells,colored}),...tiled,preview:true,overview:old===overview,mixedDetail,cacheRebuilt:false,refining:!!refiner?.pending});
+    }
+   }
+   previews?.cancel();
+   let left=extent.x*state.scale-pad,top=extent.y*state.scale-pad,pan=null;
+   if(!full){
+    const previous=viewport;
+    if(!previous||previous.key!==key||state.x+previous.left>area.x+1e-6||state.y+previous.top>area.y+1e-6||
+       state.x+previous.left+cw<area.x+area.w-1e-6||state.y+previous.top+ch<area.y+area.h-1e-6){
+     left=Math.floor((area.x-margin)*ratio)/ratio-state.x;top=Math.floor((area.y-margin)*ratio)/ratio-state.y;
+     if(previous?.key===key){
+      const dx=Math.ceil((previous.left-left)*ratio-1e-7),dy=Math.ceil((previous.top-top)*ratio-1e-7),width=Math.round(cw*ratio),height=Math.round(ch*ratio);
+      left=previous.left-dx/ratio;top=previous.top-dy/ratio;
+      let parts;
+      if(Math.abs(dx)>=width||Math.abs(dy)>=height)parts=[{x:0,y:0,w:cw,h:ch}];
+      else{
+       parts=[];
+       if(dx)parts.push({x:dx>0?0:(width+dx)/ratio,y:0,w:Math.abs(dx)/ratio,h:ch});
+       if(dy)parts.push({x:Math.max(0,dx)/ratio,y:dy>0?0:(height+dy)/ratio,w:(width-Math.abs(dx))/ratio,h:Math.abs(dy)/ratio});
+      }
+      pan={dx,dy,parts};
+     }
+     viewport={key,left,top};
+    }else({left,top}=previous);
+   }else{
+    if(viewport?.key===key)({left,top}=viewport);
+    else{left=Math.floor((state.x+extent.x*state.scale-pad)*ratio)/ratio-state.x;top=Math.floor((state.y+extent.y*state.scale-pad)*ratio)/ratio-state.y;viewport={key,left,top};}
+   }
+   // Panning only moves existing pixels; stopping is not an invalidation.
+   function remember(buffers){
+    navigation={buffers,settings,ratio,full,data:state.data,display,image:state.image,objects:state.objectImage,
+     artworkRevision:state.artworkRevision,x:state.x,y:state.y,scale:state.scale,left:state.x+left,top:state.y+top};
+    if(full){overviewRefiner?.cancel();overview=navigation;}
+   }
+   if(state.liveEditing){
+    cache=null;
+    const stats=updateLive(ctx,state,area,display,options,{ratio,full,cw,ch,left,top,key,pan});
+    remember([live.art,live.overlay]);
+    const viewKey=[state.x,state.y,state.scale,area.x,area.y,area.w,area.h,key].join('|');
+    if(!view||view.key!==viewKey||view.data!==state.data){
+     const cells=visibleCells(state,area);
+     const colored=coloredCells(cells,display,options);
+     view={key:viewKey,data:state.data,cells,colored};
+    }
+    return result({...render(ctx,state,area,display,{...options,foregroundOnly:true,visibleCells:view.cells,colored:view.colored}),...stats});
+   }
+   live=null;
+   let cacheRebuilt=false;
+   if(!cache||cache.data!==state.data||cache.image!==state.image||cache.objects!==state.objectImage||cache.display!==display||cache.key!==key){
+    const image=cache?.imageBuffer&&!overview?.buffers.includes(cache.imageBuffer)?cache.imageBuffer:makeCanvas();
+    image.width=Math.ceil(cw*ratio);image.height=Math.ceil(ch*ratio);
+    const target=image.getContext('2d');target.fillStyle='#101c25';target.fillRect(0,0,image.width,image.height);
+    target.setTransform(ratio,0,0,ratio,0,0);
+    const baseState={...state,x:-left,y:-top};
+    paintBase(target,baseState,{x:0,y:0,w:cw,h:ch},display,options);
+    cache={data:state.data,image:state.image,objects:state.objectImage,display,key,imageBuffer:image,artworkRevision:state.artworkRevision};view=null;cacheRebuilt=true;
+   }else if(pan){
+    scroll(cache.imageBuffer,pan);
+    const target=cache.imageBuffer.getContext('2d'),baseState={...state,x:-left,y:-top};
+    for(const box of pan.parts)paintBase(target,baseState,box,display,options);
+   }
+   if(cache.artworkRevision!==state.artworkRevision&&state.artworkDirty){
+    const baseState={...state,x:-left,y:-top},target=cache.imageBuffer.getContext('2d');
+    for(const [x,y,w,h] of state.artworkDirty){
+     const box={x:baseState.x+x*state.scale-2,y:baseState.y+y*state.scale-2,w:w*state.scale+4,h:h*state.scale+4};
+     paintBase(target,baseState,box,display,options);
+    }
+    cache.artworkRevision=state.artworkRevision;
+   }
+   state.artworkDirty=null;
+   ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();
+   ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
+   if(full&&r.cameraRect){ctx.fillStyle='rgba(5,16,25,.48)';ctx.fillRect(area.x,area.y,area.w,area.h);}
+   ctx.imageSmoothingEnabled=false;
+   const dx=Math.round((state.x+left)*ratio)/ratio,dy=Math.round((state.y+top)*ratio)/ratio;
+   ctx.drawImage(cache.imageBuffer,dx,dy,cache.imageBuffer.width/ratio,cache.imageBuffer.height/ratio);ctx.restore();
+   remember([cache.imageBuffer]);
    const viewKey=[state.x,state.y,state.scale,area.x,area.y,area.w,area.h].join('|');
    if(!view||view.key!==viewKey){
     const cells=visibleCells(state,area);
-    const colored=options.heatmap?cells.filter(c=>(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&surface(c).length&&(options.filter==='all'||(options.filter==='water'?c.land===2:c.land!==2))&&display.meetsThreshold(c,options.threshold||0)).length:0;
+    const colored=coloredCells(cells,display,options);
     view={key:viewKey,cells,colored};
    }
-   return {...render(ctx,state,area,display,{...options,foregroundOnly:true,visibleCells:view.cells,colored:view.colored}),cacheRebuilt};
+   return result({...render(ctx,state,area,display,{...options,foregroundOnly:true,visibleCells:view.cells,colored:view.colored}),cacheRebuilt,panParts:pan?.parts.length||0});
   }};
  }
  const api={render,createViewCache,surface,outlineParts,selectionArms,riskArms,sourceCell};root.CrateMapRenderer=api;if(typeof module!=='undefined')module.exports=api;

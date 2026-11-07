@@ -10,8 +10,9 @@ from PIL import Image
 from realmap_resources import resources, THEATERS
 from realmap_objects import ObjectPainter, deployed_voxel_type
 from realmap_format import yes
-from toy_live_materials import object_key
+from toy_live_materials import object_key, VISUAL
 from toy_build_inputs import artwork_fingerprint
+from toy_object_components import Components
 
 
 def dumps(v):
@@ -19,7 +20,7 @@ def dumps(v):
 
 
 def frame_stamp():
-    return artwork_fingerprint(('toy_live_objects.py', 'toy_live_materials.py'))
+    return artwork_fingerprint(('toy_live_objects.py', 'toy_live_materials.py', 'toy_object_components.py'))
 
 
 def build(output, cache):
@@ -30,9 +31,11 @@ def build(output, cache):
     index_colors = [(i, 0, 0) for i in range(256)]
     saved = cache/'frames.json.gz'; stamp = cache/'frames.stamp'; digest = frame_stamp()
     cached = saved.is_file() and stamp.is_file() and stamp.read_text('utf8') == digest
+    components = Components()
     if cached:
         data = json.loads(gzip.decompress(saved.read_bytes()))
         palettes, sizes, scopes = data['palettes'], data['sizes'], data['scopes']
+        components = Components(data['components'])
 
     class IndexedPainter(ObjectPainter):
         def colors(self, art, house, default='unit', remap=True):
@@ -49,11 +52,12 @@ def build(output, cache):
                 palette_ids[key] = len(palettes); palettes.append(record)
             return index_colors, palette_ids[key]
 
-        def voxel_parts(self, *args, **kwargs):
+        def voxel_parts(self, obj, cfg, image, art, turret=None):
             vpl = hashlib.sha256(self.get('voxels.vpl')).hexdigest()
             self.voxels = renderers.get(vpl)
-            result = super().voxel_parts(*args, **kwargs)
+            result = super().voxel_parts(obj, cfg, image, art, turret=turret)
             renderers[vpl] = self.voxels
+            components.voxels(obj, cfg, image, art, turret, result, part_ref)
             return result
 
     def part_ref(part):
@@ -69,11 +73,11 @@ def build(output, cache):
             if not (pixels/(key+'.png')).exists(): Image.fromarray(indices).save(pixels/(key+'.png'))
         return [key, part['x']+box[0], part['y']+box[1], part['palette'], int(opacity[0])]
 
-    def shadow_ref(part):
+    def shadow_ref(part, all_shapes=False):
         # Only VXL shadows are added here; paired SHP shadows use the existing
         # official capture path. One binary footprint is shared by all owners.
         mask=part.get('shadow')
-        if not part.get('shadowModel') or mask is None or not (box:=mask.getbbox()):return None
+        if not (all_shapes or part.get('shadowModel')) or mask is None or not (box:=mask.getbbox()):return None
         a=(np.asarray(mask.crop(box))>0).astype(np.uint8);h,w=a.shape
         key=hashlib.sha256(struct.pack('<II',w,h)+a.tobytes()).hexdigest()[:32]
         if key not in sizes:
@@ -90,6 +94,7 @@ def build(output, cache):
                 if version == 'ra2' and climate not in ('TEMPERATE', 'SNOW', 'URBAN'): continue
                 theater = res.theater(climate); theater['effectiveRules'] = res.rules
                 painter = IndexedPainter(res, theater, cache); target = scopes.setdefault(version+'/'+climate, {})
+                components.scope(version+'/'+climate, painter)
                 for category, list_name in [('STRUCTURES', 'BUILDINGTYPES'), ('INFANTRY', 'INFANTRYTYPES'), ('UNITS', 'VEHICLETYPES'), ('AIRCRAFT', 'AIRCRAFTTYPES')]:
                     for kind in dict.fromkeys(v.upper() for v in res.rules[list_name].values()):
                         cfg, image, art = painter.art_for(kind)
@@ -111,6 +116,9 @@ def build(output, cache):
                                         parts = painter.parts(rec)
                                         target[key] = [ref for part in parts if (ref := part_ref(part))]
                                         target[key] += [ref for part in parts if (ref := shadow_ref(part))]
+                                        components.shp_turret(rec, cfg, parts, part_ref, shadow_ref)
+                                        if category != 'STRUCTURES' or yes(cfg.get('CAPTURABLE','no')) or yes(cfg.get('BRIDGEREPAIRHUT','no')) or int(cfg.get('TECHLEVEL','-1')) >= 0:
+                                            components.body(painter, rec, cfg, image, art, parts, part_ref, shadow_ref)
                                     except (ValueError, OSError, IndexError, struct.error) as error:
                                         missing.append([version, climate, kind, str(error)])
                                         failed = True; break
@@ -122,7 +130,7 @@ def build(output, cache):
         for renderer in renderers.values(): renderer.close()
 
     if not cached:
-        saved.write_bytes(gzip.compress(dumps(dict(palettes=palettes, sizes=sizes, scopes=scopes)),9,mtime=0))
+        saved.write_bytes(gzip.compress(dumps(dict(palettes=palettes, sizes=sizes, scopes=scopes, components=components.data)),9,mtime=0))
         stamp.write_text(digest,'utf8'); (cache/'missing.json').write_bytes(dumps(missing))
     # Some buildings never use owner-color indices. Reuse their existing RGBA
     # atlas entries for every owner, but prove this from the native pixels first.
@@ -161,6 +169,8 @@ def build(output, cache):
             if fields[0] == 'STRUCTURES' and dumps(fields[1]) not in allowed[scope.split('/')[0]]:
                 del target[key]
             else: used.update(p[0] for p in target[key])
+    for refs in components.references():
+        used.update(p[0] for p in refs)
     sizes = {key:size for key,size in sizes.items() if key in used}
 
     # Native palette indices compress much better than owner-colored RGBA.
@@ -182,12 +192,15 @@ def build(output, cache):
         ids[key] = len(assets); assets.append([len(pages),x,y,w,h]); x += w; row = max(row,h); used = True
     finish()
     refs, ref_ids = [], {}
+    def intern(parts):
+        value = [[ids[p[0]], *p[1:]] for p in parts]; sig = dumps(value)
+        if sig not in ref_ids: ref_ids[sig] = len(refs); refs.append(value)
+        return ref_ids[sig]
     for target in scopes.values():
         for key, parts in target.items():
-            value = [[ids[p[0]], *p[1:]] for p in parts]; sig = dumps(value)
-            if sig not in ref_ids: ref_ids[sig] = len(refs); refs.append(value)
-            target[key] = ref_ids[sig]
-    payload = dict(version=1, atlases=pages, assets=assets, palettes=palettes, refs=refs, scopes=scopes, invariant=invariant)
+            target[key] = intern(parts)
+    payload = dict(version=1, atlases=pages, assets=assets, palettes=palettes, refs=refs, scopes=scopes, invariant=invariant,
+                   visualFields=VISUAL, components=components.pack(intern))
     data = gzip.compress(dumps(payload),9,mtime=0); (output/'index.json.gz').write_bytes(data)
     keep = {p['file'] for p in pages}; resolved = output.resolve()
     for path in output.glob('objects-*.png'):

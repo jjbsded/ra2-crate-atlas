@@ -42,3 +42,7 @@ for(const [a,b,horizontal,vertical]of [['ArrowLeft','ArrowUp',-1,-1],['ArrowRigh
  h.keys.cancel();h.advance(600);assert.equal(h.moves.length,1,'blur cancels repeating movement');
 }
 console.log('PASS: delayed eight-direction chords, short taps, hold repeats, uneven release, opposite keys, stale repeat and lifecycle cancellation.');
+{
+ const h=harness();for(const key of ['w','a','s','d','W','A','S','D']){assert.equal(h.keys.down(key),false);assert.equal(h.keys.up(key),false);}h.advance(600);assert.deepEqual(h.moves,[]);assert.equal(h.pending(),0);
+ const other=harness();other.keys.down('ArrowRight');assert.equal(other.keys.down('d'),false);other.advance(90);assert.equal(other.keys.up('d'),false);other.advance(260);assert.equal(other.moves.at(-1).horizontal,1,'Letter keys cannot alter an arrow chord');other.keys.cancel();
+}

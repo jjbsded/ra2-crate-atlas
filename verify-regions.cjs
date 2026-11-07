@@ -4,6 +4,9 @@ const cells=Array.from({length:441},(_,i)=>{const x=i%21,y=Math.floor(i/21);retu
 const lookup=new Map(cells.map(c=>[R.key(c),c])),valid=new Set(lookup.keys());
 const pt=(x,y)=>({x:30*(x-y),y:15*(x+y),game:{x,y}});
 let doc=R.defaults();
+const missingTransparency=JSON.parse(R.encode(doc));delete missingTransparency.transparency;
+assert.equal(R.decode(JSON.stringify(missingTransparency),valid).transparency,80);
+assert.equal(R.decode(R.encode({...doc,transparency:35}),valid).transparency,35,'Saved transparency remains a user preference');
 assert.equal(doc.regions.length,12);assert.equal(doc.overlap,false);
 assert.ok(doc.regions.every(r=>r.cells.size===0));
 assert.equal(new Set(R.colors).size,12);
@@ -90,6 +93,30 @@ const s=new Map([['a',{all:{n:10n**100n,count:2}}],['b',{all:{n:10n**100n+1n,cou
 assert.deepEqual(R.sorted(regions,s,'all.average').map(r=>r.id),['b','a','c']);
 assert.deepEqual(R.sorted(regions,s,'all.average',true).map(r=>r.id),['a','b','c']);
 assert.deepEqual(R.sorted(regions,s,'name',true).map(r=>r.id),['c','a','b']);
+const insertionOrder=[regions[1],regions[2],regions[0]];
+assert.deepEqual(R.sorted(insertionOrder,null,'order',true).map(r=>r.id),['b','c','a']);
+assert.deepEqual(R.sorted(insertionOrder,null,'order').map(r=>r.id),['a','c','b']);
+assert.deepEqual(insertionOrder.map(r=>r.id),['b','c','a'],'Sorting must not change the stored region-list order');
+const I=require('./i18n.js'),previousLanguage=I.language;I.setLanguage('zh-CN');
+for(const [kind,prefix]of [['player','玩家'],['water','水域'],['land','陆地']])assert.equal(R.displayName({id:'r9',generatedName:{kind,number:3}}),prefix+' 3');
+assert.equal(R.displayName({id:'r9',name:'玩家3',customName:true,generatedName:{kind:'player',number:3}}),'玩家3','Custom names remain unchanged');I.setLanguage(previousLanguage);
+const unitRegions=[...regions,{id:'d',name:'零倍率'}],huge=10n**100n;
+for(const group of ['tank','infantry']){
+ const buffs=new Map([
+  ['a',{[group]:{n:huge*3n,count:3}}],
+  ['b',{[group]:{n:huge*2n+1n,count:2}}],
+  ['d',{[group]:{n:0n,count:1}}],
+ ]);
+ const order=(metric,ascending=false)=>R.sorted(unitRegions,buffs,group+'.'+metric,ascending).map(r=>r.id);
+ assert.deepEqual(order('total'),['a','b','c','d']);
+ assert.deepEqual(order('total',true),['c','d','b','a']);
+ assert.deepEqual(order('average'),['b','a','d','c']);
+ assert.deepEqual(order('average',true),['d','a','b','c']);
+}
+const ties=unitRegions.map((r,i)=>({...r,cells:new Set(i===2?[]:[i])}));
+const values=new Map([['a',{tank:{n:12n,count:3}}],['b',{tank:{n:8n,count:2}}],['c',{tank:{n:100n,count:1}}],['d',{tank:{n:0n,count:1}}]]);
+assert.deepEqual([...R.ranks(ties,values,'tank','average')],[['a',1],['b',1],['d',3]]);
+assert.deepEqual([...R.ranks(ties,values,'tank','total')],[['a',1],['b',2],['d',3]]);
 // Real report: partition every cell; land + sea sum to all and match exact cell totals.
 const report=process.argv[2];
 if(report){

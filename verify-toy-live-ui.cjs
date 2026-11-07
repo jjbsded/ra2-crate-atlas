@@ -14,11 +14,11 @@ async function upload(p,file=map){await p.locator('#mapFile').setInputFiles(file
  await p.evaluate(()=>CrateMapViewer.focus(CrateMapViewer.state.cells.find(c=>c.multiplier>3)));
  await p.waitForFunction(()=>CrateMapViewer.state.incoming?.sources.length>0,null,{timeout:10000});
  metrics.sources=await p.evaluate(()=>CrateMapViewer.state.incoming.sources.length);
- await p.locator('#regionToggle').click();assert.ok(await p.locator('#regionRows canvas').count()>0);await p.locator('#regionTool').selectOption('brush-ellipse');
+ await p.locator('#simulationPlaceTab').click();await p.locator('#regionToggle').click();assert.ok(await p.locator('#regionRows canvas').count()>0);await p.locator('#regionTool').selectOption('brush-ellipse');
  const name=p.locator('#regionName');await name.fill('Live QA');await name.dispatchEvent('change');
  // Autosave is debounced by 300 ms; a fixed 350 ms sleep races CPU-throttled rendering.
  await p.waitForFunction(()=>localStorage.getItem('crate-atlas.regions.v1.'+CrateMapViewer.state.data.metadata.sourceSha256)?.includes('Live QA'),null,{timeout:10000});
- await p.locator('#regionToggle').click();assert.ok(await p.locator('#heatmap').isChecked());
+ await p.locator('#viewMode').click();assert.ok(await p.locator('#heatmap').isChecked());
  await p.evaluate(()=>CrateMapViewer.focus(CrateMapViewer.state.cells.find(c=>c.bridge?.kind==='high')));
  await p.locator('#terrain3dOpen').click();await p.waitForFunction(()=>!document.getElementById('terrain3dStage').classList.contains('is-loading'),null,{timeout:30000});assert.equal(await p.locator('#terrain3dError').textContent(),'');
  await p.locator('#terrain3dDialog').screenshot({path:path.join(out,mobile?'mobile-3d.png':'desktop-3d.png')});await p.locator('#terrain3dClose').click();

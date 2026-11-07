@@ -273,7 +273,7 @@ def build_patch(report, lookup, path, x, y, radius):
             if not kind: continue
             # Bridge art is distributed across neighboring cells below, with
             # a separate elevated surface for high bridges.
-            if is_overlay and bridge_kind(kind):
+            if is_overlay and (bridge_kind(kind) or yes(theater['effectiveRules'].get(kind, {}).get('ISRUBBLE', 'no'))):
                 continue
             skey = (kind,is_overlay,frame,c['slope'])
             if skey not in sprites:

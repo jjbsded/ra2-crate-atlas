@@ -32,13 +32,13 @@
  const key=c=>c.x*1024+c.y;
  function displayName(region){
   if(region.id===EMPTY)return _t('空');
-  if(!region.customName&&region.generatedName)return region.generatedName.kind==='team'?_t`小队${region.generatedName.team}`:region.generatedName.kind==='player'?_t`玩家${region.generatedName.number}`:region.generatedName.kind==='water'?_t`水域${region.generatedName.number}`:_t`陆地${region.generatedName.number}`;
+  if(!region.customName&&region.generatedName)return region.generatedName.kind==='team'?_t`小队 ${region.generatedName.team}`:region.generatedName.kind==='player'?_t`玩家 ${region.generatedName.number}`:region.generatedName.kind==='water'?_t`水域 ${region.generatedName.number}`:_t`陆地 ${region.generatedName.number}`;
   const n=region.id.slice(1);
   // Legacy generated names had no marker. Keep the stored bytes untouched;
   // explicit renames are marked so even a custom default-looking name survives.
   return !region.customName&&['区域 '+n,`Region ${n}`].includes(region.name)?_t`区域 ${n}`:region.name;
  }
- const defaults=()=>({version:1,defaultRegionCount:12,selectionBoundsVersion:1,autoOptionsVersion:2,transparency:50,overlap:false,showTotals:true,autoHandled:false,autoOptions:A.options(),appliedTeams:{},active:'r1',next:13,regions:colors.map((color,i)=>({id:`r${i+1}`,name:_t`区域 ${i+1}`,color,cells:new Set()}))});
+ const defaults=()=>({version:1,defaultRegionCount:12,selectionBoundsVersion:1,autoOptionsVersion:2,transparency:80,overlap:false,showTotals:true,autoHandled:false,autoOptions:A.options(),appliedTeams:{},active:'r1',next:13,regions:colors.map((color,i)=>({id:`r${i+1}`,name:_t`区域 ${i+1}`,color,cells:new Set()}))});
  function encode(doc){return JSON.stringify({...doc,regions:doc.regions.map(r=>({...r,cells:[...r.cells].sort((a,b)=>a-b)}))});}
  function decode(raw,valid){
   const data=JSON.parse(raw);
@@ -53,7 +53,7 @@
    return {id:r.id,name:String(r.name||_t`区域 ${i+1}`).slice(0,48),...(r.customName===true?{customName:true}:{}),...(gname?{generatedName:gname}:{}),color:/^#[0-9a-f]{6}$/i.test(r.color)?r.color:colors[i%colors.length],
     cells:new Set(r.cells.filter(k=>Number.isInteger(k)&&valid.has(k)))};
   });
-  const doc={version:1,defaultRegionCount:12,selectionBoundsVersion:1,autoOptionsVersion:2,transparency:Number.isFinite(data.transparency)?Math.max(0,Math.min(100,data.transparency)):50,overlap:data.overlap===true,showTotals:data.showTotals!==false,autoHandled:data.autoHandled===true,autoOptions,appliedTeams:A.teams(data.appliedTeams),active:data.active===EMPTY||ids.has(data.active)?data.active:regions[0].id,
+  const doc={version:1,defaultRegionCount:12,selectionBoundsVersion:1,autoOptionsVersion:2,transparency:Number.isFinite(data.transparency)?Math.max(0,Math.min(100,data.transparency)):80,overlap:data.overlap===true,showTotals:data.showTotals!==false,autoHandled:data.autoHandled===true,autoOptions,appliedTeams:A.teams(data.appliedTeams),active:data.active===EMPTY||ids.has(data.active)?data.active:regions[0].id,
    next:Math.max(Math.max(...regions.map(r=>Number(r.id.slice(1))))+1,Number.isInteger(data.next)&&data.next<10000000?data.next:1),regions};
   // One-time migration: preserve customized names/colors/cells. Later manual
   // deletion is respected, even when fewer than twelve regions remain.
@@ -68,6 +68,24 @@
    out[p.number]={empty:team==='empty',team:['A','B','C','D'].includes(team)?team:null,color:region?.color||'#344b59'};
   }return out;
  }
+ function playersForRegion(doc,region,starts){
+  if(!region||region.id===EMPTY)return [];
+  const generated=region.generatedName;
+  if(generated?.kind==='player')return starts.filter(p=>p.number===generated.number).map(p=>p.number);
+  if(generated?.kind==='team')return starts.filter(p=>doc.appliedTeams?.[p.number]===generated.team).map(p=>p.number);
+  return starts.filter(p=>region.cells.has(key(p))&&doc.appliedTeams?.[p.number]!=='empty').map(p=>p.number);
+ }
+ function nearestPlayer(cell,numbers,starts){
+  let best=null,distance=Infinity;
+  for(const p of starts)if(numbers.includes(p.number)){const d=(cell.x-p.x)**2+(cell.y-p.y)**2;if(d<distance){distance=d;best=p.number;}}
+  return best;
+ }
+ function playerAt(doc,cell,starts){
+  if(!cell||cell.virtual)return null;const k=key(cell),active=doc.regions.find(r=>r.id===doc.active);
+  const ordered=active?.cells.has(k)?[active,...doc.regions.filter(r=>r!==active).reverse()]:[...doc.regions].reverse();
+  for(const region of ordered)if(region.cells.has(k)){const number=nearestPlayer(cell,playersForRegion(doc,region,starts),starts);if(number!==null)return number;}
+  return starts.find(p=>p.x===cell.x&&p.y===cell.y)?.number??null;
+ }
  function labelStrokes(){return {inner:'#050a0b',outer:'#fff'};}
  // When overlap is switched off, the active region wins; remaining ties use list order.
  function exclusive(doc){
@@ -78,17 +96,17 @@
   }
   return removed;
  }
- function apply(doc,keys,remove=false){
+ function apply(doc,keys,remove=false,onChange=null){
   if(doc.active===EMPTY){
-   const changed=new Set();for(const k of keys)for(const r of doc.regions)if(r.cells.delete(k))changed.add(r);
+   const changed=new Set();for(const k of keys)for(const r of doc.regions)if(r.cells.delete(k)){changed.add(r);onChange?.(r,k,false);}
    for(const r of changed)touch(r);return changed.size>0;
   }
   const r=doc.regions.find(r=>r.id===doc.active);if(!r)return false;const changed=new Set();
   for(const k of keys){
-   if(remove){if(r.cells.delete(k))changed.add(r);}
+   if(remove){if(r.cells.delete(k)){changed.add(r);onChange?.(r,k,false);}}
    else{
-    if(!r.cells.has(k)){r.cells.add(k);changed.add(r);}
-    if(!doc.overlap)for(const other of doc.regions)if(other!==r&&other.cells.delete(k))changed.add(other);
+    if(!r.cells.has(k)){r.cells.add(k);changed.add(r);onChange?.(r,k,true);}
+    if(!doc.overlap)for(const other of doc.regions)if(other!==r&&other.cells.delete(k)){changed.add(other);onChange?.(other,k,false);}
    }
   }
   for(const r of changed)touch(r);return changed.size>0;
@@ -114,20 +132,36 @@
   for(const g of [land,sea,all]){g.total=ratio(g.n,base);g.average=g.count?ratio(g.n,base*BigInt(g.count)):null;}
   return {land,sea,all};
  }
+ const emptyGroup={count:0,n:0n};
+ function compareValues(a,b,field){
+  const x=field==='average'?a.n*BigInt(b.count):field==='count'?BigInt(a.count):a.n;
+  const y=field==='average'?b.n*BigInt(a.count):field==='count'?BigInt(b.count):b.n;
+  return x<y?-1:x>y?1:0;
+ }
  function sorted(regions,stats,metric='all.total',ascending=false){
+  if(metric==='order')return ascending?[...regions]:[...regions].reverse();
   const [group,field]=metric.split('.');
   return [...regions].sort((a,b)=>{
    let cmp;
    if(metric==='name')cmp=displayName(a).localeCompare(displayName(b),_i18n?.language||'zh-CN',{numeric:true});
    else{
-    const x=stats.get(a.id)[group],y=stats.get(b.id)[group];
+    const x=stats?.get(a.id)?.[group]||emptyGroup,y=stats?.get(b.id)?.[group]||emptyGroup;
     if(field==='average'&&(!x.count||!y.count))return x.count? -1:y.count?1:0; // Empty averages always last.
-    const u=field==='average'?x.n*BigInt(y.count):field==='count'?BigInt(x.count):x.n;
-    const v=field==='average'?y.n*BigInt(x.count):field==='count'?BigInt(y.count):y.n;
-    cmp=u<v?-1:u>v?1:0;
+    cmp=compareValues(x,y,field);
    }
    return ascending?cmp:-cmp;
   });
+ }
+ function ranks(regions,stats,group,field){
+  const defined=regions.filter(r=>r.cells.size&&(field!=='average'||stats.get(r.id)[group]?.count));
+  const result=new Map();
+  let last=null,rank=0;
+  sorted(defined,stats,group+'.'+field).forEach((r,index)=>{
+   const value=stats.get(r.id)[group]||emptyGroup;
+   if(!last||compareValues(last,value,field)!==0)rank=index+1;
+   result.set(r.id,rank);last=value;
+  });
+  return result;
  }
  const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
  // Zero-probability / occupied cells remain selectable; this is a boundary rule.
@@ -192,6 +226,6 @@
   }
   return Number.isFinite(left)?{x:left,y:top,w:Math.max(1,right-left),h:Math.max(1,bottom-top)}:null;
  }
- const api={EMPTY,colors,nextColor,lab,key,displayName,playerStyles,labelStrokes,defaults,encode,decode,exclusive,apply,fillKeys,revision,touch,statistics,sorted,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
+ const api={EMPTY,colors,nextColor,lab,key,displayName,playerStyles,playersForRegion,nearestPlayer,playerAt,labelStrokes,defaults,encode,decode,exclusive,apply,fillKeys,revision,touch,statistics,sorted,ranks,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
  root.CrateRegionStatistics=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

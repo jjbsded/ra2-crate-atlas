@@ -12,7 +12,9 @@ expected = set(builder['APPLICATION_MODULES']) | set(builder['EXTRA_FILES']) | s
 expected.update(p.relative_to(ROOT).as_posix() for p in builder['frontend_files']())
 assert not expected-files, 'Git ignores release inputs: '+str(sorted(expected-files))
 for name in files:
-    assert not name.startswith(('data/', 'profiles/', 'assets/')), 'Personal or large resources staged: '+name
+    assert not name.startswith(('data/', 'profiles/')), 'Personal resources staged: '+name
+    if name.startswith('assets/'):
+        assert name in {'assets/urban-trees/sprites.zip', 'assets/urban-trees/provenance.json'}, 'Unreviewed resource staged: '+name
     if name.startswith('output/'):
         assert name in expected, 'Analysis output staged: '+name
     path = ROOT/name

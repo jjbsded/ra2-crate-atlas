@@ -40,9 +40,9 @@
    }
   }
   function paint(ctx,indices){for(const i of indices){const c=commands[sequence[i]],a=data.assets[c.id];ctx.drawImage(images[a[0]],a[1],a[2],a[3],a[4],c.x,c.y,a[3],a[4]);}}
-  function small(){if(!overview){const scale=Math.min(1,(mobile()?1280:2048)/Math.max(width,height));overview=canvas(Math.ceil(width*scale),Math.ceil(height*scale));const ctx=overview.getContext('2d');ctx.fillStyle='#18232b';ctx.fillRect(0,0,overview.width,overview.height);ctx.scale(scale,scale);paint(ctx,sequence.keys());}return overview;}
+  function small(){if(!overview){const scale=Math.min(1,(mobile()?1280:2048)/Math.max(width,height));overview=canvas(Math.ceil(width*scale),Math.ceil(height*scale));const ctx=overview.getContext('2d');ctx.scale(scale,scale);paint(ctx,sequence.keys());}return overview;}
   function chunk(x,y){const key=`${x},${y}`;if(cache.has(key)){const c=cache.get(key);cache.delete(key);cache.set(key,c);return c;}
-   const image=canvas(chunkSize,chunkSize),ctx=image.getContext('2d');ctx.fillStyle='#18232b';ctx.fillRect(0,0,chunkSize,chunkSize);ctx.translate(-x*chunkSize,-y*chunkSize);paint(ctx,buckets.get(key)||[]);cache.set(key,image);
+   const image=canvas(chunkSize,chunkSize),ctx=image.getContext('2d');ctx.translate(-x*chunkSize,-y*chunkSize);paint(ctx,buckets.get(key)||[]);cache.set(key,image);
    while(cache.size>(mobile()?24:48)){const key=cache.keys().next().value,old=cache.get(key);cache.delete(key);old.width=old.height=1;}return image;
   }
   return {width,height,original:true,draw(ctx,...args){
@@ -55,7 +55,10 @@
    const inv=ctx.getTransform().inverse(),corners=[[0,0],[ctx.canvas.width,0],[0,ctx.canvas.height],[ctx.canvas.width,ctx.canvas.height]].map(([x,y])=>[inv.a*x+inv.c*y+inv.e,inv.b*x+inv.d*y+inv.f]);
    const left=Math.max(0,sx,Math.min(...corners.map(p=>p[0]))),top=Math.max(0,sy,Math.min(...corners.map(p=>p[1]))),right=Math.min(width,sx+sw,Math.max(...corners.map(p=>p[0]))),bottom=Math.min(height,sy+sh,Math.max(...corners.map(p=>p[1])));
    const count=(Math.ceil(right/chunkSize)-Math.floor(left/chunkSize))*(Math.ceil(bottom/chunkSize)-Math.floor(top/chunkSize));
-   if(count>64){ctx.fillStyle='#18232b';ctx.fillRect(left,top,right-left,bottom-top);const ids=new Set();for(let y=Math.floor(top/chunkSize);y<Math.ceil(bottom/chunkSize);y++)for(let x=Math.floor(left/chunkSize);x<Math.ceil(right/chunkSize);x++)for(const i of buckets.get(`${x},${y}`)||[])ids.add(i);paint(ctx,[...ids].sort((a,b)=>a-b));}
+   // A preview tile already bounds the output to 260 physical pixels. Rasterize
+   // its mixed scene at that size rather than building several full 512px source
+   // chunks first. Exact views keep their original source-pixel chunk cache.
+   if(count>64||ctx.cratePreviewTile&&scene.paint){const ids=new Set();for(let y=Math.floor(top/chunkSize);y<Math.ceil(bottom/chunkSize);y++)for(let x=Math.floor(left/chunkSize);x<Math.ceil(right/chunkSize);x++)for(const i of buckets.get(`${x},${y}`)||[])ids.add(i);paint(ctx,[...ids].sort((a,b)=>a-b));}
    else for(let y=Math.floor(top/chunkSize);y<Math.ceil(bottom/chunkSize);y++)for(let x=Math.floor(left/chunkSize);x<Math.ceil(right/chunkSize);x++)ctx.drawImage(chunk(x,y),x*chunkSize,y*chunkSize);
    ctx.restore();
   },stats:()=>({chunks:cache.size,overviewPixels:overview?overview.width*overview.height:0,commands:sequence.length})};

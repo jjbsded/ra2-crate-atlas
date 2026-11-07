@@ -64,7 +64,7 @@ def clearance_risks(cells, folder, meta, rules, progress=lambda *args: None):
     layout, not a simulation of destruction, debris or arbitrary game history.
     """
     grid = bytearray(262144)
-    candidates = {}
+    candidates, risks = {}, {}
     crate_rules = rules.get('CRATERULES', {})
     crate_names = [crate_rules.get('CRATEIMG', 'CRATE'), crate_rules.get('WATERCRATEIMG', 'WCRATE')]
     for p, c in cells.items():
@@ -85,23 +85,38 @@ def clearance_risks(cells, folder, meta, rules, progress=lambda *args: None):
         transition = bool(not elevated(c) and candidate and overlay_name is None and c['slope'] <= 4 and land != 3 and post == 3
                           and (track or foot) and number(post_cost.get('TRACK', '0')) == 0
                           and number(post_cost.get('FOOT', '0')) == 0)
-        c['potentialMarked'] = False
         if removed or transition:
-            c['clearance'] = dict(land=land, postLand=post, rockTransition=transition, supported=False)
+            risks[p] = dict(land=land, postLand=post, rockTransition=transition, supported=False)
         if transition:
             candidates[key] = c
     if candidates:
         progress('检查完全移除建筑、矿物、树木和单位后的潜在禁行格', 84)
         maximum = sum(meta['size'][2:])-1
         (folder/'clearance-grid.bin').write_bytes(grid)
-        run([TOOLS/'map-search.exe', folder/'clearance-grid.bin', folder/'clearance-search.bin', maximum, min(maximum+1, 32)], 180)
+        from incremental_probability import cached
+        def full_search():
+            run([TOOLS/'map-search.exe', folder/'clearance-grid.bin', folder/'clearance-search.bin', maximum, min(maximum+1, 32)], 180)
+            return read_search(folder/'clearance-search.bin', maximum**2)
+        incremental = cached(grid, {}, maximum, folder, meta, full_search, progress, kind='clearance')
+        if incremental is None:
+            full_search()
+        else:
+            meta.setdefault('incrementalProbability', {})['clearance'] = incremental[1]
         for origin, selected in enumerate(read_search(folder/'clearance-search.bin', maximum**2)):
             for index, key in enumerate(selected):
                 c = candidates.get(key)
-                if c is not None and not c['clearance']['supported']:
-                    c['potentialMarked'] = not c['marked']
-                    c['clearance'].update(supported=True, witness=dict(origin=[origin % maximum+1, origin//maximum+1],
+                risk = risks.get((c['x'],c['y'])) if c is not None else None
+                if risk is not None and not risk['supported']:
+                    risk.update(supported=True, witness=dict(origin=[origin % maximum+1, origin//maximum+1],
                         candidateIndex=index, candidateCount=len(selected)))
+    for p, c in cells.items():
+        risk = risks.get(p)
+        marked = bool(risk and risk['supported'] and not c['marked'])
+        if c.get('clearance') != risk or c.get('potentialMarked') != marked:
+            c = cells[p] = dict(c)
+            c['potentialMarked'] = marked
+            if risk is None: c.pop('clearance', None)
+            else: c['clearance'] = risk
     markers = [[c['x'], c['y']] for c in cells.values() if c['potentialMarked']]
     return markers, dict(model='all-supported-objects-cleared', probabilityComputed=False,
         description='假设地图预置建筑、矿物、树木／地形物及地面单位／步兵全部完全移除，且不留下废墟或新覆盖物；保持地形、高度、其他 Overlay 和规则不变。斜纹格在此布局有随机落箱路径，随后变为禁行；不表示当前出箱概率，也不推演实际拆除过程。',
@@ -114,7 +129,7 @@ def finish_preview(cells, res, theater, tmps, meta, folder, filename, progress, 
                 partialAnalysis=bool(reason or meta.get('loadIssues')), resourceFiles=[str(p) for p in res.mix_paths])
     if reason:
         meta['analysisError'] = reason
-        meta['warnings'].insert(0, '部分加载：'+reason+'。已保留可读取的地形和对象；缺失规则可能影响全图的附近搜索及重抽，未计算概率或禁行风险。')
+        meta['warnings'].insert(0, '部分加载：'+reason+'。已保留可读取的地形和对象；缺失规则可能影响全图的附近搜索及放置判定，未计算概率或禁行风险。')
     for c in cells.values():
         c.update(probability=None, multiplier=None, oneAttemptProbability=None, terms=[], marked=False, potentialMarked=False)
     rendering = render_ground(cells, res, theater, tmps, folder, meta, progress)
@@ -129,19 +144,19 @@ def finish_preview(cells, res, theater, tmps, meta, folder, filename, progress, 
     return report
 
 
-def partial_preview(data, folder, version, filename, progress, mix_paths=None, minerals_enabled=True, reason=None):
+def partial_preview(data, folder, version, filename, progress, mix_paths=None, minerals_enabled=True, reason=None, simulation=None):
     start = time.perf_counter()
     folder.mkdir(parents=True, exist_ok=True)
     progress('部分内容尚不支持，继续读取可用地形与对象', 10)
     cells, res, theater, tmps, meta = parse_map(data, folder, version, progress, mix_paths,
-        visual_only=True, minerals_enabled=minerals_enabled)
+        visual_only=True, minerals_enabled=minerals_enabled, simulation=simulation)
     (folder/'source.map').write_bytes(data)
     from realmap_approx import prepare
     prepare(cells, res, theater, meta, reason)
     return finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start)
 
 
-def analyze_directory(data, folder, filename, progress, minerals_enabled=True, resource_root=None):
+def analyze_directory(data, folder, filename, progress, minerals_enabled=True, resource_root=None, simulation=None, analysis_context=None):
     from realmap_mod import ModResources, selected_root
     from realmap_approx import prepare
     root = resource_root or selected_root()
@@ -151,9 +166,9 @@ def analyze_directory(data, folder, filename, progress, minerals_enabled=True, r
     folder.mkdir(parents=True, exist_ok=True)
     source = folder/'source.map'; source.write_bytes(data)
     progress('从所选游戏目录发现规则、art 和资源包', 5)
-    res = ModResources(root, source)
+    res = analysis_context or ModResources(root, source)
     cells, res, theater, tmps, meta = parse_map(data, folder, res.version, progress,
-        resource_context=res, visual_only=True, minerals_enabled=minerals_enabled)
+        resource_context=res, visual_only=True, minerals_enabled=minerals_enabled, simulation=simulation)
     found = res.discovery
     meta.update(filename=Path(filename.replace('\\','/')).name[:160], resourceProfile='directory',
                 previewOnly=True, version='directory', engineVersion=res.version, resourceFiles=list(res.mix_paths),
@@ -181,21 +196,21 @@ def analyze_directory(data, folder, filename, progress, minerals_enabled=True, r
     return report
 
 
-def analyze(data, folder, version='yr', filename='map.yrm', progress=lambda *args: None, mix_paths=None, minerals_enabled=True, resource_root=None, *, use_precomputed=True):
+def analyze(data, folder, version='yr', filename='map.yrm', progress=lambda *args: None, mix_paths=None, minerals_enabled=True, resource_root=None, *, use_precomputed=True, simulation=None, analysis_context=None):
     if version in ('directory', 'shikong'):
-        return analyze_directory(data, folder, filename, progress, minerals_enabled=minerals_enabled, resource_root=resource_root)
+        return analyze_directory(data, folder, filename, progress, minerals_enabled=minerals_enabled, resource_root=resource_root, simulation=simulation, analysis_context=analysis_context)
     start = time.perf_counter()
     folder.mkdir(parents=True, exist_ok=True)
     try:
-        cells, res, theater, tmps, meta = parse_map(data, folder, version, progress, mix_paths, minerals_enabled=minerals_enabled)
+        cells, res, theater, tmps, meta = parse_map(data, folder, version, progress, mix_paths, resource_context=analysis_context, minerals_enabled=minerals_enabled, simulation=simulation)
     except (ValueError, OSError, struct.error) as error:
         # The preview repeats validation of the map core and compressed terrain.
         # Corrupt/non-map input still fails; unsupported model data can load.
         return partial_preview(data, folder, version, filename, progress, mix_paths,
-                               minerals_enabled=minerals_enabled, reason=str(error))
+                               minerals_enabled=minerals_enabled, reason=str(error), simulation=simulation)
     meta['resourceFiles'] = [Path(p).name for p in res.mix_paths]
     (folder/'source.map').write_bytes(data)
-    return finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start, use_precomputed=use_precomputed)
+    return finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress, start, use_precomputed=use_precomputed and simulation is None)
 
 
 def compute_analysis(cells, folder, meta, theater, progress):
@@ -210,15 +225,34 @@ def compute_analysis(cells, folder, meta, theater, progress):
         statuses[key] = c['status']
     (folder / 'search-grid.bin').write_bytes(grid)
     maximum = sum(meta['size'][2:])-1
-    progress(f'穷举 {maximum**2:,} 个初始坐标的原生顺序搜索', 48)
-    run([TOOLS / 'map-search.exe', folder / 'search-grid.bin', folder / 'search.bin', maximum, min(maximum+1, 32)], 180)
-    probability = calculate(read_search(folder/'search.bin', maximum**2), statuses, maximum**2, progress=progress)
+    from incremental_probability import cached
+    def full_search():
+        progress(f'穷举 {maximum**2:,} 个初始坐标的原生顺序搜索', 48)
+        run([TOOLS / 'map-search.exe', folder / 'search-grid.bin', folder / 'search.bin', maximum, min(maximum+1, 32)], 180)
+        return read_search(folder/'search.bin', maximum**2)
+    incremental = cached(grid, statuses, maximum, folder, meta, full_search, progress)
+    if incremental is None:
+        probability = calculate(full_search(), statuses, maximum**2, progress=progress)
+    else:
+        probability, statistics = incremental
+        meta.setdefault('incrementalProbability', {})['current'] = statistics
     result_cells = probability.pop('cells')
     markers = []
     shadowed = []
-    for p, c in cells.items():
-        c.update(result_cells.get(p[1]*512+p[0], dict(probability=0, multiplier=0, oneAttemptProbability=0, terms=[])))
-        c['marked'] = bool(c['rockTransition'] and c['terms'])
+    prepared = theater.get('_layoutPrepared')
+    inputs = dict(cells)
+    previous_inputs, previous_cells = prepared.get('computed', ({}, {})) if prepared else ({}, {})
+    zero = dict(probability=0, multiplier=0, oneAttemptProbability=0, terms=[])
+    reused = 0
+    for p, raw in cells.items():
+        value = result_cells.get(p[1]*512+p[0], zero)
+        old = previous_cells.get(p)
+        if previous_inputs.get(p) is raw and old is not None and all(old.get(k) == v for k,v in value.items()):
+            c = cells[p] = old; reused += 1
+        else:
+            c = cells[p] = {**raw, **value}
+            c['marked'] = bool(c['rockTransition'] and c['terms'])
+            if approximate: c['potentialMarked'] = False
         if c['marked']:
             markers.append([p[0], p[1]])
         elif c['rockTransition'] and c['candidate'] and (c['track'] or c['float']):
@@ -226,10 +260,11 @@ def compute_analysis(cells, folder, meta, theater, progress):
     if approximate:
         potential, clearance = [], dict(model='unverified', probabilityComputed=False,
             description='近似计算仅估计落箱概率，尚未验证放箱后／清空对象后的禁行风险。')
-        for c in cells.values():
-            c['potentialMarked'] = False
     else:
         potential, clearance = clearance_risks(cells, folder, meta, theater['effectiveRules'], progress)
+    if prepared is not None:
+        prepared['computed'] = inputs, dict(cells)
+    meta.setdefault('layoutUpdate', {}).update(reusedResultCells=reused)
     return dict(probability=probability, markers=markers, zeroProbabilityRockCandidates=shadowed,
                 potentialMarkers=potential, clearance=clearance)
 
@@ -247,13 +282,36 @@ def finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress,
         computed = compute_analysis(cells, folder, meta, theater, progress)
         meta.setdefault('calculationSource', dict(kind='live', reason='forced' if not use_precomputed else 'not-covered'))
     markers, potential, clearance = computed['markers'], computed['potentialMarkers'], computed['clearance']
+    from incremental_probability import publish_probability
+    publish_probability(cells, computed, meta)
+    from incremental_probability import defer_render_requested
+    theater.pop('_layoutPrepared', None); theater.pop('_layoutDirty', None)
+    # A renderer owns its cell dictionaries. Cached layouts and published
+    # probability snapshots must not acquire geometry/bridge rendering fields.
+    cells = {p:dict(c) for p,c in cells.items()}
+    for c in cells.values():
+        if c.get('bridge'): c['bridge'] = dict(c['bridge'])
+    finish = lambda: complete_analysis(cells, res, theater, tmps, meta, folder, progress, start, computed)
+    return PendingAnalysis(finish) if defer_render_requested() else finish()
+
+
+class PendingAnalysis:
+    def __init__(self, finish):
+        self.finish = finish
+
+
+def complete_analysis(cells, res, theater, tmps, meta, folder, progress, start, computed):
+    version = meta['version']; approximate = bool(meta.get('approximate'))
+    markers, potential, clearance = computed['markers'], computed['potentialMarkers'], computed['clearance']
     rendering = render_ground(cells, res, theater, tmps, folder, meta, progress)
     if approximate:
         for missing in rendering.get('missingSprites', []):
             meta['loadIssues'].append(dict(message='地形物／覆盖物贴图未能绘制：'+missing, count=1, cells=[]))
     meta['elapsedSeconds'] = round(time.perf_counter()-start, 3)
-    report = dict(schemaVersion=3 if approximate else 2, model='approximate-unknown-retry' if approximate else ('original-YR-1.001' if version == 'yr' else 'original-RA2-1.006')+'-static-next-crate', metadata=meta, rendering=rendering,
+    report = dict(schemaVersion=3 if approximate else 2, model='approximate-unknown-failure' if approximate else ('original-YR-1.001' if version == 'yr' else 'original-RA2-1.006')+'-static-next-crate', metadata=meta, rendering=rendering,
                   **computed, cells=list(cells.values()))
+    from region_navigation import build as build_navigation
+    report['regionNavigation'] = build_navigation(report, theater['effectiveRules'])
     write_report(folder/'result.json', report, compressed=False)
     with (folder/'cells.csv').open('w', encoding='utf-8-sig', newline='') as output:
         names = ['x', 'y', 'level', 'slope', 'rawLand', 'land', 'postLand', 'overlayName', 'terrain', 'occupied',
@@ -275,6 +333,8 @@ def finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress,
             c = cells[tuple(p)]; risk = c['clearance']
             writer.writerow([*p, c['level'], LANDS[risk['land']], LANDS[risk['postLand']], c['probability'],
                              json.dumps(c['removable'], ensure_ascii=False), json.dumps(risk['witness']), json.dumps(c['higher']), clearance['description']])
+    from map_results import remember_analysis_context
+    meta['resourceContextSeeded'] = bool(remember_analysis_context(meta, folder/'result.json', res))
     return report
 
 

@@ -19,18 +19,18 @@
    if(!source||options.filter!=='all'&&(options.filter==='water'?source.land!==2:source.land===2)||!display.meetsThreshold(source,options.threshold||0))return [];
    const value=display.get(source);
    if(!(value.multiplier>0))return [];
-   return [{cell:c,multiplier:value.multiplier,alpha:options.baselineLayer===false&&value.isBaseline?0:display.cellAlpha(source,{opacity:1-options.opacity/100}),
+   return [{cell:c,multiplier:value.multiplier,alpha:options.baselineLayer===false&&value.isBaseline?0:display.cellAlpha(source,{opacity:1-options.opacity/100,baselineFactor:options.paletteColors?.baselineFactor}),
     label:display.showLabel(source,options.baselineValues)?value.multiplier.toFixed(1)+'×':null}];
   });
  }
- const land=['Clear','Road','Water','Rock','Wall','Tiberium','Beach','Rough','Ice','Railroad','Tunnel'];
+ const land=[_t('平地'),_t('道路'),_t('水面'),_t('不可通行地面'),_t('围墙'),_t('矿石'),_t('海滩'),_t('粗糙地面'),_t('冰面'),_t('铁轨'),_t('隧道')];
  // Risk flags come from the same exact analysis as the main map. Do not infer
  // an anomaly from Rough/high differences or from a rounded probability alone.
  const riskStyles={
   current:{color:0xff77c6,alpha:.34,pattern:'solid',label:_t('放箱后禁行')},
   potential:{color:0xed9dca,alpha:.22,pattern:'hatch',label:_t('清空后潜在禁行')},
-  zero:{color:0xf0ad69,alpha:.13,pattern:'dots',label:_t('Rough · 落箱概率 0')},
-  other:{color:0xb6bdc7,alpha:.13,pattern:'dots',label:_t('Rough · 未归入异常点')}
+  zero:{color:0xf0ad69,alpha:.13,pattern:'dots',label:_t('粗糙地面 · 概率 0')},
+  other:{color:0xb6bdc7,alpha:.13,pattern:'dots',label:_t('粗糙地面')}
  };
  function riskCategory(c){
   if(c.marked)return 'current';
@@ -44,21 +44,15 @@
    if(c.land===7&&c.higher.length)return _t('Rough 例外 · 放箱前地面类型允许通行');
    return `${land[c.land]} · ${c.land===3?_t('当前地面已禁行'):_t('地面类型允许通行')}${c.higher.length?_t(' · 命中高差判定'):''}`;
   }
-  if(meta.previewOnly)return (meta.partialAnalysis?_t('部分地图预览'):_t('地图外观预览'))+_t(' · 未验证禁行规则');
-  if(meta.approximate)return _t('近似概率，不保证准确 · 未验证禁行规则');
-  if(!meta.predictionEnabled)return _t('本图未启用四级高差禁行判定');
-  if(after)return `${land[c.land]} → ${land[c.postLand]} · ${c.postLand===3?_t('放箱后地面禁行'):_t('放箱后未变为 Rock 地面')}`;
-  const category=riskCategory(c),prefix=c.land===7?_t('Rough 例外 · '):'';
-  if(category==='current')return _t`${prefix}当前可随机落箱，放箱后禁行 · 对应主图实色粉标`;
-  if(category==='potential')return _t`${prefix}当前落箱概率为 0；清空对象后可随机落箱，随后禁行 · 对应主图斜纹粉标`;
-  if(category==='zero'){
-   const reason=c.primary===false?_t('；高度投影判定未选中此低格'):c.status==='ghost'?_t('；此坡型不生成实体箱'):'';
-   const cleared=c.clearance?.supported===false?_t('；清空对象后仍无随机落箱路径'):'';
-   return _t`${prefix}随机落箱概率为 0${reason}${cleared} · 不属于主图异常点`;
-  }
-  if(category==='other')return _t`${prefix}未归入主图异常点；不能仅凭高差条件判断放箱风险`;
-  if(c.land===3)return _t`Rock · 当前地面已禁行${c.higher.length?_t('，命中高差判定'):''}`;
-  return `${land[c.land]||_t('未知地面')} · ${c.higher.length?_t('命中高差位置；当前地面类型未变为 Rock'):_t('未命中高差判定')}`;
+  if(meta.previewOnly)return _t('外观预览');
+  if(meta.approximate)return _t('近似概率');
+  if(!meta.predictionEnabled)return land[c.land]||_t('未知');
+  if(after)return c.postLand===3?_t('放箱后无法通行。'):_t('放箱后可通行');
+  const category=riskCategory(c);
+  if(category==='current')return _t('放箱后无法通行。');
+  if(category==='potential')return _t('清空对象后放箱将无法通行。');
+  return land[c.land]||_t('未知');
+
  }
  let library;
  function loadLibrary(){
@@ -259,9 +253,9 @@
      const fine=$('terrain3dRelief').checked&&reliefAssets.size>0;relief.visible=fine;coarse.visible=!fine;
      if(probabilityOn&&hasProbability)buildProbability();probabilityLayer.visible=probabilityOn&&hasProbability;
      $('terrain3dProbability').disabled=busy||!hasProbability;$('terrain3dProbability').textContent=_t('概率:')+(probabilityLayer.visible?_t('开'):_t('关'));$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityLayer.visible));
-     $('terrain3dProbability').title=hasProbability?_t('同时显示概率着色和倍率；沿用主图配色、筛选、透明度及 1× 标签设置，放大可查看倍率'):_t('本图未计算概率');
-     $('terrain3dProbabilityNote').hidden=!probabilityLayer.visible;
-     $('terrain3dProbabilityNote').textContent=hasProbability?_t`${data.metadata.approximate?_t('近似概率，不保证准确；未知格按放箱失败重抽。'):''}概率与主图使用同一结果；1× 基准 ${root.CrateProbabilityDisplay.percent(probability.display.baselineProbability)}。放大可查看倍率；仅切换显示，不重新计算。`:'';
+     $('terrain3dProbability').title=hasProbability?_t('显示概率和倍率'):_t('本图未计算概率');
+     $('terrain3dProbabilityNote').hidden=true;
+     $('terrain3dProbabilityNote').textContent='';
      const enabled=data.metadata.predictionEnabled,show=$('terrain3dMarkers').checked;
      const rel=relationships(selected,lookup);
      if(show&&enabled){
@@ -277,20 +271,20 @@
      label(selected,_t`选中 (${selected.x}, ${selected.y}) · L${selected.level}${enabled&&selectedRisk?' · '+selectedRisk.label:''}`,true);
      $('terrain3dTitle').textContent=_t`3D 地形 · (${selected.x}, ${selected.y})`;
      $('terrain3dCrate').disabled=busy||!selected.canPlace;$('terrain3dCrate').setAttribute('aria-pressed',String(after));$('terrain3dCrate').textContent=after?_t('恢复放箱前'):_t('预览放箱后');
-     $('terrain3dCrate').title=data.metadata.demonstration==='single'?(selected.canPlace?_t('只比较放箱前后的地面类型，不代表已计算随机落点概率'):_t('此格地面已禁行，请选择 Rough 例外或普通可通行格')):selected.canPlace?_t('只比较地面类型，分析结果保持不变'):_t('当前格没有已验证的实体箱随机落点，无法预览放箱');
+     $('terrain3dCrate').title=data.metadata.demonstration==='single'?(selected.canPlace?_t('只比较放箱前后的地面类型，不代表已计算随机落点概率'):_t('此格地面已禁行，请选择 Rough 例外或普通可通行格')):selected.canPlace?_t('预览放箱后'):_t('此格无法预览放箱');
      $('terrain3dMarkers').disabled=!enabled;
-     $('terrain3dDetail').textContent=_t`(${selected.x}, ${selected.y}) · 高度 ${selected.level} / 坡型 ${selected.slope} · ${description(selected,data.metadata,after)}${selected.occupied?_t(' · 当前有对象占用'):''}`;
+     $('terrain3dDetail').textContent=_t`(${selected.x}, ${selected.y}) · 高度 ${selected.level} · ${description(selected,data.metadata,after)}${selected.occupied?_t(' · 当前有对象占用'):''}`;
      $('terrain3dRelations').replaceChildren();
      const refs=selected.higher.length?selected.higher:selected.affected;
-     const prefix=document.createElement('span');prefix.textContent=!enabled?'':selected.higher.length?_t('相关高格：'):selected.affected.length?_t('受此高格影响：'):_t('附近没有与此格关联的高差判定。');$('terrain3dRelations').append(prefix);
+     const prefix=document.createElement('span');prefix.textContent=!enabled?'':selected.higher.length?_t('相关高格：'):selected.affected.length?_t('受此高格影响：'):'';$('terrain3dRelations').append(prefix);
      for(const[x,y,l]of refs){const button=document.createElement('button');button.textContent=`(${x}, ${y}) L${l}`;button.disabled=!lookup.has(`${x},${y}`);button.title=button.disabled?_t('位于当前局部范围外，居中或扩大范围后查看'):_t('选中此格');button.onclick=()=>choose(lookup.get(`${x},${y}`));$('terrain3dRelations').append(button);}
-     $('terrain3dSource').textContent=data.simplified?_t('简化 3D：沿用原地图高度、坡形和桥面高度；方块崖壁与对象符号仅作示意，概率和判定标识与主图一致。'):data.metadata.sourceDescription||_t`${data.metadata.filename} · ${data.metadata.theater} · 矿石/树木${data.metadata.mineralsEnabled===false&&data.metadata.treesEnabled!==false?_t('混合'):data.metadata.mineralsEnabled===false?_t('关（无矿石、无树木布局）'):_t('开')} · ${cells.length} 格 / ${data.metadata.uniqueTiles} 种实际地块 · ${fine?_t('崖壁按原图轮廓与深度细分重建，未绘制的背面使用补面'):_t('崖壁使用简化模型')}；坡面与树木为贴图重建。${data.metadata.missing.length?' '+data.metadata.missing.length+_t(' 项资源缺失，使用占位或省略外观。'):''}${data.metadata.bridgeNote?' '+data.metadata.bridgeNote:''}`;
+     $('terrain3dSource').hidden=true;$('terrain3dSource').textContent='';
      const warnings=data.metadata.missing;
      $('terrain3dWarnings').hidden=!warnings.length;$('terrain3dWarningsText').textContent=warnings.join('\n');
      const counts={current:0,potential:0,zero:0,other:0};for(const c of cells){const category=riskCategory(c);if(category)counts[category]++;}
      for(const category of Object.keys(counts)){$(`terrain3dCount-${category}`).textContent=counts[category];}
      $('terrain3dLegendOther').hidden=!counts.other;
-     $('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=!enabled;canvas.setAttribute('aria-label',_t`可旋转的附近地形。${$('terrain3dDetail').textContent}`);requestDraw();
+     $('terrain3dLegend').hidden=!enabled;$('terrain3dRiskScope').hidden=true;canvas.setAttribute('aria-label',_t`可旋转的附近地形。${$('terrain3dDetail').textContent}`);requestDraw();
     }
     function choose(c,notify=true){if(!c)return;selected=c;after=false;update();if(notify)onSelect(c.x,c.y);}
     function setCamera(){const focus=target.clone().add(pan),distance=35;camera.position.set(focus.x+distance*Math.cos(pitch)*Math.sin(yaw),focus.y+distance*Math.sin(pitch),focus.z+distance*Math.cos(pitch)*Math.cos(yaw));camera.lookAt(focus);const half=viewHalfSize(data.radius,zoom,width,heightPx);camera.left=-half*width/heightPx;camera.right=half*width/heightPx;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();camera.updateMatrixWorld();}

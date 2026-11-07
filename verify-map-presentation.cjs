@@ -21,24 +21,29 @@ cells[1].removable=[{category:'unit',type:'unit,"quoted"\nname'}];
 const data={metadata:{filename:'fixture.map',sourceSha256:'fixture-hash',version:'yr',cellCount:3,
  size:[0,0,20,20],localSize:[2,2,16,12],visibleRect:[2,2,16,12],warnings:[],elapsedSeconds:1},
  rendering:{objects:{total:1,requested:2,hidden:[],missing:[{type:'MISSING',reason:'无贴图'}],warnings:[]}},cells,
- probability:{sampleCount:10,finalSuccess:.5,finalGhost:0,finalFailure:0,period:1,weightPeriod:1,
+ probability:{model:'finite-retry-v2',attemptLimit:1000,sampleCount:10,finalSuccess:.5,finalFailure:0,period:1,
  exact:{denominator:'100',failureNumerator:'1',coefficients:[{n:1,numerator:'10'}]}},
  markers:[[10,10]],potentialMarkers:[[11,10]],zeroProbabilityRockCandidates:[],clearance:{description:'移除对象，保留地形'}};
 const lookup=new Map(cells.map(c=>[`${c.x},${c.y}`,c])),display=D.map(data);
+// The user's details disclosure survives replacement, immediate re-selection
+// (before the browser toggle task), and an interval with no selected cell.
+view.cell(cells[0],data,display);let technical=$('cellInfo').children.find(n=>n.tag==='details');technical.open=true;
+view.cell(cells[1],data,display);assert.equal($('cellInfo').children.find(n=>n.tag==='details').open,true);
+view.clear();view.cell(cells[2],data,display);technical=$('cellInfo').children.find(n=>n.tag==='details');assert.equal(technical.open,true);
+technical.open=false;technical.ontoggle();view.clear();view.cell(cells[0],data,display);assert.equal($('cellInfo').children.find(n=>n.tag==='details').open,false);
 let focused;
 const show=report=>view.report({data:report,base:'/output/test/',url:'/output/test/result.json'},D.map(report),{lookup,onFocus:c=>focused=c});
 show(data);view.cell(cells[0],data,display);
 assert.match($('cellInfo').textContent,/4\.0×/);
 assert.match($('cellInfo').textContent,/40%/);
-assert.match($('cellInfo').textContent,/相关高格：\(9,10\) 高 6/);
+assert.match($('cellInfo').textContent,/放箱后无法通行/);
 assert.equal($('markerList').children[0].classList.contains('selected'),true);
 $('potentialList').children[0].onclick();assert.equal(focused,cells[1]);
 assert.equal($('heatmap').disabled,false);assert.equal($('riskLists').hidden,false);
 assert.match($('objectWarnings').textContent,/MISSING：无贴图/);
 assert.match($('stats').textContent,/极小（非零）/);
 view.transfer({sources:[{reason:'投影优先规则',cell:null},{reason:'障碍',cell:cells[1]}]});
-assert.match($('transferInfo').textContent,/2 个起点/);assert.match($('transferInfo').textContent,/其中 1 个/);
-assert.match($('transferInfo').textContent,/最近边缘地形/);
+assert.equal($('transferInfo').textContent,'青蓝：2 个来源格 · 再次点击取消');
 view.transfer(null,'读取失败');assert.equal($('transferInfo').textContent,'读取失败');
 view.clear();assert.equal($('transferInfo').hidden,true);assert.equal($('markerList').children[0].classList.contains('selected'),false);
 
@@ -46,12 +51,13 @@ const approx={...data,metadata:{...data.metadata,version:'directory',resourceRoo
  approximation:{retryCellCount:1,assumptions:['未验证扩展行为']},loadIssues:[{message:'缺少规则',count:1,cells:[[11,10]]}]}};
 const unknown={...cells[1],assumedRetry:true,retryAssumptions:['未知单位'],bridge:{kind:'high',deckLevel:6},objectsGround:['TREE'],objectsDeck:[]};
 show(approx);view.cell(unknown,approx,{get:()=>({multiplier:0})});
-assert.match($('cellInfo').textContent,/近似概率，不保证准确/);
+assert.match($('cellInfo').textContent,/近似概率/);assert.doesNotMatch($('cellInfo').textContent,/不保证/);
 assert.match($('cellInfo').textContent,/桥下对象TREE/);
-assert.match($('cellInfo').textContent,/搜索选中本格后重新抽取/);
-assert.equal($('markers').disabled,true);assert.equal($('heatmap').disabled,false);
+assert.match($('cellInfo').textContent,/未知单位/);
+assert.doesNotMatch($('cellInfo').textContent,/重抽|重新抽取/);
+assert.equal($('markers').disabled,false);assert.equal($('heatmap').disabled,false);
 assert.equal($('retryMod').hidden,true);assert.match($('analysisIssues').textContent,/未验证扩展行为/);
-assert.match(Details.completion(approx),/1 格采用重抽假设/);
+assert.equal(Details.completion(approx),'地图已加载');
 
 const preview={...data,probability:null,metadata:{...data.metadata,previewOnly:true,partialAnalysis:true,analysisError:'不可计算',warnings:['未计算概率']}};
 show(preview);view.cell({...cells[0],terrainError:'未知 TMP'},preview,D.map(preview));
@@ -59,6 +65,17 @@ assert.equal($('cellFraction').disabled,true);assert.equal($('heatmap').disabled
 assert.match($('cellInfo').textContent,/未计算概率/);assert.match($('cellInfo').textContent,/未知 TMP/);
 show(data);assert.equal($('cellFraction').disabled,false);assert.equal($('analysisNotice').hidden,true);
 assert.equal($('jsonDownload').textContent,'下载精确概率 JSON');
+for(const variant of [0,15]){
+ view.cell({...cells[0],overlay:24,overlayName:'GAWALL',overlayData:variant},data,{get:()=>display.get(cells[0])});
+ const basic=$('cellInfo').children[0];assert(basic.children.some(row=>row.children[0].textContent==='Overlay'&&row.children[1].textContent==='GAWALL'));
+ assert(basic.children.some(row=>row.children[0].textContent==='变体编号'&&row.children[1].textContent===String(variant)),'Overlay variants belong in the main detail table, including variant zero');
+}
+
+show(data);const unchangedWarnings=$('objectWarnings').children[0],unchangedMarker=$('markerList').children[0],statNode=$('stats').children[1];
+const live={...data,probability:{...data.probability,finalSuccess:.75,finalFailure:.25}};
+view.update({data:live,base:'/output/test/',url:'/output/test/result.json'},D.map(live),{lookup,onFocus:c=>focused=c});
+assert.equal($('objectWarnings').children[0],unchangedWarnings);assert.equal($('markerList').children[0],unchangedMarker);assert.equal($('stats').children[1],statNode);assert.match(statNode.textContent,/75%/);
+const riskChange={...live,markers:[[11,10]]};view.update({data:riskChange,base:'/output/test/',url:'/output/test/result.json'},D.map(riskChange),{lookup,onFocus:c=>focused=c});assert.equal($('markerList').children[0].dataset.key,'11,10');
 
 const before=structuredClone(data),download=Export.report(data,display),report=JSON.parse(download.text);
 assert.equal(download.name,'crate-map-probability.json');assert.equal(report.cells[0].relativeMultiplier,4);
@@ -106,18 +123,20 @@ async function controls(){
  vm.runInContext(fs.readFileSync(__dirname+'/map-exports.js','utf8'),ctx);
  const state={data,cells,lookup:new Map(lookup),selected:cells[0]};
  ctx.CrateMapExports.bind({document:doc,getContext:()=>({state,display}),canvas:{toBlob:fn=>shotCallback=fn},
-  draw:()=>drawn++,mapOptions:options=>{assert.equal(options.snapshotRegions,true);return{};},message:()=>assert.fail('Unexpected export error')});
+  draw:()=>drawn++,mapOptions:options=>{assert.equal(options.snapshotRegions,true);return{};},message:(text,error)=>assert(!error,text)});
  $('jsonDownload').onclick({preventDefault(){}});
  assert.equal(JSON.parse(await links.at(-1).blob.text()).metadata.sourceSha256,'fixture-hash');
  $('cellFraction').onclick();assert.equal(links.at(-1).name,'cell-10-10-exact.json');
  $('screenshot').onclick();assert.equal(drawn,1);
  state.data={...data,metadata:{...data.metadata,filename:'next.map'}};
  shotCallback(new Blob(['png']));assert.equal(links.at(-1).name,'fixture.map-crate-probability.png');
- state.data=data;
+ state.data={...data,cells:cells.slice()};state.cells=cells.slice();state.image={snapshot:()=>({id:'frozen-artwork'})};
  const exporting=$('mapImageExport').onclick();assert.equal($('mapImageExport').disabled,true);
+ state.data.cells[0]={...cells[0],x:999};state.cells[0]=state.data.cells[0];state.image={id:'next-artwork'};
  state.data={...data,metadata:{...data.metadata,filename:'next.map'}};state.lookup.clear();
  frames.shift()();await exporting;
  assert.equal(rendered.lookup.get('10,10'),cells[0],'Changing maps during export must not clear the captured coordinate lookup.');
+ assert.equal(rendered.cells[0],cells[0]);assert.equal(rendered.data.cells[0],cells[0]);assert.equal(rendered.image.id,'frozen-artwork');
  assert.equal(links.at(-1).name,'fixture.map-完整地图.jpg');
  assert.equal($('mapImageExport').disabled,false);
  console.log('PASS: real download handlers, selected fraction, asynchronous screenshot naming and full-map export snapshot.');

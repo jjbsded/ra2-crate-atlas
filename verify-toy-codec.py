@@ -4,10 +4,11 @@ import gzip
 import json
 from pathlib import Path
 from toy_codec import columns,compact_report,compact_search,dumps,expand_report,expand_search,probability_recipe,selections,zipped
+from map_storage import read_json
 
 
 def fixture(folder, output):
-    report=json.loads((folder/'result.json').read_text('utf-8'))
+    report=read_json(folder/'result.json')
     raw=(folder/'search.bin').read_bytes()
     recipe=probability_recipe(report,selections(raw,report['probability']['sampleCount']))
     table=dict(count=len(report['cells']),columns=columns(report['cells']))

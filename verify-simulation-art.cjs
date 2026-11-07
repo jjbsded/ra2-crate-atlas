@@ -1,0 +1,10 @@
+/* Exercise the actual Toy pixel conversion/cache against native part hashes. */
+const fs=require('node:fs'),path=require('node:path'),zlib=require('node:zlib'),crypto=require('node:crypto'),assert=require('node:assert/strict');
+const {createCanvas,loadImage}=require('@napi-rs/canvas');require('./toy-live/components.js');require('./toy-live/objects.js');
+const qa=path.resolve('output/simulation-20261104'),site=path.resolve(process.argv[2]||'output/CrateAtlas-Toy-Simulation-20261104');
+const lib=JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(site,'live/objects/index.json.gz')))),data=JSON.parse(fs.readFileSync(path.join(qa,'art-cases.json')));
+global.document={baseURI:'https://qa.invalid/'};global.CrateWebConfig={liveVersion:'fixed-yellow-stripes'};global.CrateMapPlatform={readJSON:async()=>lib};
+global.CrateToyOriginal={canvas:createCanvas,page:async url=>loadImage(path.join(site,new URL(url).pathname))};
+(async()=>{let count=0;for(const version of ['ra2','yr']){const cases=data.cases.filter(c=>c.version===version),prepared=await CrateLiveObjects.prepare({metadata:{version,theater:'TEMPERATE'},rendering:{visualObjects:cases.map(c=>c.meta)}},()=>true,{baseLibrary:{refs:[]}});
+ for(const c of cases){const parts=prepared.get(c.meta);assert(parts,c.meta.type);assert.equal(parts.length,c.expected.length,c.meta.type+' part count');for(let i=0;i<parts.length;i++){const p=parts[i],e=c.expected[i],rgba=p.image.getContext('2d').getImageData(0,0,p.image.width,p.image.height).data;assert.deepEqual([p.x,p.y,p.image.width,p.image.height,p.shadow],[e.x,e.y,e.width,e.height,e.shadow]);assert.equal(crypto.createHash('sha256').update(rgba).digest('hex'),e.sha256,c.meta.type+' '+version+' fixed stripe pixels / rubble');count++;}}
+}fs.writeFileSync(path.join(qa,'art-verification.json'),JSON.stringify({status:'PASS',states:data.cases.length,parts:count,nonRemapUnchanged:true,fixedThreePixelStripes:true}));console.log('PASS native/Toy fixed yellow/black stripes + rubble:',data.cases.length,'states,',count,'parts');})().catch(e=>{console.error(e);process.exitCode=1;});

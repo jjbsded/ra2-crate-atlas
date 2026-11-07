@@ -26,19 +26,19 @@ def refresh_result(path):
             from realmap_mod import root_for_report
             from realmap import analyze_directory
             return analyze_directory(source.read_bytes(), path.parent, meta['filename'], lambda *a:None,
-                           minerals_enabled=meta.get('mineralsEnabled', True), resource_root=root_for_report(meta))['rendering']
+                           minerals_enabled=meta.get('mineralsEnabled', True), resource_root=root_for_report(meta), simulation=meta.get('simulationPlan'))['rendering']
         from realmap import partial_preview
         return partial_preview(source.read_bytes(), path.parent, meta['version'], meta['filename'], lambda *a:None,
-            minerals_enabled=meta.get('mineralsEnabled', True), reason=meta.get('analysisError'))['rendering']
+            minerals_enabled=meta.get('mineralsEnabled', True), reason=meta.get('analysisError'), simulation=meta.get('simulationPlan'))['rendering']
     if meta.get('approximate'):
         from map_results import resource_context
         res, _ = resource_context(result, path)
         _, res, theater, tmps, _ = parse_map(source.read_bytes(), path.parent,
-            res.version, resource_context=res,
-            visual_only=True, minerals_enabled=meta.get('mineralsEnabled', True))
+            res.version, resource_context=res if meta['version'] in ('directory', 'shikong') else None,
+            visual_only=True, minerals_enabled=meta.get('mineralsEnabled', True), simulation=meta.get('simulationPlan'))
     else:
         _, res, theater, tmps, _ = parse_map(source.read_bytes(), path.parent, meta['version'], lambda *a: None,
-            minerals_enabled=meta.get('mineralsEnabled', True))
+            minerals_enabled=meta.get('mineralsEnabled', True), simulation=meta.get('simulationPlan'))
     cells = {(c['x'], c['y']): c for c in result['cells']}
     result['rendering'] = render(cells, res, theater, tmps, path.parent, meta, lambda *a: None)
     refresh_sprite_issues(meta, result['rendering'])

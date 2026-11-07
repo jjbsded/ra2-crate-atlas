@@ -16,6 +16,39 @@ def wait(service, job):
 
 
 class JobChecks(unittest.TestCase):
+    def test_probability_does_not_wait_for_obsolete_render(self):
+        from realmap import PendingAnalysis
+        from incremental_probability import publish_probability
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def analyze(*args, **kwargs):
+            name = args[3]; calls.append(name)
+            meta = dict(cellCount=1, sourceSha256='test', version='yr')
+            publish_probability({(1,1):dict(x=1,y=1)}, dict(probability={},markers=[],
+                zeroProbabilityRockCandidates=[],potentialMarkers=[],clearance={}), meta)
+            def render():
+                if name == 'old':
+                    entered.set()
+                    if not release.wait(5): raise RuntimeError('test release timeout')
+                return dict(metadata=meta)
+            return PendingAnalysis(render)
+        jobs = MapJobs(analyzer=analyze)
+        plan = dict(map=dict(sha256='test'))
+        old = jobs.submit(b'', 'yr', 'old', (), simulation=plan)
+        self.assertTrue(entered.wait(5))
+        try:
+            new = jobs.submit(b'', 'yr', 'new', (), simulation=plan)
+            deadline = time.monotonic()+2
+            while not jobs.status(new['id']).get('probabilityReady') and time.monotonic()<deadline:
+                time.sleep(.005)
+            self.assertTrue(jobs.status(new['id']).get('probabilityReady'))
+            self.assertFalse(jobs.status(old['id'])['done'])
+        finally:
+            release.set()
+        self.assertTrue(wait(jobs, old)['superseded'])
+        self.assertTrue(wait(jobs, new)['done'])
+        self.assertEqual(calls, ['old', 'new'])
+
     def test_serial_execution_and_busy_admission(self):
         entered, release = threading.Event(), threading.Event()
         calls = []

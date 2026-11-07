@@ -19,6 +19,7 @@ import original_resources as resource_store
 import i18n_settings
 from server_lifecycle import Lifecycle, StartupError, bind_or_reuse
 from map_jobs import MapJobs, BusyError
+from map_storage import singleflight
 
 ROOT = Path(__file__).resolve().parent
 # A newly extracted release must never silently reopen an older installation.
@@ -56,6 +57,12 @@ JOBS = {}
 LOCK = threading.Lock()
 MAPS = MapJobs()
 PICKER_LOCK = threading.Lock()
+
+
+@singleflight
+def resource_status():
+    from realmap_mod import status as mod_status
+    return {**resource_store.status(), 'mod':mod_status()}
 
 
 class LocalServer(ThreadingHTTPServer):
@@ -158,6 +165,10 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if urlsplit(self.path).path == '/api/server/identity':
             return self.server.lifecycle.control(self)
+        if urlsplit(self.path).path.startswith(('/api/resources', '/api/maps/')) and urlsplit(self.path).path != '/api/maps/health':
+            from realmap_mod import lookup_scope
+            with lookup_scope():
+                return self.server.lifecycle.dispatch(self, self.get_application)
         return self.server.lifecycle.dispatch(self, self.get_application)
 
     def get_application(self):
@@ -180,9 +191,28 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if urlsplit(self.path).path == '/api/resources':
             try:
-                from realmap_mod import status as mod_status
-                return self.json({**resource_store.status(), 'mod': mod_status()})
+                return self.json(resource_status())
             except ValueError as error:
+                return self.json({'error': str(error)}, 400)
+        if route.path == '/api/maps/simulation-art':
+            try:
+                from simulation_art import preview
+                from map_results import result_path, load_report
+                query = parse_qs(route.query)
+                path = result_path(query.get('result', [''])[0])
+                report, _ = load_report(path)
+                return self.json(preview(report, path, query.get('type', [''])[0].upper(),
+                                         int(query.get('level', ['0'])[0]), query.get('color', [''])[0]))
+            except (ValueError, OSError, KeyError) as error:
+                return self.json({'error': str(error)}, 400)
+        if route.path == '/api/maps/simulation-source':
+            try:
+                from map_results import simulation_source
+                from map_results import result_path, load_report
+                path = result_path(parse_qs(route.query).get('result', [''])[0])
+                report, _ = load_report(path)
+                return self.json(simulation_source(report, path))
+            except (ValueError, OSError, KeyError, TypeError) as error:
                 return self.json({'error': str(error)}, 400)
         if route.path == '/api/maps/region-navigation':
             try:
@@ -209,6 +239,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_error(404)
         if self.path == '/api/maps/health':
             return self.json({'feature': 'real-maps-v1', 'versions': ['yr', 'ra2'], 'instance': INSTANCE_ID})
+        if self.path.startswith('/api/maps/probability/'):
+            value = MAPS.probability(self.path.rsplit('/', 1)[-1])
+            return self.json(value if value else {'error': '概率快照已过期'}, 200 if value else 404)
         if self.path.startswith('/api/maps/job/'):
             job = MAPS.status(self.path.rsplit('/', 1)[-1])
             return self.json(job if job else {'error': '任务不存在'}, 200 if job else 404)
@@ -239,6 +272,10 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if urlsplit(self.path).path == '/api/server/shutdown':
             return self.server.lifecycle.control(self, shutdown=True)
+        if urlsplit(self.path).path.startswith(('/api/resources', '/api/maps/')):
+            from realmap_mod import lookup_scope
+            with lookup_scope():
+                return self.server.lifecycle.dispatch(self, self.post_application)
         return self.server.lifecycle.dispatch(self, self.post_application)
 
     def post_application(self):
@@ -257,21 +294,37 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(i18n_settings.save(payload['language']))
             except (OSError, ValueError) as error:
                 return self.json({'error': str(error)}, 400)
-        if route.path in ('/api/maps/minerals', '/api/maps/recompute'):
+        live_routes = {'/api/maps/simulation-live/open': 'open',
+                       '/api/maps/simulation-live/edit': 'edit',
+                       '/api/maps/simulation-live/paint': 'paint',
+                       '/api/maps/simulation-live/sources': 'sources',
+                       '/api/maps/simulation-live/close': 'close'}
+        if route.path in ('/api/maps/minerals', '/api/maps/recompute', '/api/maps/simulation', '/api/maps/simulation-patch') or route.path in live_routes:
             expected = f'http://{self.headers.get("Host", "")}'
             if self.headers.get('Origin', expected) != expected:
                 return self.json({'error': '不接受其他网页的分析请求'}, 403)
             try:
                 size = int(self.headers.get('Content-Length', 0))
-                if not 0 < size <= 4096:
+                if not 0 < size <= (8*1024*1024 if '/simulation' in route.path else 4096):
                     raise ValueError('无效请求长度')
-                action = MAPS.recompute if route.path.endswith('/recompute') else MAPS.minerals
-                response = action(json.loads(self.rfile.read(size)))
+                payload = json.loads(self.rfile.read(size))
+                if not isinstance(payload, dict):
+                    raise ValueError('无效请求')
+                live_action = live_routes.get(route.path)
+                if live_action:
+                    from simulation_live import open_session, release_session, request
+                    response = (open_session(payload) if live_action == 'open' else
+                                release_session(payload) if live_action == 'close' else request(payload, live_action))
+                else:
+                    from simulation_visual import patch
+                    action = {'/api/maps/recompute': MAPS.recompute, '/api/maps/minerals': MAPS.minerals,
+                              '/api/maps/simulation': MAPS.simulate, '/api/maps/simulation-patch': patch}[route.path]
+                    response = action(payload)
                 return self.json(response, 202 if 'id' in response else 200)
             except BusyError as error:
                 return self.json({'error': str(error)}, 409)
             except (ValueError, OSError, KeyError, TypeError) as error:
-                return self.json({'error': str(error)}, 400)
+                return self.json({'error': str(error), **({key:getattr(error,key) for key in ('code','reason') if hasattr(error,key)})}, 400)
         if route.path == '/api/resources/directory':
             expected = f'http://{self.headers.get("Host", "")}'
             if self.headers.get('Origin', expected) != expected:

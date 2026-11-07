@@ -1,0 +1,21 @@
+'use strict';
+const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs');
+const base=process.env.SIM_BASE||'http://127.0.0.1:8799/',tag=process.env.PROFILE_OUT||'after',file='/output/map-22309489b5d3/result.json';
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const p=await browser.newPage({viewport:{width:1900,height:1300}}),requests=[],warnings=[],errors=[];let record=false;
+ p.on('pageerror',e=>errors.push(e.message));p.on('console',m=>{if(m.type()==='warning')warnings.push(m.text());});p.on('request',r=>{if(record&&r.method()==='POST'&&r.url().includes('/api/maps/'))requests.push({url:new URL(r.url()).pathname,at:Date.now()});});
+ await p.goto(base+'maps.html?result='+file);await p.waitForFunction(()=>window.CrateMapViewer?.simulation.model&&!CrateMapViewer.state.busy,null,{timeout:120000});await p.locator('#simulationPlaceTab').click();await p.waitForFunction(()=>CrateMapViewer.state.liveEditing,null,{timeout:120000});await p.locator('#minimap').uncheck();
+ const samples=[];p.on('response',async r=>{if(r.url().endsWith('/api/maps/simulation-live/open'))try{const value=await r.json();if(value.timing)console.log('OPEN',JSON.stringify(value.timing));}catch{}});
+ async function place(){await p.locator('#map').scrollIntoViewIfNeeded();const point=await p.evaluate(()=>{const v=CrateMapViewer,m=v.simulation.model,c=m.source.cells.find(c=>c.level===0&&c.overlay===255&&c.surfaceVisibility!==0&&m.placement('MTNK',c.x,c.y).allowed),cell=v.state.lookup.get(c.x+','+c.y);v.state.scale=1.5;v.state.x=v.area.x+v.area.w/2-cell.px*1.5;v.state.y=v.area.y+v.area.h/2-cell.py*1.5;v.draw();const r=document.getElementById('map').getBoundingClientRect(),k=r.width/v.viewport.width;return [r.x+(v.area.x+v.area.w/2)*k,r.y+(v.area.y+v.area.h/2)*k];});const before=await p.evaluate(()=>CrateMapViewer.simulation.model.count),start=Date.now();record=true;await p.mouse.click(...point);await p.waitForFunction(count=>CrateMapViewer.simulation.model.count>count,before);await p.waitForFunction(()=>!CrateMapViewer.simulation.waiting&&!CrateMapViewer.simulation.computing&&document.getElementById('mapBusy').hidden,null,{timeout:120000});const result=await p.evaluate(()=>({live:CrateMapViewer.state.liveEditing,probability:CrateMapViewer.state.liveProbability,artwork:CrateMapViewer.state.liveArtwork,count:CrateMapViewer.simulation.model.count}));record=false;samples.push({elapsedMs:Date.now()-start,...result});}
+ await place();
+ // A separate server is mandatory: these two opens deliberately evict the
+ // test session, without disturbing any session on the user's main server.
+ assert(new URL(base).port!=='8767');await p.evaluate(async file=>{for(let i=0;i<2;i++)await CrateLocalAPI.json('/api/maps/simulation-live/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:file})});},file);
+ await place();
+ // Once both existing slots contain edited sessions, the true LRU handle may
+ // still expire; the client must reconnect rather than generate reports.
+ await p.evaluate(async file=>{const plan=CrateMapViewer.state.data.metadata.simulationPlan;await CrateLocalAPI.json('/api/maps/simulation-live/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:file,resume:{probability:1,painted:1,plan,paintPlan:plan}})});await CrateLocalAPI.json('/api/maps/simulation-live/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:file})});},file);
+ await place();await place();assert.deepEqual(errors,[]);fs.mkdirSync('output/live-recovery-qa',{recursive:true});fs.writeFileSync('output/live-recovery-qa/'+tag+'.json',JSON.stringify({samples,requests,warnings},null,2));
+ if(process.env.RECOVERY_ASSERT){assert(samples.every(s=>s.live),'An expired session reconnects instead of permanently degrading');assert(!requests.some(r=>r.url==='/api/maps/simulation'),'Ordinary recovery does not generate a full map report');}
+ console.log(JSON.stringify({tag,samples:samples.map(s=>({elapsedMs:s.elapsedMs,live:s.live,count:s.count,probabilityMs:s.probability?.elapsedMs,artworkMs:s.artwork?.elapsedMs})),warnings,fullReports:requests.filter(r=>r.url==='/api/maps/simulation').length}));
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

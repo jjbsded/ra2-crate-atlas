@@ -16,7 +16,7 @@
    throw Error(_t('本地服务返回的内容不完整或格式不正确。')+help);
   }
   _i18n?.diagnostics(data);
-  if(!response.ok){const error=Error(data.error||_t`本地服务请求失败（${response.status}）。请重试。`);error.status=response.status;throw error;}
+  if(!response.ok){const error=Error(data.error||_t`本地服务请求失败（${response.status}）。请重试。`);error.status=response.status;if(data.code)error.code=data.code;if(data.reason)error.reason=data.reason;throw error;}
   return data;
  }
  function pause(ms,signal){
@@ -28,16 +28,17 @@
    signal?.addEventListener('abort',abort,{once:true});
   });
  }
- async function waitForMapJob(job,{request=json,wait=pause,onProgress,signal}={}){
+ async function waitForMapJob(job,{request=json,wait=pause,onProgress,signal,pollInterval=700}={}){
   if(job.url)return job.url;
   if(!job.id)throw Error(_t('分析任务缺少编号，请重新分析地图'));
   for(;;){
    signal?.throwIfAborted();
    const status=await request('/api/maps/job/'+job.id,{signal});
    if(status.error)throw Error(status.error);
-   onProgress?.(status);
+   await onProgress?.(status);
+   if(status.superseded)throw new DOMException('Superseded','AbortError');
    if(status.done){if(!status.url)throw Error(_t('分析已结束，但结果记录缺失，请重新分析地图'));return status.url;}
-   await wait(700,signal);
+   await wait(status.probabilityReady?Math.max(200,pollInterval):pollInterval,signal);
   }
  }
  const api={json,waitForMapJob};root.CrateLocalAPI=api;if(typeof module!=='undefined')module.exports=api;

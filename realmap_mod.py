@@ -8,9 +8,10 @@ import sys
 from runtime_bootstrap import ROOT
 from realmap_resources import Resources, THEATERS
 from realmap_format import sha
+from map_storage import singleflight
 
 sys.path.insert(0, str(ROOT/'resource_context'))
-from ra2mod import Context, Resources as DirectoryResources
+from ra2mod import Context, Resources as DirectoryResources, lookup_scope
 
 DIRECTORY_VERSIONS = ('directory', 'shikong')  # Compatibility with old reports only.
 DISCOVERY_VERSION = 1
@@ -80,6 +81,7 @@ def discover(root):
     return _discover(*directory_manifest(root))
 
 
+@singleflight
 @lru_cache(maxsize=4)
 def _discover(root, manifest):
     reader = DirectoryResources(root, [])
@@ -134,15 +136,16 @@ def _discover(root, manifest):
                 sources=sources, issues=issues, assumptions=assumptions, archiveCount=len(archives))
 
 
-def status():
+def status(root=None, found=None):
     value = ''
     try:
-        value = selected_root()
+        value = selected_root() if root is None else root
         if not value:
             return dict(ready=False, configured=False, root='', reason='未设置游戏目录；原版与尤复可直接使用')
-        found = discover(value)
+        found = found or discover(value)
         engine = '尤里的复仇' if found['engineVersion']=='yr' else '红色警戒 2'
         return dict(ready=True, configured=True, root=found['config']['root'], engineVersion=found['engineVersion'],
+                    fingerprint=found['fingerprint'],
                     sources=found['sources'], warnings=found['issues'], archiveCount=found['archiveCount'],
                     reason=f'目录资源已就绪 · 自动识别为{engine}资源 · {found["archiveCount"]} 个 MIX · 近似概率，不保证准确')
     except (OSError, ValueError, TypeError, AttributeError) as error:
@@ -153,13 +156,12 @@ def configure(root):
     if not isinstance(root, str):
         raise ValueError('游戏目录应为文本')
     value = str(Path(root.strip()).expanduser().resolve()) if root.strip() else ''
-    if value:
-        discover(value)  # Validate before replacing the previous setting.
+    found = discover(value) if value else None  # Validate before replacing the previous setting.
     _save_root(value)
     legacy = ROOT/'profiles/local.json'
     if legacy.is_file():
         legacy.unlink()
-    return status()
+    return status(value, found)
 
 
 def discovery_for_report(meta):

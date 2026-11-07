@@ -8,7 +8,7 @@
  let library=null;
  const catalog=()=>library||(library=root.CrateMapPlatform.readJSON('live/materials.json.gz?v='+root.CrateWebConfig.liveVersion).then(v=>{if(v.version!==1)throw Error('Unsupported shared materials');return v;}).catch(e=>{library=null;throw e;}));
  async function create(report,{signal}={}){
-  const lib=await catalog();signal?.throwIfAborted();
+  const lib=await catalog();signal?.throwIfAborted();const manualSource={version:report.metadata.version,map:{MAP:{THEATER:report.metadata.theater}}};await root.CrateSimulationAssets.prepare(manualSource);
   const r=report.rendering,scope=lib.scopes[report.metadata.version+'/'+report.metadata.theater]||{tiles:{},sprites:{},objects:{}},origin=r.origin,lookup=new Map(report.cells.map(c=>[key(c),c])),palette=A().palettes[report.metadata.theater]||A().palettes.TEMPERATE;
   const data={size:[r.width,r.height],assets:lib.assets.slice(),atlases:lib.atlases,tiles:{},terrainVariants:scope.terrainVariants||{},sprites:{},objects:[]},images=new Array(lib.atlases.length),needed=new Set(),events=[],generated=new Map(),missingBridges=new Set();
   const stats={originalTiles:0,fallbackTiles:0,originalSprites:0,fallbackSprites:0,originalObjects:0,fallbackObjects:0,atlasPages:0},missing=new Set();
@@ -38,7 +38,8 @@
     }
    }
    data.tiles[k]=parts||[];for(const [i,ref] of (parts||[]).entries())command(ref,cx-30,cy-15,depth,c.x,false,{terrain:true,receiver:!i||!!c.slope,level:c.level});
-   for(const overlay of [true,false]){const name=overlay?c.overlayName:c.terrain;if(!name)continue;const sk=`${+overlay}/${name}/${overlay?frame(c):0}`,bridge=overlay&&(high.has(name)||/^LOBRD[GB]/.test(name));const signature=r.spriteSignatures?.[name]||[];let ref=resolve('sprites',JSON.stringify([+overlay,signature[0],overlay?frame(c):0,signature,high.has(name)?name:'']));
+   for(const overlay of [true,false]){const name=overlay?c.overlayName:c.terrain;if(!name||overlay&&name==='RUBBLE_OVERLAY')continue;const sk=`${+overlay}/${name}/${overlay?frame(c):0}`,bridge=overlay&&(high.has(name)||/^LOBRD[GB]/.test(name));const signature=r.spriteSignatures?.[name]||[];let ref=resolve('sprites',JSON.stringify([+overlay,signature[0],overlay?frame(c):0,signature,high.has(name)?name:'']));
+    if(overlay?c.simulationOverlay:c.simulationTerrain){const art=await root.CrateSimulationAssets.get(manualSource,{type:name},{frame:overlay?frame(c):0});if(art)ref=generatedRef('manual:'+sk,art.x,art.y,art.image.width,art.image.height,ctx=>ctx.drawImage(art.image,art.x,art.y));}
     if(ref!==undefined){stats.originalSprites++;data.sprites[sk]=ref;}
     else{stats.fallbackSprites++;missing.add('sprite:'+sk);if(bridge){missingBridges.add(key(c));continue;}ref=fallbackSprite(c,overlay);data.sprites[sk]=ref;}
     command(ref,cx,cy,depth+(bridge?-1.8:overlay?.2:.3),c.x,false,{solid:!bridge&&!(overlay&&/^(TIB|GEM)\d+/.test(name)),stencil:bridge?(high.has(name)?128|Math.min(127,c.level+4):Math.min(127,c.level+3)):0});
@@ -71,5 +72,5 @@
   }
   result.metadata.sourceDescription=root.CrateI18n.language==='en'?'Bundled original artwork; missing visual states use simplified shapes.':'优先使用包内原版素材；缺失的显示状态采用简绘外观。';result.hybrid={...scene.hybrid};return result;
  }
- root.CrateLiveArtwork={create,patch};
+ root.CrateLiveArtwork={create,patch,catalog};
 })(globalThis);

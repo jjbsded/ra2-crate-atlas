@@ -3,6 +3,17 @@
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
+ const terrainCache=new WeakMap();
+ function terrainRendering(state){
+  const r=state.data.rendering,cached=terrainCache.get(r);if(cached)return cached;
+  const [ox,oy]=r.origin||[0,0];let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
+  for(const c of state.cells||state.lookup.values())if(!c.virtual){
+   const px=c.px??30*(c.x-c.y)+ox,py=c.py??15*(c.x+c.y-c.level)+oy;
+   for(const ring of c.surface||[[[0,-15],[30,0],[0,15],[-30,0]]])for(const [dx,dy]of ring){left=Math.min(left,px+dx);right=Math.max(right,px+dx);top=Math.min(top,py+dy);bottom=Math.max(bottom,py+dy);}
+  }
+  const value=Number.isFinite(left)?{width:Math.max(1,right-left),height:Math.max(1,bottom-top),offsetX:left,offsetY:top}:{width:r.width,height:r.height,offsetX:0,offsetY:0};
+  terrainCache.set(r,value);return value;
+ }
  // Directions follow the isometric map on screen (before elevation), not the
  // raw X/Y axes. All eight offsets address adjacent logical cells.
  const directions=[
@@ -17,30 +28,33 @@
  ];
  function neighbor(lookup,cell,direction){return cell?lookup.get(`${cell.x+direction.dx},${cell.y+direction.dy}`)||null:null;}
  function position(area,p,w,h){return{x:Math.max(area.x,Math.min(area.x+area.w-w,p.x)),y:Math.max(area.y,Math.min(area.y+area.h-h,p.y))};}
+ function imageLayout(rendering,plot,players){
+  const side=players?12:0,top=players?24:0,bottom=players?14:0,availableW=plot.w-2*side,availableH=plot.h-top-bottom,scale=Math.min(availableW/rendering.width,availableH/rendering.height);
+  return {image:{x:plot.x+side+(availableW-rendering.width*scale)/2,y:plot.y+top+(availableH-rendering.height*scale)/2,w:rendering.width*scale,h:rendering.height*scale,scale},markerClip:plot};
+ }
  function layout(rendering,area,options={}){
   const compact=!!options.compact,minimized=!!options.minimized,w=minimized?(compact?96:72):(compact?220:254),h=minimized?(compact?48:36):(compact?190:332);
   const panel={...position(area,options.position||{x:area.x+area.w-266,y:area.y+12},w,h),w,h,minimized};
   const buttons={minimize:{x:panel.x+w-64,y:panel.y+6,w:24,h:24},close:{x:panel.x+w-32,y:panel.y+6,w:24,h:24}};
   if(compact){buttons.minimize={x:panel.x+w-88,y:panel.y+4,w:40,h:40};buttons.close={x:panel.x+w-44,y:panel.y+4,w:40,h:40};}
   if(minimized)return{...panel,buttons,image:null,navigation:null};
-  if(compact){const scale=Math.min((w-16)/rendering.width,132/rendering.height);return {...panel,buttons,navigation:[],image:{x:panel.x+(w-rendering.width*scale)/2,y:panel.y+50+(132-rendering.height*scale)/2,w:rendering.width*scale,h:rendering.height*scale,scale}};}
-  const scale=Math.min((panel.w-16)/rendering.width,146/rendering.height);
+  if(compact)return {...panel,buttons,navigation:[],...imageLayout(rendering,{x:panel.x+8,y:panel.y+50,w:w-16,h:132},options.players)};
   const nav={x:panel.x+134,y:panel.y+211,step:36,size:32};
   const navigation=directions.map(d=>({...d,box:{x:nav.x+d.col*nav.step,y:nav.y+d.row*nav.step,w:nav.size,h:nav.size}}));
   buttons.center={x:nav.x+nav.step,y:nav.y+nav.step,w:nav.size,h:nav.size};
-  return {...panel,buttons,navigation,image:{x:panel.x+(panel.w-rendering.width*scale)/2,y:panel.y+36+(146-rendering.height*scale)/2,w:rendering.width*scale,h:rendering.height*scale,scale}};
+  return {...panel,buttons,navigation,...imageLayout(rendering,{x:panel.x+8,y:panel.y+36,w:panel.w-16,h:146},options.players)};
  }
  function contains(box,p){return p.x>=box.x&&p.y>=box.y&&p.x<=box.x+box.w&&p.y<=box.y+box.h;}
  function viewport(mini,area,view,rendering){
-  const x=Math.max(0,(area.x-view.x)/view.scale),y=Math.max(0,(area.y-view.y)/view.scale);
-  const right=Math.min(rendering.width,(area.x+area.w-view.x)/view.scale),bottom=Math.min(rendering.height,(area.y+area.h-view.y)/view.scale);
+  const ox=rendering.offsetX||0,oy=rendering.offsetY||0,x=Math.max(0,(area.x-view.x)/view.scale-ox),y=Math.max(0,(area.y-view.y)/view.scale-oy);
+  const right=Math.min(rendering.width,(area.x+area.w-view.x)/view.scale-ox),bottom=Math.min(rendering.height,(area.y+area.h-view.y)/view.scale-oy);
   if(right<=x||bottom<=y)return null;
   return{x:mini.image.x+x*mini.image.scale,y:mini.image.y+y*mini.image.scale,w:(right-x)*mini.image.scale,h:(bottom-y)*mini.image.scale};
  }
  function pan(mini,p,area,scale,rendering){
   const x=Math.max(0,Math.min(rendering.width,(p.x-mini.image.x)/mini.image.scale));
   const y=Math.max(0,Math.min(rendering.height,(p.y-mini.image.y)/mini.image.scale));
-  return{x:area.x+area.w/2-x*scale,y:area.y+area.h/2-y*scale};
+  return{x:area.x+area.w/2-(x+(rendering.offsetX||0))*scale,y:area.y+area.h/2-(y+(rendering.offsetY||0))*scale};
  }
- const api={layout,position,contains,viewport,pan,directions,neighbor};root.CrateMinimap=api;if(typeof module!=='undefined')module.exports=api;
+ const api={layout,position,contains,viewport,pan,directions,neighbor,terrainRendering};root.CrateMinimap=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

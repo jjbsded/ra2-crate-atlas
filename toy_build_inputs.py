@@ -12,6 +12,7 @@ def artwork_fingerprint(extra=()):
     names = {p.name for p in ROOT.glob('realmap*.py')} | {
         'toy_build_inputs.py', 'terrain_depth.py', 'map_results.py', 'map_images.py',
         'original_resources.py', 'voxel-worker.cs',
+        'assets/urban-trees/sprites.zip', 'assets/urban-trees/provenance.json',
         'output/realmap-tools/voxel-worker.exe',
         'output/realmap-tools/voxel-worker.sha256',
     } | set(extra)

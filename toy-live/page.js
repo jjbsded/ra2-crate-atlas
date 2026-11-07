@@ -1,23 +1,18 @@
 /* Toy supports both the official catalog and browser-local map imports. */
 (function(){
  'use strict';const $=id=>document.getElementById(id),en=CrateI18n.language==='en',say=(zh,english)=>en?english:zh;
- document.title=say('Toy · 地图概率工具','Toy · Map probabilities');document.querySelector('h1').textContent=say('地图概率工具 · Toy','Map probabilities · Toy');
- document.querySelector('.app-header p').textContent=say('选择本机地图，在浏览器后台计算；文件不上传服务器。地图优先使用包内原版贴图，缺失素材才使用简绘外观。','Select a local map and analyze it in a browser worker. Files stay on your device. Maps use bundled original artwork, with simplified visuals only for missing assets.');
+ document.title=document.querySelector('h1').textContent=CrateI18n.t('红警2地图箱子概率计算器');
+ document.querySelector('.app-header p').hidden=true;document.querySelector('.app-header .eyebrow').hidden=true;
  const drop=$('dropzone');drop.querySelector('div').hidden=false;drop.querySelector('.file-label').hidden=false;$('version').closest('label').hidden=false;
  $('version').replaceChildren(...[['yr',say('尤里的复仇 1.001','Yuri’s Revenge 1.001')],['ra2',say('红色警戒 2 · 1.006','Red Alert 2 · 1.006')]].map(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;return option;}));
- const label=drop.querySelector('.file-label');label.firstChild.textContent=say('选择自定义地图 ','Choose custom map ');drop.querySelector('p').textContent=say('支持 .map / .yrm / .mpr；请选对游戏版本。计算中可取消，失败保留当前地图。','Supports .map / .yrm / .mpr. Choose the correct game version. Analysis can be cancelled; failures retain the current map.');
+ const label=drop.querySelector('.file-label');label.firstChild.textContent=say('选择自定义地图 ','Choose custom map ');drop.querySelector('p').textContent=say('.map / .yrm / .mpr · 只读','.map / .yrm / .mpr · Read-only');
  const cancel=document.createElement('button');cancel.id='liveCancel';cancel.type='button';cancel.hidden=true;cancel.textContent=say('取消计算','Cancel analysis');cancel.onclick=()=>CrateLivePlatform.cancel();drop.append(cancel);
  window.addEventListener('crate-live-busy',()=>{cancel.hidden=!CrateLivePlatform.busy;});
  const errorDetails=document.createElement('details'),errorSummary=document.createElement('summary'),errorBody=document.createElement('pre');errorDetails.id='liveErrorDetails';errorDetails.hidden=true;errorSummary.textContent=say('错误详情','Error details');errorBody.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto';errorDetails.append(errorSummary,errorBody);drop.after(errorDetails);
  window.addEventListener('crate-live-error',({detail})=>{errorDetails.hidden=false;errorDetails.open=true;const keys=[['filename','文件','File'],['version','资源版本','Game version'],['stage','处理阶段','Stage'],['section','区块','Section'],['record','记录','Record'],['message','原因','Reason']];errorBody.textContent=keys.filter(([k])=>detail[k]!==undefined).map(([k,zh,eng])=>`${say(zh,eng)}: ${detail[k]}`).join('\n')+(detail.stack?'\n\n'+say('技术信息（用于排查）','Technical details')+'\n'+detail.stack:'');});
  window.addEventListener('crate-live-busy',()=>{if(CrateLivePlatform.busy)errorDetails.hidden=true;});
- const artwork=document.createElement('p');artwork.id='liveArtworkStatus';artwork.className='hint';artwork.hidden=true;drop.after(artwork);
- const updateArtwork=()=>{const value=window.CrateMapViewer?.state.data?.rendering.hybrid;artwork.hidden=!value;if(!value)return;const original=value.originalTiles+value.originalSprites+value.originalObjects,fallback=value.fallbackTiles+value.fallbackSprites+value.fallbackObjects;artwork.textContent=say(`素材：原版 ${original} 项 · 缺失采用简绘 ${fallback} 项（地形 ${value.fallbackTiles}、覆盖物／地形物 ${value.fallbackSprites}、建筑／单位 ${value.fallbackObjects}）。简绘不改变概率。`,`Artwork: ${original} original · ${fallback} simplified fallbacks (${value.fallbackTiles} terrain, ${value.fallbackSprites} overlays/scenery, ${value.fallbackObjects} buildings/units). Visual fallbacks do not change probabilities.`);};
- new MutationObserver(updateArtwork).observe($('status'),{childList:true,subtree:true});updateArtwork();
- const hint=document.createElement('p');hint.className='hint';hint.textContent=say('支持范围：原版资源地图与简单地图内规则覆盖。未运行触发、脚本或 Mod 扩展；未知对象会告警并按选中后重抽近似处理。重新打开页面后需重新选取自定义地图，区域划分按地图内容自动保存。','Scope: stock assets and simple embedded rule overrides. Triggers, scripts and Mod extensions are not executed. Unknown objects are warned and treated as retry-on-landing assumptions. Reselect custom files after reloading; saved regions are keyed by map content.');drop.after(hint);
- document.querySelector('.view-controls').nextElementSibling.textContent=say('矿石／树木开关切换对应布局；自定义地图首次切换会现场计算，随后缓存两种状态。','Ore / trees toggles the layout. Custom maps compute each state on first use, then cache both states.');
  $('terrain3dDialog').querySelector('.eyebrow').textContent='TOY / 3D';
  $('terrain3dLoading').textContent=say('正在生成附近地形…','Generating nearby terrain…');
- document.querySelector('footer').textContent=say('Toy · 浏览器本地分析 · 官方地图与自定义地图共用概率展示、来源、区域、小地图、3D 和导出。','Toy · Local browser analysis · Official and custom results share probabilities, origins, regions, minimap, 3D and exports.');
- if(sessionStorage.getItem('crate-live-reselect')){sessionStorage.removeItem('crate-live-reselect');hint.textContent=say('自定义文件不会上传或保存在服务器；请重新选择上次的地图，已保存的区域将自动恢复。','Custom files are not uploaded or stored on a server. Reselect your previous map to restore saved regions.');}
+ document.querySelector('footer').hidden=true;
+ if(sessionStorage.getItem('crate-live-reselect')){sessionStorage.removeItem('crate-live-reselect');const hint=document.createElement('p');hint.textContent=say('请重新选择上次的地图。','Reselect your previous map.');drop.after(hint);}
 })();

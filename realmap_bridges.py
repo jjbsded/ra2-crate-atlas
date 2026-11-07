@@ -12,19 +12,27 @@ HIGH_NAMES = frozenset(name for name, direction in HIGH.values())
 FRAME_VARIATION = (0, 1, 2, 3, 3, 2, 1, 0, 2, 3, 0, 1, 1, 0, 3, 2)
 
 
-def initialize(cells, *, strict=True):
+def initialize(cells, *, strict=True, dirty=None):
     """Reproduce the 0x100/0x1000 bits of YR 47E040/47E470.
 
     Flags are applied in OverlayPack load order (y, then x). The source and
     two forward cells have both bits; the rear edge only has 0x100, and the
     third forward cell only receives 0x1000.
     """
-    for c in cells.values():
+    for p in cells if dirty is None else dirty:
+        c = cells[p]
         c['bridge'] = dict(kind='low') if (c['overlayName'] or '').startswith(('LOBRDG', 'LOBRDB')) else None
         c['bridgeProjection'] = False
         if strict and c['bridge'] and c['slope'] > 4:
             raise ValueError(f"({c['x']},{c['y']}) 在复杂坡面预放低桥；加载失败后的状态尚未支持")
-    for p, c in sorted(cells.items(), key=lambda item: (item[0][1], item[0][0])):
+    if dirty is not None and len(dirty) < max(1, len(cells)//16):
+        sources = {(x-step*dx,y-step*dy) for x,y in dirty
+                   for dx,dy in ((0,-1),(-1,0)) for step in (-1,0,1,2,3)}
+        sources = (p for p in sources if p in cells and cells[p]['overlay'] in HIGH)
+    else:
+        sources = (p for p,c in cells.items() if c['overlay'] in HIGH)
+    for p in sorted(sources, key=lambda p:(p[1],p[0])):
+        c = cells[p]
         index, name = c['overlay'], c['overlayName'] or ''
         if index in HIGH:
             expected, (dx, dy) = HIGH[index]
@@ -44,6 +52,8 @@ def initialize(cells, *, strict=True):
                     # outside-map dummy cell; it does not extend the deck.
                     if strict and step != 3:
                         raise ValueError(f'{p} 的高桥跨出地图；边界加载状态尚未支持')
+                    continue
+                if dirty is not None and q not in dirty:
                     continue
                 other['bridgeProjection'] = step != -1
                 if step != 3:

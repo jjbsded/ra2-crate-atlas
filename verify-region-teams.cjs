@@ -5,7 +5,7 @@ const R=require('./region-statistics.js'),P=require('./player-starts.js');
 const doc=R.defaults();doc.appliedTeams={1:'A',2:'A',3:'empty'};doc.autoOptions.teams={...doc.appliedTeams};
 Object.assign(doc.regions[0],{generatedName:{kind:'team',team:'A'},color:'#ffff00'});
 Object.assign(doc.regions[1],{generatedName:{kind:'player',number:4},color:'#121b4c'});
-const restored=R.decode(R.encode(doc),new Set());assert.deepEqual(restored.appliedTeams,doc.appliedTeams);assert.deepEqual(restored.autoOptions.teams,doc.autoOptions.teams);assert.equal(R.displayName(restored.regions[0]),'小队A');
+const restored=R.decode(R.encode(doc),new Set());assert.deepEqual(restored.appliedTeams,doc.appliedTeams);assert.deepEqual(restored.autoOptions.teams,doc.autoOptions.teams);assert.equal(R.displayName(restored.regions[0]),'小队 A');
 restored.regions[0].name='自定义';restored.regions[0].customName=true;assert.equal(R.displayName(restored.regions[0]),'自定义');
 const data={metadata:{waypoints:{0:7001,1:5003,2:3005,3:1007}},rendering:{origin:[230,-30]}},cells=[{x:1,y:7,level:0},{x:3,y:5,level:0},{x:5,y:3,level:0},{x:7,y:1,level:0}],state={data,lookup:new Map(cells.map(c=>[c.x+','+c.y,c]))};
 const styles=R.playerStyles(restored,P.positions(state));assert.equal(styles[1].color,styles[2].color);assert.equal(styles[1].team,'A');assert.equal(styles[3].empty,true);assert.equal(styles[4].team,null);assert.equal(styles[4].color,'#121b4c');

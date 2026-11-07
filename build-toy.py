@@ -18,11 +18,11 @@ from toy_codec import columns, compact_report, compact_search, dumps, expand_sea
 ROOT = Path(__file__).resolve().parent
 _artwork_lock = None
 _artwork_cache = None
-FRONTEND = '''app.js asset-data.js i18n-en.js i18n.js model.js timing.js scene.js
+FRONTEND = '''finite-retry.js app.js asset-data.js i18n-en.js i18n.js model.js timing.js scene.js
 probability-index.js probability.js probability-display.js occupancy-overlay.js
-minimap.js transfer-origins.js player-starts.js map-artwork.js map-renderer.js map-image-export.js
-selection-keyboard.js official-map-names.js official-maps-ui.js region-statistics.js region-auto.js region-statistics-ui.js
-map-results.js map-details.js map-exports.js mineral-layouts.js local-api.js realmap-ui.js
+minimap.js transfer-origins.js player-starts.js map-artwork.js map-raster-background.js raster-refinement.js raster-preview-cache.js map-renderer.js map-image-export.js
+selection-keyboard.js map-coordinates.js map-display-controls.js map-navigation.js official-map-names.js official-maps-ui.js region-statistics.js region-auto.js region-overlay-cache.js region-label-layout.js region-title-controls.js region-refresh-queue.js region-table-controls.js region-statistics-ui.js buff-reference.js unit-buff.js buff-expectation.js buff-expectation-ui.js buff-expectation-worker.js
+map-results.js map-details.js map-exports.js mineral-layouts.js simulation-assets.js simulation-visual.js simulation-bridges.js simulation-model.js simulation-ui.js simulation.css local-api.js realmap-ui.js
 realmap-ui.css page-navigation.css official-maps.css region-statistics.css terrain3d.js terrain3d.css'''.split()
 
 
@@ -210,6 +210,8 @@ def _refresh_navigation(task):
     from region_navigation import for_report
     original = json.loads((folder/'result.json').read_text('utf-8'))
     report = json.loads(gzip.decompress(path.read_bytes()))
+    assert all(original['metadata'][k] == report['metadata'][k]
+               for k in ('sourceSha256', 'version', 'mineralsEnabled')), 'Navigation source does not match baked report'
     report['regionNavigation'] = for_report(original, folder/'result.json')
     path.write_bytes(zipped(report))
 
@@ -245,11 +247,13 @@ def refresh_artwork(output, cache, jobs):
     finalize(output,manifest)
 
 
-def refresh_navigation(output, cache, jobs):
+def refresh_navigation_data(output, cache, manifest, jobs):
+    """Replace only auxiliary masks using each verified report's original source.
+
+    Gameplay/artwork keep their actual generation identities. for_report checks
+    source bytes and resource hashes; this does not regenerate probabilities.
+    """
     from official_maps import select
-    manifest = json.loads((output/'build-manifest.json').read_text('utf-8'))
-    if manifest['modelSourceSha256'] != source_fingerprint():
-        raise ValueError('Analysis code changed; create a full build instead')
     catalog = json.loads((output/'catalog.json').read_text('utf-8'))
     tasks = []
     for entry in catalog['maps']:
@@ -262,8 +266,15 @@ def refresh_navigation(output, cache, jobs):
         for i,_ in enumerate(pool.map(_refresh_navigation,tasks),1):
             if i%25==0:
                 print(f'Navigation [{i}/{len(tasks)}]',flush=True)
+    from region_navigation import VERSION
+    manifest['regionNavigationVersion']=VERSION
+    manifest['regionNavigationSourceSha256']=hashlib.sha256((ROOT/'region_navigation.py').read_bytes()).hexdigest()
+
+
+def refresh_navigation(output, cache, jobs):
+    manifest = json.loads((output/'build-manifest.json').read_text('utf-8'))
+    refresh_navigation_data(output, cache, manifest, jobs)
     frontend(output)
-    manifest['regionNavigationVersion']=2
     finalize(output,manifest)
 
 
@@ -283,13 +294,15 @@ def package_entries(entries, cache, fingerprint, output, max_image, jobs, art_ca
 
 def page(source, demo=False):
     text = source.read_text('utf-8')
-    title = '概率演示 · 低清简化版（非完整版）' if demo else '官方地图概率图集 · 低清简化版（非完整版）'
+    title = '概率演示 · 低清简化版（非完整版）' if demo else '红警2地图箱子概率计算器'
     text = re.sub(r'<title>.*?</title>', '<title>'+title+'</title>', text)
     text = re.sub(r'<script src="language-settings\.js[^\"]*"></script>', '', text)
     text = text.replace('<script src="i18n.js', '<script src="toy-boot.js"></script><script src="i18n.js', 1)
     text = text.replace('</head>', '<link rel="stylesheet" href="toy.css?v='+hashlib.sha256((ROOT/'toy/toy.css').read_bytes()).hexdigest()[:12]+'"></head>')
     text = text.replace('<body>', '<body class="toy">')
     text = re.sub(r'href="/research[^\"]*"', 'href="about.html"', text)
+    # Toy keeps local documentation, without the full edition's website links.
+    text = re.sub(r'\s*·\s*<a\b[^>]*id="githubRepository"[^>]*>.*?</a>', '', text)
     text = re.sub(r'<a\b[^>]*href="cliff-demo\.html"[^>]*>.*?</a>', '', text)
     if not demo:
         text = text.replace('href="index.html"', 'href="demo.html"')
@@ -341,7 +354,7 @@ def frontend(output):
             text=text.replace('低清简化版（非完整版）','原版贴图轻量版（非完整版）')
         (output/name).write_text(text, 'utf-8')
     (output/'docs').mkdir(exist_ok=True)
-    for name in ['random-crate-generation.md', 'random-crate-generation.en.md']:
+    for name in ['random-crate-generation.md', 'random-crate-generation.en.md', 'simulation-mode.md', 'incremental-probability.md', 'probability-model.md']:
         shutil.copy2(ROOT/'docs'/name, output/'docs'/name)
 
 
@@ -349,7 +362,7 @@ def finalize(output, manifest, archive=None):
     manifest['internalBuild'] = manifest.get('edition') != 'toy'
     if any(output.rglob('*.tmp')):
         raise ValueError('Incomplete artwork remains in the build directory')
-    if manifest.get('transportCodec') == 1:
+    if manifest.get('transportCodec') in (1, 2, 3):
         for row in manifest['maps']:
             path = output/f'data/{row["id"]}-{row["version"]}/{"ore" if row["minerals"] else "clear"}/result.json.gz'
             report = json.loads(gzip.decompress(path.read_bytes()))
@@ -372,7 +385,7 @@ def finalize(output, manifest, archive=None):
     if archive.resolve().is_relative_to(output.resolve()):
         raise ValueError('ZIP output must be outside the site directory')
     archive.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zipped:
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
         for path in sorted(output.rglob('*')):
             if path.is_file():
                 zipped.write(path, str(path.relative_to(output)).replace('\\', '/'))
@@ -418,7 +431,7 @@ def build(output, cache, ids=None, max_image=640, modes=None, jobs=1, art_cache=
     frontend(output)
     manifest = dict(schemaVersion=1, builtAt=datetime.now(timezone.utc).isoformat(),
                     modelSourceSha256=fingerprint, maps=summary, maxImageEdge=max_image,
-                    imageQuality=quality, artworkStyle=art_style, transportCodec=1, regionNavigationVersion=2, zipBudgetBytes=budget)
+                    imageQuality=quality, artworkStyle=art_style, transportCodec=3, probabilityModel='finite-retry-v2', regionNavigationVersion=3, zipBudgetBytes=budget)
     finalize(output, manifest)
 
 

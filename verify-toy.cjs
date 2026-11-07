@@ -76,7 +76,7 @@ async function browserChecks(){
   }
   // An ordinary flat, eligible cell keeps brush samples away from cliffs.
   await page.evaluate(()=>{const c=CrateMapViewer.state.cells.find(c=>c.usable&&c.cameraCoverage===1&&c.slope===0&&c.land===0&&c.terms.length);CrateMapViewer.focus(c);});
-  await page.locator('#regionToggle').click();
+  await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();
   await page.locator('#map').scrollIntoViewIfNeeded();
   let p=await point(page);
   if(mobile)await page.touchscreen.tap(p.x,p.y);else await page.mouse.click(p.x,p.y);
@@ -115,10 +115,10 @@ async function browserChecks(){
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('crate-atlas.regions.v1.'+CrateMapViewer.state.data.metadata.sourceSha256)).regions[0].cells.length),count,'Ore switch retains regions');
   await page.locator('#mineralToggle').click();await page.waitForFunction(()=>CrateMapViewer.state.data.metadata.mineralsEnabled!==false&&!CrateMapViewer.state.busy);
   assert.deepEqual(await page.evaluate(()=>CrateMapViewer.state.cells.filter(c=>/^TREE\d+$/.test(c.terrain)).map(c=>`${c.x},${c.y}`)),originalTrees);
-  await page.locator('#regionToggle').click();
+  await page.locator('#viewMode').click();
   await page.evaluate(()=>CrateMapViewer.focus(CrateMapViewer.state.lookup.get('99,105')));
   await page.waitForFunction(()=>CrateMapViewer.state.incoming?.sources.length>0);
-  await page.reload();await ready(page);await page.locator('#regionToggle').click();
+  await page.reload();await ready(page);await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();
   assert.equal(await page.locator('#regionActiveText').textContent().then(s=>s.includes(String(count))),true,'Reload restores selection');
   await page.locator('#regionSort').selectOption('all.average');
   await page.locator('#map').scrollIntoViewIfNeeded();await page.locator('#canvasHost').screenshot({path:path.join(out,label+'-regions.png')});
@@ -126,7 +126,7 @@ async function browserChecks(){
   const pngDownload=page.waitForEvent('download');await page.locator('#screenshot').click();const png=await pngDownload;await png.saveAs(path.join(out,label+'-view.png'));
   const jpegDownload=page.waitForEvent('download',{timeout:60000});await page.locator('#mapImageExport').click();const jpeg=await jpegDownload;await jpeg.saveAs(path.join(out,label+'-full.jpg'));
   assert.ok((await fs.stat(path.join(out,label+'-full.jpg'))).size>10000);
-  assert.match(await page.locator('#mapImageStatus').textContent(),/已导出/);
+  assert.match(await page.locator('#status').textContent(),/已导出/);
   if(!await page.locator('#minimap').isChecked())await page.locator('#webNavigator').click();
   await page.locator('#minimapClose').waitFor({state:'visible'});
   await page.locator('#map').scrollIntoViewIfNeeded();await page.locator('#minimapClose').click();

@@ -1,0 +1,26 @@
+const fs=require('node:fs'),path=require('node:path'),zlib=require('node:zlib'),assert=require('node:assert/strict');
+const {parse}=require('./toy-live/parser.js'),{compose}=require('./toy-live/components.js');
+const out=path.resolve(process.env.TOY_QA_OUT||'output/toy-walls-20261104'),site=path.join(out,'site');
+const read=p=>JSON.parse(zlib.gunzipSync(fs.readFileSync(p))),stock=read(path.join(site,'live/stock-yr.json.gz')),lib=read(path.join(site,'live/objects/index.json.gz'));
+const parsed=parse(new Uint8Array(fs.readFileSync(path.join(out,'pillbox-directions.yrm'))),stock,'yr');
+assert.equal(parsed.visualObjects.length,256);assert.equal(new Set(parsed.visualObjects.map(o=>o.key)).size,1,'Building direction should not select a new pillbox image');
+const cases=JSON.parse(fs.readFileSync(path.join(out,'pillbox-cases.json')));for(const meta of cases)assert.ok(compose(lib,'yr/TEMPERATE',meta));
+const flagged=parse(new Uint8Array(fs.readFileSync(path.join(out,'pillbox-turret-flag.yrm'))),stock,'yr');assert.equal(flagged.visualObjects.length,256);
+const reference=compose(lib,'yr/TEMPERATE',parsed.visualObjects[0]);for(const meta of flagged.visualObjects)assert.deepEqual(compose(lib,'yr/TEMPERATE',meta),reference,'Turret=yes without TurretAnim must retain the fixed base');
+console.log('PASS 256 parsed pillbox directions and',cases.length,'complete/damaged/rubble component states');
+if(process.env.TOY_BASE)(async()=>{const {chromium}=require('playwright'),browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const p=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true}),errors=[];p.on('pageerror',e=>errors.push(e.message));
+ const ready=()=>p.waitForFunction(()=>window.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:120000});
+ await p.goto(process.env.TOY_BASE+'index.html');await ready();await p.locator('#mapFile').setInputFiles(path.join(out,'walls-pillboxes.yrm'));
+ await p.waitForFunction(()=>CrateMapViewer.state.data.metadata.liveComputed&&!CrateMapViewer.state.busy,null,{timeout:120000});
+ assert.equal(await p.locator('#error').textContent(),'');
+ const stats=await p.evaluate(()=>CrateMapViewer.state.data.rendering.hybrid);
+ assert.equal(stats.fallbackSprites,0);assert.equal(stats.originalSprites,128);assert.equal(stats.originalObjects,8);assert.equal(stats.fallbackObjects,0);
+ await p.evaluate(()=>CrateMapViewer.focus(CrateMapViewer.state.lookup.get('33,30')));
+ await p.locator('#map').screenshot({path:path.join(out,'walls-browser.png')});
+ await p.locator('#terrain3dOpen').click();await p.waitForFunction(()=>!document.getElementById('terrain3dStage').classList.contains('is-loading'),null,{timeout:30000});assert.equal(await p.locator('#terrain3dError').textContent(),'');
+ await p.locator('#terrain3dDialog').screenshot({path:path.join(out,'walls-3d.png')});await p.locator('#terrain3dClose').click();
+ const download=p.waitForEvent('download');await p.locator('#mapImageExport').click();const exported=await download;await exported.saveAs(path.join(out,exported.suggestedFilename()));
+ await p.locator('#mineralToggle').click();await ready();assert.equal(await p.evaluate(()=>CrateMapViewer.state.data.rendering.hybrid.fallbackSprites),0);
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'browser.json'),JSON.stringify({status:'PASS',...stats},null,2));console.log('PASS 128 wall/fence connectivity variants and 8 pillbox directions: browser, 3D, export and clear layout');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

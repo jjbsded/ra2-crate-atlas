@@ -1,20 +1,20 @@
-"""Exact shared-frame finite-retry probabilities, without sampling.
+"""Exact shared-frame finite retries using a geometric sum and CRT histograms.
 
-Aggregate origin incidence by (candidate count, residue, destination). Only the
-number of terminating origins controls the geometric retry weight. Integrate
-that function over its reduced period, or by CRT factor elimination for huge
-periods. Keep integer coefficients shared by all cells, rather than repeating
-thousands of digits for every destination.
+Candidate searches/incidence stay incremental. No map search is replayed for
+retries; unchanged terminal counts reuse the entire shared coefficient kernel.
 """
 from collections import Counter, defaultdict
-from functools import reduce
 import math
 import struct
 import sys
 
 if hasattr(sys, 'set_int_max_str_digits'):
     sys.set_int_max_str_digits(20000)
-
+MODEL = 'finite-retry-v2'
+ATTEMPT_LIMIT = 1000
+COEFFICIENT_PERIOD = math.lcm(*range(1, 25))
+PAIRS = tuple((n, r) for n in range(1, 25) for r in range(n))
+IDS = {pair: i for i, pair in enumerate(PAIRS)}
 
 def read_search(path, origin_count):
     data = path.read_bytes()
@@ -28,6 +28,7 @@ def read_search(path, origin_count):
         pos += 4 * n
     if pos != len(data):
         raise ValueError('候选文件长度不符')
+
 
 
 def fundamental(values):
@@ -98,7 +99,7 @@ def integrate_crt(terminal, counts):
 def integrate_reduced(terminal, counts):
     period = math.lcm(*counts) if counts else 1
     weight_period = math.lcm(*(fundamental(row) for row in terminal.values())) if terminal else 1
-    if weight_period > 200000:
+    if weight_period > 144:
         overall, conditional = integrate_crt(terminal, counts)
         return period, weight_period, overall, conditional, 'crt-factor-convolution'
     distinct_gcds = {math.gcd(weight_period, n) for n in counts}
@@ -118,75 +119,106 @@ def integrate_reduced(terminal, counts):
     return period, weight_period, overall, conditional, 'reduced-period-residue-aggregation'
 
 
-def calculate(selections, statuses, origin_count, limit=1000, progress=lambda *args: None):
-    """statuses: key -> 'crate' | 'ghost' | 'retry'. Missing key is retry."""
-    if not 1 <= limit <= 1000:
-        raise ValueError('重抽上限必须在 1～1000 之间')
-    terms = defaultdict(Counter)
-    ghost_terms = Counter()
-    terminal = {}
-    no_candidate = 0
-    count = 0
+def terminal_signature(terminal):
+    # Canonical exact-period projections: redistributing candidates among
+    # counts must not invalidate weights if their sum T(frame) is unchanged.
+    combined={d:[0]*d for d in range(1,25)}
+    for n in range(1,25):
+        row=[terminal.get((n,r),0) for r in range(n)]
+        components={}
+        for d in range(1,n+1):
+            if n%d:continue
+            value=[sum(row[r::d])*(COEFFICIENT_PERIOD//(n//d)) for r in range(d)]
+            for e,part in components.items():
+                if d%e==0:value=[v-part[r%e] for r,v in enumerate(value)]
+            components[d]=value
+            combined[d]=[a+b for a,b in zip(combined[d],value)]
+    return tuple((d,tuple(row)) for d,row in combined.items() if any(row))
+
+
+def retry_kernel(terminal, origin_count, limit=ATTEMPT_LIMIT):
+    if not 1 <= limit <= ATTEMPT_LIMIT:
+        raise ValueError('Invalid retry limit')
+    rows = {n: [terminal.get((n,r),0) for r in range(n)] for n in range(1,25)}
+    period, reduced, overall, conditional, method = integrate_reduced(rows, list(rows))
+    base = origin_count ** limit
+    powers = {t: (origin_count-t)**limit for t in overall}
+    weights = {t: (base-powers[t])//t if t else limit*origin_count**(limit-1) for t in overall}
+    values = {pair: sum(frames*weights[t] for t,frames in hist.items()) for pair,hist in conditional.items()}
+    return dict(denominator=period*base, values=values,
+                coefficients=[dict(n=n,r=r,numerator=str(values[n,r])) for n,r in PAIRS],
+                exhausted=sum(frames*powers[t] for t,frames in overall.items()),
+                period=period, weightPeriod=reduced, method=method,
+                terminalCountRange=[min(overall),max(overall)], overall=overall, conditional=conditional)
+
+
+def calculate(selections, statuses, origin_count, progress=lambda *args: None, limit=ATTEMPT_LIMIT):
+    terms = defaultdict(Counter); ghost_terms = Counter(); counts = Counter(); terminal = Counter()
     for picked in selections:
-        count += 1
-        n = len(picked)
-        if not n:
-            no_candidate += 1
-            continue
-        totals = terminal.setdefault(n, [0] * n)
-        for r, key in enumerate(picked):
-            status = statuses.get(key, 'retry')
-            if status == 'crate':
-                terms[key][n, r] += 1
-                totals[r] += 1
-            elif status == 'ghost':
-                ghost_terms[n, r] += 1
-                totals[r] += 1
-    assert count == origin_count
-    counts = sorted(terminal)
-    progress('正在精确合并帧余数和有限重抽', 64)
-    period, weight_period, overall, conditional, method = integrate_reduced(terminal, counts)
-    base_denominator = origin_count ** limit
-    denominator = period * base_denominator
-    weights = {t: (base_denominator - (origin_count - t) ** limit) // t if t else 0 for t in overall}
-    failure = sum(frames * (origin_count - t) ** limit for t, frames in overall.items())
-    coefficients = {}
-    for pair, histogram in conditional.items():
-        coefficients[pair] = sum(frames * weights[t] for t, frames in histogram.items())
-    coefficient_keys = sorted(coefficients)
-    ids = {pair: i for i, pair in enumerate(coefficient_keys)}
-    ghost = sum(hits * coefficients[pair] for pair, hits in ghost_terms.items())
-    cell_results = {}
-    distributions = {}
-    total = 0
-    for key, hits in terms.items():
-        signature = tuple(sorted(hits.items()))
+        n=len(picked)
+        if n>24: raise ValueError('Invalid candidate records')
+        counts[n]+=1
+        for r,key in enumerate(picked):
+            status=statuses.get(key)
+            if status=='crate': terms[key][n,r]+=1
+            elif status=='ghost': ghost_terms[n,r]+=1
+            if status in ('crate','ghost'): terminal[n,r]+=1
+    assert sum(counts.values())==origin_count
+    return evaluate_aggregates(terms,ghost_terms,counts,origin_count,counts[0],progress,terminal=terminal,limit=limit)
+
+
+def evaluate_aggregates(terms, ghost_terms, candidate_counts, origin_count, no_candidate,
+                        progress=lambda *args: None, cache=None, dirty=None, terminal=None, limit=ATTEMPT_LIMIT):
+    if origin_count<=0: raise ValueError('Invalid origin count')
+    progress('正在计算生成概率',64)
+    if terminal is None:
+        terminal=Counter(ghost_terms)
+        for hits in terms.values(): terminal.update(hits)
+    weight_key=(origin_count,limit,terminal_signature(terminal))
+    reused=cache is not None and cache.get('weightKey')==weight_key
+    if not reused:
+        kernel=retry_kernel(terminal,origin_count,limit)
+        if cache is not None:
+            cache.clear();cache.update(weightKey=weight_key,kernel=kernel,distributions={})
+    else: kernel=cache['kernel']
+    denominator=kernel['denominator']; values=kernel['values']
+    distributions=cache.setdefault('distributions',{}) if cache is not None else {}
+    local=reused and dirty is not None and 'cellResults' in cache
+    if len(distributions)>4096: distributions.clear();local=False
+    cell_results=cache['cellResults'] if local else {}
+    used=cache['usedDistributions'] if local else Counter()
+    signatures=cache['signatures'] if local else {}
+    for key in dirty if local else terms:
+        if key in signatures:
+            previous=signatures.pop(key);used[previous]-=1
+            if not used[previous]: del used[previous]
+        hits=terms.get(key)
+        if not hits: cell_results.pop(key,None);continue
+        signature=tuple(sorted(hits.items()))
         if signature not in distributions:
-            numerator = sum(count * coefficients[pair] for pair, count in signature)
-            distributions[signature] = (numerator, {
-                'probability': numerator / denominator,
-                'multiplier': numerator * origin_count / denominator,
-                'terms': [[ids[pair], count] for pair, count in signature],
-                'oneAttemptProbability': sum(count / pair[0] for pair, count in hits.items()) / origin_count,
-            })
-        numerator, result = distributions[signature]
-        total += numerator
-        cell_results[key] = dict(result)
-    assert total + ghost + failure == denominator, '精确整数概率不守恒'
-    return {
-        'sampleCount': origin_count, 'attemptLimit': limit, 'framePolicy': 'uniform-cycle',
-        'period': period, 'weightPeriod': weight_period, 'method': method,
-        'candidateCounts': counts, 'terminalCountRange': [min(overall), max(overall)],
-        'noCandidateOrigins': no_candidate, 'positiveCellCount': len(cell_results),
-        'sharedDistributionCount': len(distributions),
-        'maxMultiplier': max((c['multiplier'] for c in cell_results.values()), default=0),
-        'finalSuccess': total / denominator, 'finalGhost': ghost / denominator, 'finalFailure': failure / denominator,
-        'exact': {
-            'representation': 'shared-residue-coefficients', 'denominator': str(denominator),
-            'coefficients': [{'n': n, 'r': r, 'numerator': str(coefficients[n, r])} for n, r in coefficient_keys],
-            'failureNumerator': str(failure), 'ghostNumerator': str(ghost),
-            'formula': 'P(cell)=sum(count*coefficients[id].numerator for id,count in cell.terms)/denominator',
-            'conservationVerified': True,
-        },
-        'cells': cell_results,
-    }
+            numerator=sum(count*values[pair] for pair,count in signature)
+            distributions[signature]=(numerator,dict(probability=numerator/denominator,
+                multiplier=numerator*origin_count/denominator,
+                terms=[[IDS[pair],count] for pair,count in signature],
+                oneAttemptProbability=sum(count/pair[0] for pair,count in signature)/origin_count))
+        _,result=distributions[signature];used[signature]+=1;signatures[key]=signature;cell_results[key]=dict(result)
+    total=sum(distributions[s][0]*count for s,count in used.items())
+    ghost=sum(hits*values[pair] for pair,hits in ghost_terms.items())
+    exhausted=kernel['exhausted'];failure=ghost+exhausted
+    assert total+failure==denominator,'Exact retry probability conservation failed'
+    if cache is not None:
+        cache.update(cellResults=cell_results,usedDistributions=used,signatures=signatures,
+                     coefficientsReused=reused,evaluatedDestinations=len(dirty if local else terms))
+    counts=sorted(n for n,count in candidate_counts.items() if n and count)
+    return dict(model=MODEL,sampleCount=origin_count,attemptLimit=limit,framePolicy='uniform-cycle',
+        period=math.lcm(*counts),coefficientPeriod=COEFFICIENT_PERIOD,
+        weightPeriod=kernel['weightPeriod'],method=kernel['method'],candidateCounts=counts,
+        terminalCountRange=kernel['terminalCountRange'],noCandidateOrigins=no_candidate,
+        positiveCellCount=len(cell_results),sharedDistributionCount=len(used),
+        maxMultiplier=max((distributions[s][1]['multiplier'] for s in used),default=0),
+        finalSuccess=total/denominator,finalFailure=failure/denominator,
+        exact=dict(representation='shared-residue-coefficients',denominator=str(denominator),
+            coefficients=kernel['coefficients'],failureNumerator=str(failure),ghostNumerator=str(ghost),
+            exhaustedNumerator=str(exhausted),
+            formula='P(cell)=sum(count*coefficients[id].numerator for id,count in cell.terms)/denominator',
+            conservationVerified=True),cells=dict(cell_results))

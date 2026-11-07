@@ -23,21 +23,18 @@
   return {present:i=>index(i)!==0,get:i=>{const v=index(i);if(v>column[1].length)throw Error('CODEC_COLUMN_INDEX');return column[1][v-1];}};
  }
  function probability(p,recipe){
-  const n=BigInt(p.sampleCount),limit=BigInt(p.attemptLimit),base=n**limit,weights=new Map(),powers=new Map();
-  for(const[t]of recipe.overall){const power=(n-BigInt(t))**limit;powers.set(t,power);weights.set(t,t?(base-power)/BigInt(t):0n);}
-  const histograms=recipe.histograms.map(hist=>hist.reduce((sum,[t,frames])=>sum+BigInt(frames)*weights.get(t),0n));
-  const numerators=recipe.ids.map(id=>histograms[id]),exact=p.exact,denominator=BigInt(p.period)*base;
-  if(numerators.length!==exact.coefficients.length)throw Error('CODEC_COEFFICIENT_COUNT');
-  exact.denominator=denominator.toString();
-  exact.coefficients.forEach((c,i)=>c.numerator=numerators[i].toString());
-  exact.failureNumerator=recipe.overall.reduce((sum,[t,frames])=>sum+BigInt(frames)*powers.get(t),0n).toString();
-  exact.ghostNumerator=recipe.ghosts.reduce((sum,[i,hits])=>sum+BigInt(hits)*numerators[i],0n).toString();
-  return {n,denominator,numerators};
+  const F=root.CrateFiniteRetry||(typeof require==='function'?require('../finite-retry.js'):null);
+  if(p.model!==F.MODEL||recipe.model!==p.model)throw Error('CODEC_PROBABILITY_MODEL');
+  const terminal=new Map(recipe.terminal.map(([i,count])=>[F.pairs[i][0]*32+F.pairs[i][1],count])),k=F.kernel(terminal,p.sampleCount,p.attemptLimit),numerators=F.pairs.map(([n,r])=>k.values.get(n*32+r)),exact=p.exact;
+  const ghost=recipe.ghosts.reduce((s,[i,count])=>s+BigInt(count)*numerators[i],0n);
+  Object.assign(exact,{denominator:k.denominator.toString(),coefficients:k.coefficients,
+   ghostNumerator:ghost.toString(),exhaustedNumerator:k.exhausted.toString(),failureNumerator:(ghost+k.exhausted).toString()});
+  return{n:BigInt(p.sampleCount),denominator:k.denominator,numerators};
  }
  async function report(value,loadBase){
   if(!value._static)return value;
   const transport=value._static;
-  if(transport.codec!==1)throw Error('CODEC_VERSION');
+  if(transport.codec!==3)throw Error('CODEC_VERSION');
   const table=await loadBase(transport.base),count=table.count;
   if(!Number.isInteger(count)||count<1||count>260100)throw Error('CODEC_CELL_COUNT');
   const columns={...table.columns};

@@ -1,0 +1,15 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const P=require('./toy-live/parser.js'),M=require('./simulation-model.js');
+const dir=process.argv[2],stock=JSON.parse(fs.readFileSync(path.join(dir,'stock.json')));
+const parse=(name,options={})=>P.parse(new Uint8Array(fs.readFileSync(path.join(dir,name+'.map'))),stock,'yr',true,name+'.map',()=>{},options);
+const empty=parse('empty');assert(!empty.metadata.approximate);assert.equal(empty.metadata.warnings.filter(w=>w.includes('仅为空注册项')).length,2);
+const unknown=parse('unknown',{sourceSha256:'fixture'});assert(unknown.metadata.approximate);
+const model=M.create(unknown.source),point=unknown.cells.find(c=>c.usable&&model.placement('MTNK',c.x,c.y).allowed);
+assert(point);assert(model.place('MTNK',point.x,point.y));
+const edited=parse('unknown',{source:unknown.source,plan:model.plan});assert(edited.metadata.approximate);
+assert(edited.cells.find(c=>c.x===point.x&&c.y===point.y).occupied);
+assert(edited.cells.find(c=>c.x===20&&c.y===20).assumedRetry);
+model.quick('units');const cleared=parse('unknown',{source:unknown.source,plan:model.plan});assert(cleared.metadata.approximate,'Original uncertainty must survive cached-source recomputation');
+const terrain=structuredClone(unknown.source);terrain.cells.find(c=>c.x===point.x&&c.y===point.y).terrainError='unknown tile';
+assert(!M.create(terrain).placement('MTNK',point.x,point.y).allowed);
+console.log('PASS Toy empty registrations, approximate editing, unknown terrain guards');

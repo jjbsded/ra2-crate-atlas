@@ -13,12 +13,12 @@ const out=process.env.DISPLAY_QA||'output/display-verification-20261103';fs.mkdi
   await page.waitForFunction(()=>window.CrateMapViewer?.state.data&&!CrateMapViewer.state.busy,null,{timeout:120000});
   for(const id of ['grid','blocked'])assert.equal(await page.locator('#'+id).isChecked(),false,id);
   assert.equal(await page.locator('#potentialMarkers').count(),0);
-  assert.equal(await page.locator('#baselineLayer').isChecked(),true);
+  assert.equal(await page.locator('#baselineLayer').isChecked(),false);
   assert.equal(await page.evaluate(()=>document.getElementById('baselineLayer').closest('label').nextElementSibling.contains(document.getElementById('baselineValues'))),true,'1x layer precedes 1x labels');
   await page.locator('#map').scrollIntoViewIfNeeded();
   async function check(label){
    await page.waitForTimeout(150);
-   const size=await page.evaluate(()=>{const c=document.getElementById('map'),r=c.getBoundingClientRect(),scale=Math.min(r.width/1600,r.height/1050);return{width:c.width,height:c.height,expectedWidth:1600*scale*devicePixelRatio,expectedHeight:1050*scale*devicePixelRatio};});
+   const size=await page.evaluate(()=>{const c=document.getElementById('map'),r=c.getBoundingClientRect(),{width,height}=CrateMapViewer.viewport,scale=Math.min(r.width/width,r.height/height);return{width:c.width,height:c.height,expectedWidth:width*scale*devicePixelRatio,expectedHeight:height*scale*devicePixelRatio};});
    assert.ok(Math.abs(size.width-size.expectedWidth)<=1&&Math.abs(size.height-size.expectedHeight)<=1,JSON.stringify(size));
    const hits=await page.evaluate(()=>['minimapMinimize','minimapClose'].map(id=>{const b=document.getElementById(id),r=b.getBoundingClientRect(),x=r.x+r.width/2;return{id,center:document.elementFromPoint(x,r.y+r.height/2)?.id,below:[2,20,60,100].map(y=>document.elementFromPoint(x,r.bottom+y)?.id)};}));
    for(const h of hits){assert.equal(h.center,h.id);assert.ok(h.below.every(id=>id!==h.id),JSON.stringify(h));}
@@ -37,6 +37,7 @@ const out=process.env.DISPLAY_QA||'output/display-verification-20261103';fs.mkdi
    await page.locator('#markers').setChecked(enabled);
    await page.waitForFunction(value=>qaMapRender.options.markers===value&&qaMapRender.options.potentialMarkers===value,enabled);
   }
+  await page.locator('#baselineLayer').check();await page.waitForFunction(()=>qaMapRender.options.baselineLayer);
   const withBaseline=await page.evaluate(()=>qaMapRender.colored);
   await page.locator('#baselineLayer').uncheck();await page.waitForFunction(()=>!qaMapRender.options.baselineLayer);
   assert.ok(await page.evaluate(n=>qaMapRender.colored<n,withBaseline),'Actual 1x checkbox hides baseline fills');

@@ -85,8 +85,23 @@ def verify(root, cache, modes=None, cases_path=None):
                 assert not any(key in meta for key in ['resourceRoot', 'resourceFiles', 'mineralPreviousResult'])
                 key = hashlib.sha256(raw+version.encode()+str(layout == 'ore').encode()+manifest['modelSourceSha256'].encode()).hexdigest()[:24]
                 original_folder = cache/key
-                cases.append(dict(report=str(path.resolve()), original=str((original_folder/'result.json').resolve())))
                 original = json.loads((original_folder/'result.json').read_text('utf-8'))
+                original_path=original_folder/'result.json'
+                if manifest.get('probabilityModel')=='finite-retry-v2' and original['probability'].get('model')!='finite-retry-v2':
+                    # The layout/art source retains its provenance. Verify the
+                    # new probability model from that source's original search.
+                    from realmap_exact import calculate, read_search
+                    count=original['probability']['sampleCount']
+                    value=calculate(read_search(original_folder/'search.bin',count),{c['y']*512+c['x']:c['status'] for c in original['cells']},count)
+                    results=value.pop('cells');original['probability']=value
+                    for cell in original['cells']:
+                        cell.update(results.get(cell['y']*512+cell['x'],dict(probability=0,multiplier=0,oneAttemptProbability=0,terms=[])))
+                    if cases_path:
+                        import shutil
+                        expected=cases_path.parent/'current-model'/key;expected.mkdir(parents=True,exist_ok=True)
+                        original_path=expected/'result.json';original_path.write_text(json.dumps(original,separators=(',',':')),'utf8')
+                        shutil.copy2(original_folder/'search.bin',expected/'search.bin')
+                cases.append(dict(report=str(path.resolve()), original=str(original_path.resolve())))
                 if manifest.get('artworkStyle') == 'tiles':
                     simplified=report['rendering']['simplified']
                     assert simplified['version']==1 and simplified['style']=='cell-materials'

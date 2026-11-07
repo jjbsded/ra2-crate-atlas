@@ -1,6 +1,6 @@
 /* Reverse native search lists. Display P(destination | this search origin),
- * averaging the random frame. Retain finite-retry weights only for auditing
- * the original final probabilities; never redistribute failed placements. */
+ * averaging the random frame. Fixed candidate coefficients explain each
+ * single-attempt cell probability; failed placements are never redistributed. */
 (function(root){
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);

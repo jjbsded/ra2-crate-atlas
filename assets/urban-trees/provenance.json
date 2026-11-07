@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "theater": "URBAN",
+  "purpose": "Missing-file fallback for TREE29–TREE35; existing stock or explicitly selected game-directory resources retain priority.",
+  "files": {
+    "tree29.urb": {
+      "sha256": "10e7fdf276c136bb8d8d9c8d9961a92659ae2782de7e3cdd82e28d616dde9da1",
+      "bytes": 2545,
+      "source": "cncnet.mix::tree29.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    },
+    "tree30.urb": {
+      "sha256": "6ed6862908391826c92297945104f636fe12f7cdb0b6636e743649c08ca710ce",
+      "bytes": 2197,
+      "source": "cncnet.mix::tree30.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    },
+    "tree31.urb": {
+      "sha256": "f7df5ce29e435cc57075be19c2617642b6fc68b238d3fcd4f04689caf9886503",
+      "bytes": 12242,
+      "source": "cncnet.mix::tree31.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    },
+    "tree32.urb": {
+      "sha256": "4bf30057752c8185e2a5792b8502e3b62170487c5147f412243bf25d5e78913e",
+      "bytes": 8337,
+      "source": "cncnet.mix::tree32.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    },
+    "tree33.urb": {
+      "sha256": "4475090faf3afd9212d02b86501ab231d243e6f83c0a89aec725b896ecd1fc27",
+      "bytes": 10583,
+      "source": "cncnet.mix::tree33.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    },
+    "tree34.urb": {
+      "sha256": "c0b5f57425dfc6eab2d9ba83fd8b943f9dbd9a10ad8011e1980fe14a8d78b8d9",
+      "bytes": 8435,
+      "source": "cncnet.mix::tree34.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    },
+    "tree35.urb": {
+      "sha256": "a8d4eaabe8cd38000447dc5a08a6210d6355e164a778ad680fff7659150f347f",
+      "bytes": 12566,
+      "source": "cncnet.mix::tree35.urb",
+      "archiveSha256": "28f11f4de2ef9673b26d122bbf21c9c813a40de13572d44f3d66768a14ccfab6"
+    }
+  }
+}

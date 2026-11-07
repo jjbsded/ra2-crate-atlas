@@ -20,29 +20,45 @@ class ModuleChecks(unittest.TestCase):
                 self.assertNotIn(symbol, providers, 'Duplicate browser module: '+symbol)
                 providers[symbol] = name
             references[name] = set(re.findall(r'\bCrate\w+\b', code))
-        # A strictly earlier provider for every edge also rules out cycles.
+        # These factories look up their collaborators only after the page has
+        # loaded every script. CrateMapViewer is published by the last script.
+        deferred = {
+            ('simulation-visual.js', 'map-artwork.js'),
+            ('simulation-ui.js', 'region-statistics.js'),
+            ('simulation-ui.js', 'resource-ui.js'),
+            ('simulation-ui.js', 'transfer-origins.js'),
+            ('buff-expectation-ui.js', 'realmap-ui.js'),
+        }
         for name, symbols in references.items():
             for symbol in symbols:
                 provider = providers.get(symbol)
-                if provider and provider != name:
+                if provider and provider != name and (name, provider) not in deferred:
                     self.assertLess(scripts.index(provider), scripts.index(name),
                                     f'{name} requires {provider} ({symbol})')
 
     def test_production_dependency_graph_has_no_cycles(self):
         modules = {Path(name).stem for name in runpy.run_path(str(ROOT/'build-portable.py'))['APPLICATION_MODULES']}
-        # Only these two documented legacy entry points may point back up a
-        # layer. All other imports, INCLUDING deferred function imports, count.
+        # Legacy forwarding entry points and the one shared tree predicate are
+        # deferred until after both modules are initialized. Other imports,
+        # INCLUDING deferred business imports, still count.
         legacy = {('realmap_mod', 'preview'), ('realmap_render', 'refresh_result')}
         graph = {}
         for module in modules:
             edges = set()
             class Imports(ast.NodeVisitor):
+                function = None
                 def visit_FunctionDef(self, node):
                     if (module, node.name) not in legacy:
+                        previous = self.function
+                        self.function = node.name
                         self.generic_visit(node)
+                        self.function = previous
                 def visit_Import(self, node):
                     edges.update(n.name.split('.')[0] for n in node.names)
                 def visit_ImportFrom(self, node):
+                    if (module, self.function, node.module) == ('realmap_simulation', 'apply', 'realmap_parser') and \
+                            [(entry.name, entry.asname) for entry in node.names] == [('is_tree', None)]:
+                        return
                     edges.add((node.module or '').split('.')[0])
             Imports().visit(ast.parse((ROOT/(module+'.py')).read_text('utf8')))
             graph[module] = edges & modules

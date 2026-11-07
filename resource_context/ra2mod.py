@@ -6,6 +6,7 @@ ordinary MIX, CSF, INI and queries use the standard library.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -13,6 +14,7 @@ from pathlib import Path
 import re
 import struct
 import zlib
+import threading
 
 from ra2map import Document, OBJECT_FIELDS, fields, fold, sha, VERSION
 
@@ -21,6 +23,20 @@ MAX_HEADER = 84 + ((6 + 12 * 65535 + 7) // 8) * 8
 REGISTRIES = ("InfantryTypes", "VehicleTypes", "AircraftTypes", "BuildingTypes")
 DEFAULT_NESTED = ("localmd.mix", "local.mix")
 DEFAULT_NAMES = ("rulesmd.ini", "artmd.ini", "aimd.ini", "ra2md.csf")
+_lookups = threading.local()
+
+
+@contextmanager
+def lookup_scope():
+    """One directory snapshot per finite read batch, never across requests."""
+    previous = getattr(_lookups, 'entries', None)
+    if previous is None:
+        _lookups.entries = {}
+    try:
+        yield
+    finally:
+        if previous is None:
+            del _lookups.entries
 
 
 def relative_name(name):
@@ -33,6 +49,15 @@ def relative_name(name):
 
 
 def local_path(root, name, *, entries=None):
+    if entries is None:
+        entries = getattr(_lookups, 'entries', None)
+    if entries is None:
+        boundary = root.resolve()
+    else:
+        key = ('resolved-root', root)
+        if key not in entries:
+            entries[key] = root.resolve()
+        boundary = entries[key]
     path = root
     for part in relative_name(name).split('/'):
         if entries is None:
@@ -50,7 +75,7 @@ def local_path(root, name, *, entries=None):
         if len(matches) > 1:
             raise ValueError(f"Case-ambiguous path: {name}")
         path = matches[0] if matches else path / part
-    if not path.resolve().is_relative_to(root.resolve()):
+    if not path.resolve().is_relative_to(boundary):
         raise ValueError("Resource resolves outside game root")
     return path
 

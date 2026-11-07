@@ -14,7 +14,7 @@ function harness(){
  }
  element('version').value='auto';
  const document={getElementById:element,activeElement:null};
- const context=vm.createContext({document,window:{},fetch:(url,options)=>new Promise((resolve,reject)=>{
+ const context=vm.createContext({document,Event:class{},window:{dispatchEvent(){}},fetch:(url,options)=>new Promise((resolve,reject)=>{
   requests.push({url,options,resolve:data=>resolve({ok:true,json:async()=>data}),reject});
  })});
  vm.runInContext(fs.readFileSync(__dirname+'/local-api.js','utf8'),context);
@@ -26,6 +26,8 @@ function harness(){
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 
 async function main(){
+ const shared=harness(),first=shared.requests.shift(),a=shared.api.resolve('auto'),b=shared.api.resolve('yr');
+ assert.equal(shared.requests.length,0,'Startup and simultaneous analysis requests share one in-flight resource check');first.resolve(shared.state('new'));assert.equal(await a,'directory');assert.equal(await b,'yr');
  const h=harness(),e=h.element;
  h.requests.shift().resolve(h.state('old'));await settle();
  const resolving=h.api.resolve('auto');h.requests.shift().resolve(h.state('old'));

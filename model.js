@@ -10,11 +10,11 @@
     { id: 'building', name: _t('03 · 建筑占格'), start: [7, 7], subtitle: _t('占用格被排除，检查下一圈') },
     { id: 'terrain', name: _t('04 · 不可通行地形'), start: [6, 8], subtitle: _t('通行检查拒绝该格') },
     { id: 'unit', name: _t('05 · 地面单位占格'), start: [8, 6], subtitle: _t('不挤走单位，寻找附近空格') },
-    { id: 'crate', name: _t('06 · 已有工具箱'), start: [9, 6], subtitle: _t('附近搜索可选中，最终放置失败后重抽') },
+    { id: 'crate', name: _t('06 · 已有工具箱'), start: [9, 6], subtitle: _t('附近搜索可选中，最终放置失败') },
     { id: 'empty', name: _t('07 · 普通空地'), start: [6, 7], subtitle: _t('半径 0 即可找到原格') },
     { id: 'ore', name: _t('08 · 矿石覆盖物'), start: [9, 7], subtitle: _t('可通行的矿石仍会阻止最终放置') },
     { id: 'water_margin', name: _t('09 · 模型可用边界外抽到海水'), start: [1, 8], world: 'coast', subtitle: _t('真实水格 → Float → 向内寻找水域') },
-    { id: 'outside_water', name: _t('10 · 地图外起点附近只有海水'), start: [2, 3], world: 'ocean', subtitle: _t('默认 Clear → Track 失败 → 重抽水格') },
+    { id: 'outside_water', name: _t('10 · 地图外起点附近只有海水'), start: [2, 3], world: 'ocean', subtitle: _t('默认 Clear → Track 搜索失败') },
     { id: 'outside_island', name: _t('11 · 地图外起点，中央小岛'), start: [2, 3], world: 'island', subtitle: _t('Track 逐圈排除海水，找到中央陆地') }
   ];
   const CORE_PRESETS=PRESETS.map(p=>p.id);
@@ -84,19 +84,15 @@
     if(!Number.isSafeInteger(frame)||frame<0||frame>999999999) throw Error(_t('逻辑帧必须是 0～999999999 的整数。'));
     if(initial.length!==2 || initial.some(v=>!Number.isInteger(v)||v<1||v>13)) throw Error(_t('X、Y 必须是 1～13 的整数。'));
     if(key(initial)!==key(preset.start))preset={id:'custom',name:_t('自定义起点 · ')+world.name,world:world.id,start:initial,subtitle:classify(initial,world,speedFor(landType(initial,world))).reason};
-    let seed=(Number(options.seed)||2026)>>>0;
-    const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0; return 1+Math.floor(seed/4294967296*13);};
     const steps=[];
     const push=(s)=>steps.push({ frame, preset:preset.id, attempt:1, candidates:[], visits:[], duration:2, ...s });
     let placed=null;
-    for(let attempt=1;attempt<=1000;attempt++) {
-      // The first point is explicitly forced for teaching. The second point is
-      // scripted so an overlay failure has a short, reproducible recovery.
-      const origin=attempt===1?initial:attempt===2?[6,7]:[random(),random()];
+    do {
+      const attempt=1,origin=initial;
       const initialLand=landType(origin,world),speed=speedFor(initialLand),cellSource=inside(origin)?_t('真实 Cell'):'InvalidCell';
       const base={attempt,origin,initialLand,speed,cellSource};
       const explanation=cellSource==='InvalidCell'?_t('取不到真实格，默认 Clear → Track。'):_t`真实格为 ${initialLand} → ${speed}。`;
-      push({...base,phase:'origin',title:attempt===1?_t('指定初始坐标'):_t('外层重新抽取 X、Y'),text:attempt===1?_t`起点 (${origin})：${classify(origin,world,speed).reason}。${explanation}`:_t`演示指定下一组坐标 (${origin})，重新判断地形。${explanation}`,duration:4});
+      push({...base,phase:'origin',title:_t('指定初始坐标'),text:_t`起点 (${origin})：${classify(origin,world,speed).reason}。${explanation}`,duration:4});
       let candidates=[], radius=-1;
       for(let r=0;r<Math.min(MAP.w+MAP.h,32);r++) {
         const scanned=scanRing(origin,r,world,speed),visits=scanned.visits;candidates=scanned.candidates;
@@ -107,24 +103,22 @@
       }
       if(radius<0) {
         push({...base,phase:'put',failed:true,failure:'no-candidate',nearbyResult:'Empty',title:_t('无有效落点，放置失败'),text:_t('全部 14 个半径都没有候选。返回 Empty 后，最终放置无法通过边界检查。'),duration:3.8});
-        push({...base,phase:'retry',failure:'no-candidate',title:_t('回到外层，重新随机'),text:_t('本轮 Track 搜索失败。重新抽 X、Y 后，才会重新读取初始格地面类型。'),duration:4});
-        continue;
+        break;
       }
       const index=frame%candidates.length;
       const selected=candidates[index];
       push({...base,phase:'choose',radius,candidates,selected,index,title:_t('从候选记录中选择'),text:_t`固定逻辑帧 ${frame} % ${candidates.length} = ${index}，取第 ${index+1} 条。附近选择不再抽随机数。`,duration:3});
       const overlay=hasOverlay(selected,world);
       const finalLand=landType(selected,world),crateKind=crateFor(finalLand);
-      push({...base,phase:'put',radius,candidates,selected,index,finalLand,crateKind,failed:overlay,failure:overlay?'overlay':null,title:overlay?_t('最终放置失败'):_t('最终放置检查通过'),text:overlay?_t('选中格已有 Overlay，不能叠放。结束本轮，重抽起点；不接着搜索更外圈。'):_t`可用边界与 Overlay 检查通过。再读最终格 ${finalLand}，创建${crateKind==='watercrate'?_t('水箱 WCRATE'):_t('陆地箱 CRATE')}。`,duration:3.8});
+      push({...base,phase:'put',radius,candidates,selected,index,finalLand,crateKind,failed:overlay,failure:overlay?'overlay':null,title:overlay?_t('最终放置失败'):_t('最终放置检查通过'),text:overlay?_t('选中格已有 Overlay，不能叠放；本次放置结束。'):_t`可用边界与 Overlay 检查通过。再读最终格 ${finalLand}，创建${crateKind==='watercrate'?_t('水箱 WCRATE'):_t('陆地箱 CRATE')}。`,duration:3.8});
       if(overlay) {
-        push({...base,phase:'retry',selected,failed:true,failure:'overlay',title:_t('回到外层，重新随机'),text:_t('附近搜索与外层重抽是两个步骤。已有覆盖物保留，下一轮从新起点重新搜索。'),duration:2.8});
-        continue;
+        break;
       }
       placed=selected;
-      push({...base,phase:'done',selected,placed,finalLand,crateKind,title:crateKind==='watercrate'?_t('水箱生成成功'):_t('陆地箱生成成功'),text:world.id==='island'&&speed==='Track'?_t`初始 (${initial}) → 中央陆地 (${selected})，第 ${attempt} 轮成功。附近扫描不要求陆路连通；本例无需重抽。`:_t`初始 (${initial}) → 最终 (${selected})；共 ${attempt} 轮。最终格 ${finalLand} 决定箱子类型。`,duration:world.id==='island'&&speed==='Track'?4.5:3.8});
+      push({...base,phase:'done',selected,placed,finalLand,crateKind,title:crateKind==='watercrate'?_t('水箱生成成功'):_t('陆地箱生成成功'),text:world.id==='island'&&speed==='Track'?_t`初始 (${initial}) → 中央陆地 (${selected})，第 ${attempt} 轮成功。附近扫描不要求陆路连通。`:_t`初始 (${initial}) → 最终 (${selected})；共 ${attempt} 轮。最终格 ${finalLand} 决定箱子类型。`,duration:world.id==='island'&&speed==='Track'?4.5:3.8});
       break;
-    }
-    if(!placed) push({phase:'exhausted',origin:initial,attempt:1000,title:_t('1000 轮均失败'),text:_t('本次调用返回失败，不保证生成。')});
+    } while(false);
+    if(!placed) push({phase:'exhausted',origin:initial,attempt:1,title:_t('未生成箱子'),text:_t('本次调用返回失败，不保证生成。')});
     let time=0;
     steps.forEach((s,i)=>{s.i=i;s.start=time;time+=s.duration;s.end=time;});
     return {preset,world,initial,frame,steps,duration:time,placed};

@@ -1,6 +1,10 @@
 """Rule-based routing masks preserve probabilities and separate bridge layers."""
 import base64
 from copy import deepcopy
+import json
+from pathlib import Path
+import subprocess
+import tempfile
 from region_navigation import build, GROUND, WATER, SHORE, DECK
 
 
@@ -8,7 +12,7 @@ def check():
     rules={'CLEAR':{'FOOT':'1'},'ROAD':{'FOOT':'1'},'WATER':{'FOOT':'0'},'ROCK':{'FOOT':'0'},'WALL':{'FOOT':'0'},'BEACH':{'FOOT':'1'},
            'HOUSE':{'STRENGTH':'100'},'IMMUNEHOUSE':{'STRENGTH':'100','IMMUNE':'yes'},
            'WALLTYPE':{'WALL':'yes','LAND':'Wall','STRENGTH':'100'},'BRIDGE1':{'LAND':'Road'},'TREE':{'NAME':'Tree'},'ROCK01':{'NAME':'Rock'},'TIBTRE01':{'SPAWNSTIBERIUM':'yes'},'TRFF01':{'NAME':'Light','TEMPERATEOCCUPATIONBITS':'0','SNOWOCCUPATIONBITS':'7'}}
-    base=dict(x=1,y=1,level=0,slope=0,rawLand=0,land=0,overlayName=None,objectsGround=[],objectsDeck=[],removable=[],occupiedGround=False,occupiedDeck=False,probability=.3,terms=[[0,1]],bridge=None)
+    base=dict(x=1,y=1,level=0,slope=0,rawLand=0,land=0,overlayName=None,higher=[],objectsGround=[],objectsDeck=[],removable=[],occupiedGround=False,occupiedDeck=False,probability=.3,terms=[[0,1]],bridge=None)
     cells=[]
     def add(**changes):
         cell=deepcopy(base);cell.update(changes);cells.append(cell)
@@ -29,9 +33,9 @@ def check():
     report=dict(metadata={'cliffBackImpassability':2},cells=cells,probability={'keep':'unchanged'})
     original=deepcopy(report);flags=base64.b64decode(build(report,rules)['flags'])
     assert flags[0]&GROUND and flags[1]&GROUND
-    assert not flags[2]&GROUND and not flags[3]&GROUND
-    assert flags[4]&DECK and not flags[4]&GROUND
-    assert flags[5]&GROUND and not flags[5]&DECK
+    assert not flags[2]&GROUND and flags[3]&GROUND
+    assert flags[4]&DECK and flags[4]&GROUND
+    assert flags[5]&GROUND and flags[5]&DECK
     assert flags[6]&WATER and flags[6]&DECK and not flags[6]&GROUND
     assert flags[7]&GROUND and not flags[8]&GROUND and flags[9]&SHORE
     assert all(not flags[i]&GROUND for i in (10,11,12,14)), 'Rocks, drills and unknown scenery are not trees'
@@ -39,7 +43,37 @@ def check():
     snow=deepcopy(report);snow['metadata']['theater']='SNOW'
     assert not base64.b64decode(build(snow,rules)['flags'])[13]&GROUND, 'Use the correct theater occupation mask'
     assert report==original
-    print('PASS routing rules: trees/destructible buildings, immune/unknown/unit blockers, walls and ground/deck masks; original report unchanged')
+    # Actual corridor connectivity, not merely a passable bit on a unit cell.
+    cases=[]
+    for terrain in ('land','bridge','water'):
+        empty=[]
+        for x in range(1,6):
+            c=deepcopy(base);c.update(x=x,y=1)
+            if terrain=='water' or terrain=='bridge' and 1<x<5:c.update(rawLand=2,land=2)
+            if terrain=='bridge':
+                if 1<x<5:c.update(overlayName='BRIDGE1',bridge=dict(kind='high',deckLevel=4))
+                else:c['level']=4
+            empty.append(c)
+        units=deepcopy(empty)
+        for c,kind in zip(units,['MCV','TANK','SOLDIER','AIRCRAFT','SHIP']):
+            layer='Deck' if terrain=='bridge' and c['bridge'] else 'Ground'
+            c['objects'+layer]=[kind];c['occupied'+layer]=True
+            c['removable']=[dict(category='unit',type=kind)]
+        a=dict(metadata=report['metadata'],cells=empty)
+        b=dict(metadata=report['metadata'],cells=units)
+        original_units=deepcopy(b)
+        assert build(a,rules)==build(b,rules),terrain
+        assert b==original_units,'Routing must not change occupation or crate probability'
+        cases.append(dict(terrain=terrain,empty=a,units=b,rules=rules,navigation=build(b,rules)))
+    mixed=deepcopy(report);mixed['cells'][2]['objectsGround'].append('TANK')
+    mixed['cells'][2]['removable'].append(dict(type='TANK',category='unit'))
+    assert not base64.b64decode(build(mixed,rules)['flags'])[2]&GROUND,'A unit must not hide an immune building'
+    root=Path(__file__).resolve().parent
+    with tempfile.TemporaryDirectory(dir=root/'output') as temp:
+        path=Path(temp)/'cases.json';path.write_text(json.dumps(cases),'utf8')
+        result=subprocess.run([str(root.parents[1]/'portable/CrateAtlas-Windows-x64/runtime/node/node.exe'),str(root/'verify-region-navigation.cjs'),str(path)],capture_output=True,text=True,creationflags=0x08000000)
+        print(result.stdout);assert result.returncode==0,result.stderr
+    print('PASS routing rules: ignore units; preserve immune/unknown blockers, walls and ground/deck masks; original report unchanged')
 
 
 if __name__=='__main__':

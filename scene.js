@@ -41,7 +41,7 @@
     box(30,124,1048,625,'#121e28',C.line,15);
     if(summary){
       text(_t('工具箱落点概率 · 放箱前地图'),52,157,20,C.text,true);
-      text(_t`随机逻辑帧 · ${trace.probability?.frameDistribution?.period||H.computeRandom(world).frameDistribution.period} 个等权帧余数精确平均 · 同次调用最多 1000 轮`,52,190,16,C.muted);
+      text(_t`随机逻辑帧 · ${trace.probability?.frameDistribution?.period||H.computeRandom(world).frameDistribution.period} 个等权帧余数精确平均`,52,190,16,C.muted);
     }else{
       text(_t('菱形是一个 Cell；整张地图在屏幕上呈横向矩形'),52,157,18,C.muted);
       text(world.id==='island'?_t('中央 2×2 格为陆地；海水会被排除，但不会挡住外圈扫描'):world.id==='ocean'?_t('全海水示例：真实格全是 Water；地图外仍取 InvalidCell'):world.id==='coast'?_t('左侧水域示例：边界外的真实水格仍有 Water 属性'):_t('陆地示例：矿石与箱子是 Overlay 覆盖物'),52,190,16,C.muted);
@@ -143,7 +143,7 @@
     if(summary)return;
     // Explanation panel is part of the recorded video.
     box(1100,124,462,625,C.panel,C.line,15);
-    text(_t`第 ${step.attempt} / 1000 轮`,1126,163,18,C.amber,true);
+    text(_t`单次放置`,1126,163,18,C.amber,true);
     text(step.title,1126,206,25,C.text,true);
     text(_t`取格：${step.cellSource||_t('真实 Cell')}`,1126,240,17,C.muted);
     text(_t`起点 ${step.initialLand||'Clear'} → ${step.speed||'Track'} 搜索`,1126,271,20,C.amber,true);
@@ -162,13 +162,13 @@
       yy=wrap(step.candidates.map((c,i)=>`${i===step.index?_t('选中 '):''}${i+1}:(${c})`).join('  '),1126,yy,407,17,C.muted,28);
       if(step.radius===0)wrap(_t('r=0 的上下行会重复记录原格两次。'),1126,yy+8,400,17,C.muted,27);
     }else{
-      wrap(step.phase==='retry'?_t('最终放置失败 → 整轮重抽'):step.phase==='done'?_t('成功后退出本次调用'):_t('附近搜索 → 候选选择 → 最终放置'),1126,yy,405,19,C.green,30);
+      wrap(step.phase==='retry'?_t('最终放置失败'):step.phase==='done'?_t('成功后退出本次调用'):_t('附近搜索 → 候选选择 → 最终放置'),1126,yy,405,19,C.green,30);
     }
     // Ordinary chapters retain the mechanism stages and research footer.
     const phaseIndex=step.phase==='origin'||step.phase==='retry'?0:step.phase==='search'?1:step.phase==='choose'?2:3;
     const stages=[_t('01  初始坐标'),_t('02  附近搜索'),_t('03  候选选择'),_t('04  最终放置')];
     stages.forEach((s,i)=>{const x=30+i*388;box(x,770,369,48,i===phaseIndex?'#3b3b2a':C.panel,i===phaseIndex?C.amber:null,8);text(s,x+19,801,19,i===phaseIndex?C.amber:C.muted,true);});
-    text(_t('蓝框不是玩家黑幕，也不是当前镜头。平地、无桥梁；首点与重抽点是指定演示输入。'),38,851,18,C.muted);
+    text(_t('蓝框不是玩家黑幕，也不是当前镜头。平地、无桥梁；起点是指定演示输入。'),38,851,18,C.muted);
     text(_t('依据：RA2 0x54E410 / 0x5502E0 · YR 0x56BD40 / 0x56DC20；不是实机回放。'),38,880,15,'#758c9e');
     if(opts.chapter){box(1268,838,292,40,C.panel);text(opts.chapter,1288,865,17,C.amber);}
   }

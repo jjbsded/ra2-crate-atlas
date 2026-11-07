@@ -3,6 +3,7 @@ from functools import lru_cache
 import contextlib
 import io
 import re
+import zipfile
 from runtime_bootstrap import ROOT
 import ra2mix
 from realmap_format import ini, ini_integer, sha
@@ -47,6 +48,12 @@ class Resources:
             mix = self.mix(name)
             if filename in mix:
                 return mix[filename]
+        # CnCNet adds these URBAN sprites; do not substitute another climate
+        # or override existing stock data. Directory resources have their own
+        # explicit resolver and never pass through this fallback.
+        if re.fullmatch(r'tree(?:29|3[0-5])\.urb', filename):
+            with zipfile.ZipFile(ROOT/'assets/urban-trees/sprites.zip') as archive:
+                return archive.read(filename)
         raise ValueError(f'原版资源中找不到 {filename}')
 
     def theater(self, name):

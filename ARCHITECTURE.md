@@ -27,7 +27,9 @@
 
 依赖从分析入口指向解析、资源和格式层。原生工具的检查与编译只在进入概率计算时进行，`parse_map()` 可在没有编译器的环境独立使用，也不加载 Pillow、NumPy 或概率求解器。原版与目录资源共用同一套格子解析和贴图解码。`realmap.py` 保留旧函数导入名，`realmap_objects.records` 和 `realmap_mod.preview` 保留兼容入口；新代码应导入实际负责该功能的模块。
 
-对象绘制与 3D 不再反向导入 `realmap_render` 取共享贴图函数。报告升级编排位于 `realmap_refresh`；旧的 `realmap_render.refresh_result` 仅作延迟转发。依赖图检查包含函数体内导入，仅排除这两个明确的兼容转发入口（`realmap_mod.preview`、`realmap_render.refresh_result`）；主业务模块依赖必须无环。
+对象绘制与 3D 不再反向导入 `realmap_render` 取共享贴图函数。报告升级编排位于 `realmap_refresh`；旧的 `realmap_render.refresh_result` 仅作延迟转发。依赖图检查包含函数体内导入，排除两个兼容转发入口（`realmap_mod.preview`、`realmap_render.refresh_result`），以及模拟应用时延迟复用解析器的单个纯函数 `is_tree`；其他主业务模块依赖必须无环。解析只读取增量模块的线程状态，NumPy 和精确计算器在创建概率存储时才加载。
+
+前端模块通常在消费者前加载。模拟界面和局部图像更新通过工厂创建，部分协作者在页面全部脚本加载后才使用；Buff 期望界面也只在任务执行时读取最后发布的 `CrateMapViewer`。模块边界检查明确记录这五条延迟关系，其他加载顺序仍严格检查。
 
 任务管理器最多保留 64 条轮询记录；运行中和排队中的任务不会被清理。完成记录移出内存不删除磁盘结果。最多一个分析实际运行，前台请求可等待一个已开始的后台预加载；其他冲突请求返回忙碌提示。同一布局的进行中请求复用任务，任务状态通过锁保护的快照返回。
 

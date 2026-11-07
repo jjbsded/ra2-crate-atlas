@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict'),A=require('./region-auto.js');
 const key=(x,y)=>x*1024+y;
-function grid(w,h){const cells=Array.from({length:w*h},(_,i)=>({x:i%w+1,y:Math.floor(i/w)+1,level:0,slope:0}));return {cells,navigation:{version:2,count:cells.length,flags:new Uint8Array(cells.length).fill(17)},starts:[{number:1,x:1,y:1}]};}
+function grid(w,h){const cells=Array.from({length:w*h},(_,i)=>({x:i%w+1,y:Math.floor(i/w)+1,level:0,slope:0}));return {cells,navigation:{version:3,count:cells.length,flags:new Uint8Array(cells.length).fill(17)},starts:[{number:1,x:1,y:1}]};}
 function change(g,x,y,mask,props={}){const i=g.cells.findIndex(c=>c.x===x&&c.y===y);g.navigation.flags[i]=mask;Object.assign(g.cells[i],props);}
 const run=(g,settings={})=>A.partition({...g,settings},{yieldControl:async()=>{}}),owns=(r,region,x,y)=>r.regions[region]?.keys.includes(key(x,y));
 function weigh(g,numerators,baseline=1n){g.display={baselineNumerator:baseline,get:c=>({numerator:numerators[g.cells.indexOf(c)]??0n})};return g;}

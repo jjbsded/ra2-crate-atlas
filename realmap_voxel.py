@@ -3,7 +3,9 @@ import hashlib
 import os
 from pathlib import Path
 import queue
+import re
 import struct
+from tempfile import TemporaryDirectory
 import subprocess
 import threading
 
@@ -13,6 +15,29 @@ from realmap_voxel_lighting import identity_vpl, shade_vxl, vpl_tables
 from realmap_voxel_shadow import footprint
 
 ROOT = Path(__file__).resolve().parent
+
+
+def simulation_pattern(color):
+    return color == 'stripe-3-yellow-black-fixed' or bool(re.fullmatch(r'stripe-3-region-[0-9a-f]{6}', color or ''))
+
+
+def simulation_rgba(rgba, indices, x=0, y=0, pattern='stripe-3-yellow-black-fixed'):
+    """Three-pixel fixed diagonals, only on remap indices.
+
+    x/y are object-relative sprite anchors so separately cropped body, turret
+    and animation layers share phase. Alpha and every non-remap pixel survive.
+    """
+    rows, columns = np.indices(indices.shape)
+    mask = (indices >= 16) & (indices < 32)
+    black = ((columns + round(x) + rows + round(y)) // 3) % 2 != 0
+    bright, dark = (255, 212, 0), (0, 0, 0)
+    if pattern.startswith('stripe-3-region-'):
+        rgb = bytes.fromhex(pattern[-6:])
+        bright = tuple((v*72+255*28+50)//100 for v in rgb)
+        dark = tuple((v*55+50)//100 for v in rgb)
+    rgba[mask, :3] = dark
+    rgba[mask & ~black, :3] = bright
+    return rgba
 
 
 def renderer_path():
@@ -47,7 +72,9 @@ class VoxelRenderer:
         dll = renderer_path()
         if not dll:
             raise ValueError('内置体素组件缺失，请重新完整解压工具包；源码运行也可用 CRATE_VOXEL_DLL 指定组件')
-        self.folder = folder/'voxel-cache'; self.folder.mkdir(exist_ok=True)
+        cache = folder/'voxel-cache'; cache.mkdir(exist_ok=True)
+        self.scratch = TemporaryDirectory(prefix='worker-', dir=cache)
+        self.folder = Path(self.scratch.name)
         self.cache = {}
         exe = ensure_worker()
         vp = self.folder/'voxels.vpl'; vp.write_bytes(identity_vpl(vpl))
@@ -87,6 +114,7 @@ class VoxelRenderer:
     def close(self):
         process = getattr(self, 'process', None)
         if process is None:
+            self.scratch.cleanup()
             return
         try:
             if process.poll() is None:
@@ -106,8 +134,9 @@ class VoxelRenderer:
                         stream.close()
                     except OSError:
                         pass
+            self.scratch.cleanup()
 
-    def draw(self, vxl, hva, facing, offsets, angle, colors, *, shadow_section=0, shadow_scale=1.0):
+    def draw(self, vxl, hva, facing, offsets, angle, colors, *, shadow_section=0, shadow_scale=1.0, remap_origin=None, remap_pattern='stripe-3-yellow-black-fixed'):
         if self.process.poll() is not None or self.process.stdin.closed:
             raise ValueError('体素进程已停止，无法继续绘制对象')
         checksum = hashlib.sha256(vxl+hva).hexdigest()
@@ -136,4 +165,6 @@ class VoxelRenderer:
         rgba = np.zeros((*body.shape,4), dtype=np.uint8)
         rgba[:,:,:3] = np.asarray(colors,dtype=np.uint8)[body]
         rgba[:,:,3] = np.where(body,255,0)
+        if remap_origin is not None:
+            simulation_rgba(rgba, body, x+remap_origin[0], y+remap_origin[1], remap_pattern)
         return Image.fromarray(rgba), shadow, x,y,sx,sy

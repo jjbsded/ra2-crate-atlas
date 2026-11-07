@@ -4,20 +4,27 @@
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
- function createReader({fetch=(...args)=>root.fetch(...args),Image=root.Image,readJSON=null,readBinary=null,
+ function createReader({fetch=(...args)=>root.fetch(...args),Image=root.Image,readJSON=null,readBinary=null,upgrade=null,
   createSources=(...args)=>root.CrateTransferOrigins.create(...args)}={}){
-  return async function read(url,{signal}={}){
+  return async function read(url,{signal,upgraded=false,onMetadata=null}={}){
    let data;
    if(readJSON)data=await readJSON(url,{signal});
    else{const response=await fetch(url,{cache:'no-store',signal});
     if(!response.ok)throw Error(_t('分析结果无法读取，请重新分析地图'));
     data=await response.json();}
+   if(data.probability&&data.probability.model!=='finite-retry-v2'&&upgrade){
+    if(upgraded)throw Error(_t('分析结果需要重新计算'));
+    const current=await upgrade(url,{signal});signal?.throwIfAborted();return read(current,{signal,upgraded:true,onMetadata});
+   }
    const base=url.slice(0,url.lastIndexOf('/')+1);
    _i18n?.diagnostics(data);
    if(!data.metadata||!Array.isArray(data.cells)||(!data.rendering?.image&&!data.rendering?.simplified&&!data.rendering?.original))throw Error(_t('地图分析结果不完整，请重新分析地图'));
+   signal?.throwIfAborted();onMetadata?.(url,data);
    async function picture(name){
     if(!name)return null;
-    const image=new Image();image.src=base+name+'?v='+(data.rendering.version||1);
+    const url=base+name+'?v='+(data.rendering.version||1);
+    if(Image===root.Image&&root.CrateMapArtwork?.load)return root.CrateMapArtwork.load(url,{signal,legacyMatte:(data.rendering.version||1)<=22});
+    const image=new Image();image.src=url;
     await image.decode();return image;
    }
    let im,objectImage;
@@ -46,9 +53,9 @@
  function createLoader(read){
   let revision=0,controller=null;
   function invalidate(){++revision;controller?.abort();controller=null;}
-  function request(url,prepared=null){
+  function request(url,prepared=null,options={}){
    invalidate();const ticket=revision;controller=new AbortController();
-   return {ready:prepared?Promise.resolve(prepared):read(url,{signal:controller.signal}),current:()=>ticket===revision};
+   return {ready:prepared?Promise.resolve(prepared):read(url,{...options,signal:controller.signal}),current:()=>ticket===revision};
   }
   return {request,invalidate};
  }

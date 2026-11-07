@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from realmap_bridges import HIGH_NAMES, sprite_frame
 
-VERSION = 19
+VERSION = 23
 # Compatibility exports; shared sprite code lives below both renderers.
 from realmap_sprites import palette, sprite_spec, shadow_frame, SHADOW_ALPHA
 
@@ -155,78 +155,22 @@ def mark_bridge_stencil(im, x, y, level, stencil, *, high=False):
         part[alpha[top-y:bottom-y, left-x:right-x] != 0] = 128 | min(level+4, 127)
 
 
-def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=True):
-    from realmap_sprites import tile_parts, shp_frame
-    from realmap_format import yes, ini, sha
-    # Lighting is display data, kept outside the gameplay parser/cache identity.
-    # Reopened reports and Toy capture may provide this context explicitly.
-    if 'mapLighting' not in theater:
-        theater = dict(theater)
-        source = folder/'source.map'
-        if source.is_file() and meta.get('sourceSha256'):
-            raw = source.read_bytes()
-            if sha(raw) != meta['sourceSha256']:
-                raise ValueError('光照读取的地图原文件与报告哈希不一致')
-            theater['mapLighting'] = ini(raw).get('LIGHTING', {})
-    colors = palette(theater['palette'])
-    from realmap_terrain_variants import TerrainVariants
-    variants = TerrainVariants(res, theater, tmps)
-    ordered = sorted(cells.values(), key=lambda c: (c['x']+c['y'], c['x']))
-    minx = min(30*(c['x']-c['y'])-30 for c in ordered)-90
-    miny = min(15*(c['x']+c['y']-c['level'])-15 for c in ordered)-180
-    maxx = max(30*(c['x']-c['y'])+30 for c in ordered)+90
-    maxy = max(15*(c['x']+c['y']-c['level'])+15 for c in ordered)+90
-    width, height = maxx-minx, maxy-miny
-    # Keep native TMP/SHP pixels even on large maps. Display zoom belongs to
-    # the viewport; reducing each sprite here permanently loses detail and
-    # creates differently resampled duplicates in the Toy sprite atlases.
-    factor = 1
-    canvas = Image.new('RGB', (round(width*factor), round(height*factor)), '#18232b')
-    from realmap_objects import ObjectPainter
-    painter = ObjectPainter(res, theater, folder)
-    progress('绘制建筑、步兵、车辆和飞机', 86)
-    object_events, object_info = painter.prepare(cells, [-minx, -miny])
-    if painter.voxels is not None:
-        painter.voxels.close()
-    scene = canvas.copy()
-    object_bodies = Image.new('L', (width, height))
-    # Same-level terrain must not erase sprite pixels extending beyond the
-    # anchor cell. Higher foreground terrain still wins the depth comparison.
-    # This is solely the object scene; picking/ground/probability stay untouched.
-    object_stencil = np.zeros((height, width), dtype=np.uint8)
-    object_shadows = []
-    event_index = 0
-    def draw_objects(before=float('inf')):
-        nonlocal event_index
-        while event_index < len(object_events) and object_events[event_index][0] < before:
-            depth, _, cx, cy, level, part = object_events[event_index]
-            event_index += 1
-            im = part['image']; x, y = round(cx+part['x']), round(cy+part['y'])
-            drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
-            scene.paste(drawn, (round(x*factor), round(y*factor)), drawn)
-            object_bodies.paste(255, (x,y,x+im.width,y+im.height), im.getchannel('A'))
-            mark_sprite_stencil(im, x, y, level+2, object_stencil)
-            if part['shadow'] is not None:
-                object_shadows.append((part['shadow'], round(cx+part.get('shadowX', part['x'])),
-                    round(cy+part.get('shadowY', part['y'])), level))
-    # One logical pixel per original game pixel even when the color raster scales.
-    # Integer owner 0 means a vertical cliff face / no selectable ground surface.
-    owner = Image.new('I', (width, height), 0)
-    bodies = Image.new('L', (width, height))
-    shadows = []
-    levels = np.array([-32768]+[c['level'] for c in ordered], dtype=np.int16)
-    tiles, sprites, missing, audit = {}, {}, set(), {}
-    tile_heights = {}
-    has_high_bridges = any(c['overlayName'] in HIGH_NAMES for c in ordered)
-    records = []
-    bounds = camera_rect(meta, [-minx, -miny])
-    def bridge_overlay(cell):
-        name = cell['overlayName'] or ''
-        return name in HIGH_NAMES or name.startswith(('LOBRDG', 'LOBRDB'))
-    bridge_stencil = (np.zeros((height, width), dtype=np.uint8)
-                      if any(bridge_overlay(c) for c in ordered) else None)
-    for ident, c in enumerate(ordered, 1):
-        draw_objects(c['x']+c['y'])
+class PaintAssets:
+    """Decoded native pixels shared between local replays of one scene."""
+
+    def __init__(self, res, theater, tmps):
+        from realmap_terrain_variants import TerrainVariants
+        self.res, self.tmps = res, tmps
+        self.colors = palette(theater['palette'])
+        self.variants = TerrainVariants(res, theater, tmps)
+        self.tiles, self.sprites, self.audit, self.tile_heights = {}, {}, {}, {}
+        self.missing = set()
+
+    def ground(self, c, high=False):
+        from realmap_sprites import tile_parts
+        variants, tiles, tmps = self.variants, self.tiles, self.tmps
+        colors, tile_heights = self.colors, self.tile_heights
+        has_high_bridges = high
         visual_file = variants.file(c)
         key = visual_file, c['subTile']
         if key not in tiles:
@@ -251,11 +195,128 @@ def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=Tru
             array = np.asarray(mask) != 0
             full = contours(array, bx-30, by-15) if c['slope'] else [[[0, -15], [30, 0], [0, 15], [-30, 0]]]
             tiles[key] = (parts, array, bx-30, by-15, full)
-        parts, mask, dx, dy, full = tiles[key]
+        parts = tiles[key][0]
         if has_high_bridges and key not in tile_heights:
             from terrain_depth import tile_pixel_heights
             tile_heights[key] = ([None]*len(parts) if c.get('terrainError') else
                                 tile_pixel_heights(tmps[visual_file], c['subTile'], parts))
+        return key, tiles[key]
+
+    def sprite(self, sc, is_overlay, theater):
+        from realmap_sprites import shp_frame
+        from realmap_format import yes
+        sprites, audit, missing = self.sprites, self.audit, self.missing
+        res = self.res
+        kind = sc['overlayName'] if is_overlay else sc['terrain']
+        frame = sprite_frame(sc) if is_overlay else 0
+        if not kind:
+            return None
+        if is_overlay and yes(theater['effectiveRules'].get(kind, {}).get('ISRUBBLE', 'no')):
+            return None  # Rubble belongs to the destroyed building.
+        green = bool(is_overlay and sc.get('simulationOverlay') and yes(theater['effectiveRules'].get(kind,{}).get('TIBERIUM','no')))
+        skey = kind, is_overlay, frame, green
+        if skey not in sprites:
+            try:
+                raw, pal, offset, spec = sprite_spec(kind, is_overlay, frame, res, theater)
+                cfg = theater['effectiveRules'].get(kind, {})
+                mask, shadow_spec = shadow_frame(raw, frame, cfg, res.art.get(cfg.get('IMAGE', kind).upper(), {}))
+                # High decks sit above the ground receiver. Their artwork
+                # must block ground shadows from neighboring bridge spans,
+                # even when their Overlay rules use the default DrawFlat.
+                solid = (not is_overlay or kind in HIGH_NAMES
+                         or any(yes(cfg.get(k, 'no')) for k in ('WALL', 'CRATE', 'ISAROCK'))
+                         or not yes(cfg.get('DRAWFLAT', 'yes')))
+                im=shp_frame(raw, frame, pal)
+                if green:
+                    from simulation_art import green_ore
+                    im=green_ore(im)
+                sprites[skey] = (im, offset, mask, solid)
+                spec.update(shadow_spec)
+                audit[f'{kind}/{frame}'] = spec
+            except (ValueError, IndexError, KeyError) as error:
+                sprites[skey] = None
+                missing.add(kind)
+        return sprites[skey]
+
+
+def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=True, image_sink=None, replay=None):
+    from realmap_format import ini, sha
+    # Lighting is display data, kept outside the gameplay parser/cache identity.
+    # Reopened reports and Toy capture may provide this context explicitly.
+    if 'mapLighting' not in theater:
+        theater = dict(theater)
+        source = folder/'source.map'
+        if source.is_file() and meta.get('sourceSha256'):
+            raw = source.read_bytes()
+            if sha(raw) != meta['sourceSha256']:
+                raise ValueError('光照读取的地图原文件与报告哈希不一致')
+            theater['mapLighting'] = ini(raw).get('LIGHTING', {})
+    assets = replay['assets'] if replay else PaintAssets(res, theater, tmps)
+    points = replay['points'] if replay else cells
+    ordered = sorted((cells[p] for p in points), key=lambda c: (c['x']+c['y'], c['x']))
+    if replay:
+        minx, miny, width, height = replay['rect']
+    else:
+        minx = min(30*(c['x']-c['y'])-30 for c in ordered)-90
+        miny = min(15*(c['x']+c['y']-c['level'])-15 for c in ordered)-180
+        maxx = max(30*(c['x']-c['y'])+30 for c in ordered)+90
+        maxy = max(15*(c['x']+c['y']-c['level'])+15 for c in ordered)+90
+        width, height = maxx-minx, maxy-miny
+    # Keep native TMP/SHP pixels even on large maps. Display zoom belongs to
+    # the viewport; reducing each sprite here permanently loses detail and
+    # creates differently resampled duplicates in the Toy sprite atlases.
+    factor = 1
+    # Empty raster margins belong to the coordinate layer below the artwork.
+    # Preserve real sprite/cliff overhangs instead of clipping to cell diamonds.
+    canvas = Image.new('RGBA', (round(width*factor), round(height*factor)))
+    if replay:
+        object_events = replay['events']
+    else:
+        from realmap_objects import ObjectPainter
+        painter = ObjectPainter(res, theater, folder)
+        progress('绘制建筑、步兵、车辆和飞机', 86)
+        object_events, object_info = painter.prepare(cells, [-minx, -miny])
+        if painter.voxels is not None:
+            painter.voxels.close()
+    scene = canvas.copy()
+    object_bodies = Image.new('L', (width, height))
+    # Same-level terrain must not erase sprite pixels extending beyond the
+    # anchor cell. Higher foreground terrain still wins the depth comparison.
+    # This is solely the object scene; picking/ground/probability stay untouched.
+    object_stencil = np.zeros((height, width), dtype=np.uint8)
+    object_shadows = []
+    event_index = 0
+    def draw_objects(before=float('inf')):
+        nonlocal event_index
+        while event_index < len(object_events) and object_events[event_index][0] < before:
+            depth, _, cx, cy, level, part = object_events[event_index]
+            event_index += 1
+            im = part['image']; x, y = round(cx+part['x']), round(cy+part['y'])
+            drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
+            scene.alpha_composite(drawn, (round(x*factor), round(y*factor)))
+            object_bodies.paste(255, (x,y,x+im.width,y+im.height), im.getchannel('A'))
+            mark_sprite_stencil(im, x, y, level+2, object_stencil)
+            if part['shadow'] is not None:
+                object_shadows.append((part['shadow'], round(cx+part.get('shadowX', part['x'])),
+                    round(cy+part.get('shadowY', part['y'])), level))
+    # One logical pixel per original game pixel even when the color raster scales.
+    # Integer owner 0 means a vertical cliff face / no selectable ground surface.
+    owner = Image.new('I', (width, height), 0)
+    bodies = Image.new('L', (width, height))
+    shadows = []
+    levels = np.array([-32768]+[c['level'] for c in ordered], dtype=np.int16)
+    tile_heights = assets.tile_heights
+    has_high_bridges = replay['high'] if replay else any(c['overlayName'] in HIGH_NAMES for c in ordered)
+    records = []
+    bounds = camera_rect(meta, [-minx, -miny])
+    def bridge_overlay(cell):
+        name = cell['overlayName'] or ''
+        return name in HIGH_NAMES or name.startswith(('LOBRDG', 'LOBRDB'))
+    bridge_stencil = (np.zeros((height, width), dtype=np.uint8)
+                      if (replay['bridges'] if replay else any(bridge_overlay(c) for c in ordered)) else None)
+    for ident, c in enumerate(ordered, 1):
+        draw_objects(c['x']+c['y'])
+        key, (parts, mask, dx, dy, full) = assets.ground(c, has_high_bridges)
         cx, cy = 30*(c['x']-c['y'])-minx, 15*(c['x']+c['y']-c['level'])-miny
         records.append((ident, c, cx, cy, mask, dx, dy, full))
         for i, (im, px, py) in enumerate(parts):
@@ -277,9 +338,11 @@ def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=Tru
             object_alpha = bridge_terrain_mask(im, *at, level, object_stencil)
             object_bodies.paste(0, (*at, at[0]+im.width, at[1]+im.height), object_alpha)
             drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
-            canvas.paste(drawn, (round(at[0]*factor), round(at[1]*factor)), drawn)
+            canvas.alpha_composite(drawn, (round(at[0]*factor), round(at[1]*factor)))
             scene_alpha = object_alpha if factor == 1 else object_alpha.resize(drawn.size)
-            scene.paste(drawn, (round(at[0]*factor), round(at[1]*factor)), scene_alpha)
+            scene_part = drawn.copy()
+            scene_part.putalpha(scene_alpha)
+            scene.alpha_composite(scene_part, (round(at[0]*factor), round(at[1]*factor)))
         # Match FA2SPHE's bridge ordering: draw the next diagonal cell's bridge
         # before foreground banks/abutments. Drawing at the owner's normal
         # depth makes the end of the SHP float over the adjoining bank.
@@ -292,32 +355,10 @@ def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=Tru
         # Both can coexist; an ore overlay must not replace the terrain object.
         sprite_cells.append((c, False))
         for sc, is_overlay in sprite_cells:
-            kind = sc['overlayName'] if is_overlay else sc['terrain']
-            frame = sprite_frame(sc) if is_overlay else 0
-            if not kind:
-                continue
-            skey = kind, is_overlay, frame
-            if skey not in sprites:
-                try:
-                    raw, pal, offset, spec = sprite_spec(kind, is_overlay, frame, res, theater)
-                    cfg = theater['effectiveRules'].get(kind, {})
-                    mask, shadow_spec = shadow_frame(raw, frame, cfg, res.art.get(cfg.get('IMAGE', kind).upper(), {}))
-                    # High decks sit above the ground receiver. Their artwork
-                    # must block ground shadows from neighboring bridge spans,
-                    # even when their Overlay rules use the default DrawFlat.
-                    solid = (not is_overlay or kind in HIGH_NAMES
-                             or any(yes(cfg.get(k, 'no')) for k in ('WALL', 'CRATE', 'ISAROCK'))
-                             or not yes(cfg.get('DRAWFLAT', 'yes')))
-                    sprites[skey] = (shp_frame(raw, frame, pal), offset, mask, solid)
-                    spec.update(shadow_spec)
-                    audit[f'{kind}/{frame}'] = spec
-                except (ValueError, IndexError, KeyError) as error:
-                    sprites[skey] = None
-                    missing.add(kind)
-            sprite = sprites[skey]
+            sprite = assets.sprite(sc, is_overlay, theater)
             if sprite:
                 im, offset, shadow, solid = sprite
-                if is_overlay and sc.get('bridge') and sc['bridge']['kind'] == 'low':
+                if not replay and is_overlay and sc.get('bridge') and sc['bridge']['kind'] == 'low':
                     sc['bridge']['emptySprite'] = im.getbbox() is None
                 sx = 30*(sc['x']-sc['y'])-minx
                 sy = 15*(sc['x']+sc['y']-sc['level'])-miny
@@ -326,8 +367,8 @@ def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=Tru
                     mark_bridge_stencil(im, x, y, sc['level'], bridge_stencil,
                                         high=sc['overlayName'] in HIGH_NAMES)
                 drawn = im if factor == 1 else im.resize((max(1, round(im.width*factor)), max(1, round(im.height*factor))))
-                canvas.paste(drawn, (round(x*factor), round(y*factor)), drawn)
-                scene.paste(drawn, (round(x*factor), round(y*factor)), drawn)
+                canvas.alpha_composite(drawn, (round(x*factor), round(y*factor)))
+                scene.alpha_composite(drawn, (round(x*factor), round(y*factor)))
                 bodies.paste(255 if solid else 0, (x, y, x+im.width, y+im.height), im.getchannel('A'))
                 object_bodies.paste(255 if solid else 0, (x, y, x+im.width, y+im.height), im.getchannel('A'))
                 if shadow is not None:
@@ -344,6 +385,9 @@ def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=Tru
         shadow_pixels += pixels
     for mask, x, y, level in shadows+object_shadows:
         apply_shadow(scene, mask, x, y, level, owners, levels, object_bodies, factor)
+    if image_sink is not None:
+        image_sink(canvas,scene,[-minx,-miny])
+        return dict(width=width,height=height,origin=[-minx,-miny])
     hidden = partial = 0
     for ident, c, cx, cy, mask, dx, dy, full in records:
         h, w = mask.shape
@@ -379,9 +423,9 @@ def render(cells, res, theater, tmps, folder, meta, progress, *, save_images=Tru
     object_info.pop('records')
     shadow_info = dict(objects=shadow_count, pixels=shadow_pixels, alpha=SHADOW_ALPHA,
                        source='original paired SHP frames', receiver='same-level ground, clipped by terrain and solid objects')
-    (folder/'render-audit.json').write_text(json.dumps(dict(version=VERSION, sprites=audit, fullyHidden=hidden, partiallyHidden=partial, shadows=shadow_info, terrainVariants=variants.metadata()), ensure_ascii=False, indent=2), 'utf8')
+    (folder/'render-audit.json').write_text(json.dumps(dict(version=VERSION, sprites=assets.audit, fullyHidden=hidden, partiallyHidden=partial, shadows=shadow_info, terrainVariants=assets.variants.metadata()), ensure_ascii=False, indent=2), 'utf8')
     return dict(version=VERSION, width=width, height=height, origin=[-minx, -miny], image=filename, objectImage=scene_filename, objects=object_info, shadows=shadow_info,
-                cameraRect=bounds, rasterScale=factor, missingSprites=sorted(missing),
+                cameraRect=bounds, rasterScale=factor, missingSprites=sorted(assets.missing),
                 fullyHidden=hidden, partiallyHidden=partial,
                 objectStyle='original sprites below information; unrendered objects have occupancy badges')
 

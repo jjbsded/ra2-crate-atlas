@@ -38,9 +38,9 @@ async function track(page,start){
   if(mobile){const x=r.x+r.width*.5,y=r.y+r.height*.5;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:x-30,y,id:1},{x:x+30,y,id:2}]});for(let i=0;i<45;i++){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x-30-i,y:y+Math.sin(i/8)*12,id:1},{x:x+30+i,y:y+Math.sin(i/8)*12,id:2}]});await page.waitForTimeout(16);}await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}
   else{await page.mouse.move(r.x+r.width*.5,r.y+r.height*.5);await page.mouse.down({button:'right'});for(let i=0;i<60;i++){await page.mouse.move(r.x+r.width*.5+Math.sin(i/12)*100,r.y+r.height*.5+Math.sin(i/17)*45);await page.waitForTimeout(16);}await page.mouse.up({button:'right'});}
   metrics.navigation=await track(page,false);assert.deepEqual(await page.evaluate(()=>[CrateMapViewer.state.selected.x,CrateMapViewer.state.selected.y]),before);
-  await page.locator('#regionToggle').click();assert.equal(await page.locator('#regionToolbar').isVisible(),true);
+  await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();assert.equal(await page.locator('#regionToolbar').isVisible(),true);
   assert.ok(await page.locator('#regionRows canvas').count()>0,'Region terrain crops and minimap locations are rendered');
-  await page.locator('#regionTool').selectOption('brush-ellipse');await page.locator('#regionToggle').click();
+  await page.locator('#regionTool').selectOption('brush-ellipse');await page.locator('#viewMode').click();
   assert.equal(await page.locator('#heatmap').isChecked(),true,'Leaving region mode restores probability');
   await page.addScriptTag({url:base+'lib/three-r160.min.js'});
   await page.evaluate(()=>CrateMapViewer.focus(CrateMapViewer.state.cells.find(c=>c.bridge?.kind==='high')));

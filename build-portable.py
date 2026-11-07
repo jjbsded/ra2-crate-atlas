@@ -17,20 +17,23 @@ import runtime_bootstrap
 
 ROOT = Path(__file__).resolve().parent
 APPLICATION_MODULES = (
-    'server.py', 'server_lifecycle.py', 'map_jobs.py', 'map_results.py', 'region_navigation.py',
+    'server.py', 'server_lifecycle.py', 'map_jobs.py', 'map_results.py', 'region_navigation.py', 'simulation_art.py',
     'realmap_format.py', 'realmap_resources.py', 'realmap_parser.py', 'realmap_sprites.py',
-    'realmap.py', 'realmap_bridges.py', 'realmap_exact.py', 'realmap_render.py', 'realmap_refresh.py',
+    'realmap.py', 'realmap_bridges.py', 'realmap_simulation.py', 'realmap_exact.py', 'incremental_probability.py', 'probability_delta.py', 'realmap_render.py', 'realmap_refresh.py',
     'realmap_3d.py', 'terrain_depth.py', 'realmap_objects.py', 'realmap_voxel.py',
     'realmap_voxel_lighting.py', 'realmap_voxel_normals.py', 'realmap_voxel_light_tables.py', 'realmap_palette_lighting.py',
     'realmap_voxel_shadow.py', 'realmap_terrain_variants.py',
     'realmap_mod.py', 'realmap_approx.py', 'original_resources.py',
     'official_maps.py', 'directory_picker.py', 'runtime_bootstrap.py', 'i18n_settings.py',
     'official_precomputed.py', 'official_render_cache.py', 'toy_codec.py',
-    'map_storage.py', 'map_images.py',
+    'map_storage.py', 'map_images.py', 'simulation_visual.py', 'simulation_live.py',
 )
 EXTRA_FILES = ('voxel-worker.cs', 'realmap-search.c', 'requirements.txt', 'export.cjs')
 DATA_FILES = (
+    'assets/urban-trees/sprites.zip', 'assets/urban-trees/provenance.json',
     'docs/rendering-porting-guide.md',
+    'docs/simulation-mode.md', 'docs/incremental-probability.md',
+    'docs/probability-model.md',
     'docs/deployed-art.md',
     'docs/voxel-lighting.md',
     'docs/vehicle-brightness-native.md',
@@ -50,6 +53,8 @@ DATA_FILES = (
     'output/realmap-tools/voxel-worker.exe', 'output/realmap-tools/voxel-worker.sha256',
 )
 
+
+DATA_FILES += tuple(p.relative_to(ROOT).as_posix() for p in sorted((ROOT/'simulation-assets').glob('*')) if p.is_file())
 
 def checksum(path):
     with path.open('rb') as stream:
@@ -162,9 +167,11 @@ def precomputed_files():
 
 
 def archive_files(target, archive_format='both', seven_zip=None):
+    if archive_format == 'none':
+        return [], None
     formats = ('zip', '7z') if archive_format == 'both' else (archive_format,)
     if not set(formats) <= {'zip', '7z'}:
-        raise ValueError('Archive format must be zip, 7z or both')
+        raise ValueError('Archive format must be zip, 7z, both or none')
     paths = [target.with_name(target.name+'.'+suffix) for suffix in formats]
     if any(path.exists() for path in paths):
         raise ValueError('输出 ZIP 或 7z 已存在；请为每次构建选择新名称')
@@ -256,7 +263,7 @@ if __name__ == '__main__':
     parser.add_argument('--ffmpeg',type=Path,required=True)
     parser.add_argument('--node-license',type=Path,required=True)
     parser.add_argument('--version', default='unreleased')
-    parser.add_argument('--archive-format', choices=('zip', '7z', 'both'), default='both')
+    parser.add_argument('--archive-format', choices=('zip', '7z', 'both', 'none'), default='both')
     parser.add_argument('--seven-zip', type=Path)
     args = parser.parse_args()
     build(args.output,args.node,args.ffmpeg,args.node_license,args.version,args.archive_format,args.seven_zip)

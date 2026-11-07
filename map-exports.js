@@ -15,9 +15,9 @@
  }
 
  function fraction(data,c,display){
-  let n=display.get(c).numerator,d=BigInt(data.probability.exact.denominator);const gcd=(a,b)=>b?gcd(b,a%b):a,g=gcd(n,d);return {text:JSON.stringify({cell:[c.x,c.y],approximate:!!data.metadata.approximate,approximation:data.metadata.approximation,sourceSha256:data.metadata.sourceSha256,mineralsEnabled:data.metadata.mineralsEnabled!==false,treesEnabled:data.metadata.treesEnabled!==false,probability:{numerator:String(n/g),denominator:String(d/g)},relativeMultiplier:display.exactFraction(c),baseline:display.metadata.baseline,singleDrawBaseline:{numerator:'1',denominator:String(data.probability.sampleCount)},display:display.metadata.mode,framePolicy:'uniform-cycle',attemptLimit:1000},null,2),type:'application/json',name:`cell-${c.x}-${c.y}-${data.metadata.approximate?'approximate-model':'exact'}.json`};
+  let n=display.get(c).numerator,d=BigInt(data.probability.exact.denominator);const gcd=(a,b)=>b?gcd(b,a%b):a,g=gcd(n,d);return {text:JSON.stringify({cell:[c.x,c.y],approximate:!!data.metadata.approximate,approximation:data.metadata.approximation,sourceSha256:data.metadata.sourceSha256,mineralsEnabled:data.metadata.mineralsEnabled!==false,treesEnabled:data.metadata.treesEnabled!==false,probability:{numerator:String(n/g),denominator:String(d/g)},relativeMultiplier:display.exactFraction(c),baseline:display.metadata.baseline,singleDrawBaseline:{numerator:'1',denominator:String(data.probability.sampleCount)},display:display.metadata.mode,framePolicy:'uniform-cycle',model:data.probability.model,attemptLimit:data.probability.attemptLimit},null,2),type:'application/json',name:`cell-${c.x}-${c.y}-${data.metadata.approximate?'approximate-model':'exact'}.json`};
  }
- function bind({getContext,canvas,draw,mapOptions,message,document=root.document}){
+ function bind({getContext,canvas,draw,mapOptions,message,prepare=null,document=root.document}){
   const $=id=>document.getElementById(id),imageExport=root.CrateMapImageExport,details=root.CrateMapDetails;
  function save(blob,name){const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 
@@ -31,12 +31,13 @@
   draw();canvas.toBlob(b=>save(b,`${filename}-crate-probability.png`),'image/png');
  };
  $('mapImageExport').onclick=async()=>{
+  try{if(prepare)await prepare();}catch(error){message(_t('地图图片未导出：')+error.message,true);return;}
   const {state,display}=getContext();
   if(!state.data||$('mapImageExport').disabled)return;
-  const source={data:state.data,image:state.image,objectImage:state.objectImage,cells:state.cells,lookup:new Map(state.lookup)},snapshotDisplay=display,options=mapOptions({snapshotRegions:true}),out=document.createElement('canvas');
-  const button=$('mapImageExport'),status=$('mapImageStatus');button.disabled=true;_i18n?.setBusy('map-image',true);status.textContent=_t('正在生成完整地图 JPEG，沿用当前筛选与图层设置…');
+  const source={data:{...state.data,cells:state.data.cells.slice()},image:state.image?.snapshot?.()||state.image,objectImage:state.objectImage?.snapshot?.()||state.objectImage,cells:state.cells.slice(),lookup:new Map(state.lookup)},snapshotDisplay=display,options=mapOptions({snapshotRegions:true}),out=document.createElement('canvas');
+  const button=$('mapImageExport');state.imageExporting=true;button.disabled=true;_i18n?.setBusy('map-image',true);message(_t('正在生成完整地图 JPEG，沿用当前筛选与图层设置…'));
   try{
-   const plan=imageExport.layout(source.data.rendering,root.CrateWebConfig?.static&&root.matchMedia?.('(pointer: coarse)').matches?{maxScale:1}:undefined);
+   const plan=imageExport.layout(source.data.rendering,{maxScale:root.CrateWebConfig?.static&&root.matchMedia?.('(pointer: coarse)').matches?1:1.5,bounds:options.coordinateSpace?.bounds});
    // Paint the progress message before the independent full-size render.
    await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
    out.width=plan.width;out.height=plan.height;const target=out.getContext('2d',{alpha:false});
@@ -45,9 +46,9 @@
    const blob=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(Error(_t('图片编码失败，请关闭其他大图后重试。'))),'image/jpeg',.95));
    const extension=blob.type==='image/jpeg'?'jpg':'png';
    save(blob,_t`${source.data.metadata.filename}-完整地图.${extension}`);
-   status.textContent=_t`已导出完整地图 · ${plan.width} × ${plan.height} · ${(blob.size/1024**2).toFixed(1)} MB · ${source.data.metadata.previewOnly?details.previewLabel(source.data.metadata)+_t('（未计算概率）'):result.labels.toLocaleString()+_t(' 格倍率；请在图片查看器中放大至 100% 阅读。')}`;
-  }catch(error){status.textContent=_t('地图图片未导出：')+error.message;}
-  finally{out.width=out.height=1;button.disabled=false;_i18n?.setBusy('map-image',false);}
+   message(_t`已导出完整地图 · ${plan.width} × ${plan.height} · ${(blob.size/1024**2).toFixed(1)} MB · ${source.data.metadata.previewOnly?details.previewLabel(source.data.metadata)+_t('（未计算概率）'):result.labels.toLocaleString()+_t(' 格倍率；请在图片查看器中放大至 100% 阅读。')}`);
+  }catch(error){message(_t('地图图片未导出：')+error.message,true);}
+  finally{out.width=out.height=1;state.imageExporting=false;button.disabled=!!state.simulationWaiting;_i18n?.setBusy('map-image',false);}
  };
 
   $('cellFraction').onclick=()=>{

@@ -16,7 +16,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),{chrom
    const a=s.cells.find(c=>valid(c)&&valid(s.lookup.get(`${c.x+1},${c.y}`))),b=s.lookup.get(`${a.x+1},${a.y}`),far=s.cells.find(c=>valid(c)&&Math.abs(c.x-a.x)+Math.abs(c.y-a.y)>20),d=R.defaults();
    d.autoHandled=true;d.active='r2';d.regions[0].cells=new Set([R.key(a),R.key(b),R.key(far)]);localStorage.setItem('crate-atlas.regions.v1.'+s.data.metadata.sourceSha256,R.encode(d));return {x:a.x,y:a.y,keys:[R.key(a),R.key(b)],far:R.key(far)};
   });
-  await page.reload();await ready();await page.locator('#regionToggle').click();await page.locator('#regionTool').selectOption('fill');
+  await page.reload();await ready();await page.locator('#simulationPlaceTab').click();await page.locator('#regionToggle').click();await page.locator('#regionTool').selectOption('fill');
   const labels=await page.locator('#regionTool option').allTextContents();assert.equal(labels.length,8);assert.ok(labels.every(s=>/^[▭▱▣◆○⬭▨⌾]/.test(s)));
   await page.evaluate(({x,y})=>{document.getElementById('minimap').checked=false;CrateMapViewer.focus(CrateMapViewer.state.lookup.get(`${x},${y}`));},sample);
   await page.locator('#map').scrollIntoViewIfNeeded();

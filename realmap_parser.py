@@ -1,5 +1,7 @@
 """Reconstruct static cells and map rules; never compile, solve or render."""
-from collections import Counter
+from collections import Counter, OrderedDict
+from copy import deepcopy
+import time
 import re
 import struct
 from realmap_format import decode_pack, ini, ini_integer, number, sha, yes
@@ -105,6 +107,23 @@ def land_after(raw_land, slope, overlay_cfg, higher, cliff_mode):
     return land
 
 
+def referenced_types(m):
+    """Conservative references outside registration lists and binary packs."""
+    return {token.upper() for section, values in m.items()
+            if not section.endswith('TYPES') and 'PACK' not in section
+            for value in values.values() for token in re.findall(r'[A-Za-z0-9_.-]+', value)}
+
+
+def tolerant_rules(m, res):
+    rules = {k: dict(v) for k, v in res.rules.items()}
+    declared = {v.upper() for section in ('BUILDINGTYPES', 'VEHICLETYPES', 'INFANTRYTYPES', 'AIRCRAFTTYPES')
+                for v in m.get(section, {}).values()}
+    for key, values in m.items():
+        if (key in rules or key in declared) and not key.endswith('TYPES'):
+            rules.setdefault(key, {}).update(values)
+    return rules
+
+
 def map_rules(m, res, warnings):
     """Map-local Techno declarations use names, not INI list keys as indices.
 
@@ -123,6 +142,7 @@ def map_rules(m, res, warnings):
         if key not in lists:
             rules[key].update(m[key]); overrides.append(key)
     additions = []
+    references = referenced_types(m)
     for section in lists:
         original = {v.upper() for v in res.rules.get(section, {}).values()}
         for key, value in m.get(section, {}).items():
@@ -134,6 +154,9 @@ def map_rules(m, res, warnings):
             if section in ('OVERLAYTYPES', 'TERRAINTYPES'):
                 raise ValueError(f'[{section}] 新增 {kind}：扩展地形物／覆盖物类型的索引与加载尚未支持')
             if not m.get(kind):
+                if kind not in res.rules and kind not in references:
+                    warnings.append(f'[{section}] {kind} 仅为空注册项，地图未引用；已忽略，不影响静态计算。')
+                    continue
                 raise ValueError(f'[{section}] 新增 {kind} 缺少地图内定义 [{kind}]')
             if kind in res.rules:
                 raise ValueError(f'[{section}] {kind} 与其他原版定义冲突')
@@ -153,7 +176,18 @@ def map_rules(m, res, warnings):
     return rules, additions
 
 
-def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None, resource_context=None, visual_only=False, minerals_enabled=True):
+_layouts = OrderedDict()  # Two immutable decoded maps; only analysis threads access this cache.
+
+
+def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None, resource_context=None, visual_only=False, minerals_enabled=True, simulation=None):
+    res = resource_context or resources(version, mix_paths)
+    identity = (sha(data), version, sha(res.rules_bytes), getattr(res, 'art_hash', None),
+                getattr(res, 'discovery', {}).get('fingerprint'), tuple(res.mix_paths), visual_only, minerals_enabled)
+    from incremental_probability import force_requested
+    prepared = _layouts.get(identity) if simulation is not None and not force_requested() else None
+    if prepared is not None:
+        _layouts.move_to_end(identity)
+        return rebuild_layout(prepared, res, simulation, progress, incremental=True)
     if not data or len(data) > 16*1024*1024 or b'\x00' in data:
         raise ValueError('请选择 16 MB 以内的文本 .map／.yrm／.mpr 地图')
     irrelevant_duplicates = []
@@ -191,12 +225,7 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
         # interprets new indexed lists or claims this is a gameplay model.
         rules = {k: dict(v) for k, v in res.rules.items()}
         if resource_context is None:
-            for key, values in m.items():
-                if key in rules or any(key == v.upper() for section in
-                    ('BUILDINGTYPES', 'VEHICLETYPES', 'INFANTRYTYPES', 'AIRCRAFTTYPES')
-                    for v in m.get(section, {}).values()):
-                    if not key.endswith('TYPES'):
-                        rules.setdefault(key, {}).update(values)
+            rules = tolerant_rules(m, res)
             if '#INCLUDE' in m:
                 issue('外部 include 未加载；仅展示当前资源中能够解析的内容。')
         additions = []
@@ -308,7 +337,53 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
                 cells[x, y].update(knownOccupiedGround=False, knownOccupiedDeck=False, unknownObjects=[])
             if cfg and yes(cfg.get('TIBERIUM', 'no')):
                 cells[x, y]['removable'].append(dict(category='mineral', type=ovname))
-    initialize_bridges(cells, strict=not visual_only)
+    prepared = dict(data=data, m=m, cells=cells, theater=theater, tmp_cache=tmp_cache, art=res.art,
+        version=version, visual_only=visual_only, minerals_enabled=minerals_enabled, has_resource_context=resource_context is not None,
+        size=size, local=local, rect=rect, warnings=warnings, issues=issues,
+        cliff_mode=cliff_mode, crate_minimum=crate_minimum, crate_maximum=crate_maximum,
+        crate_names=crate_names, rules=rules, additions=additions, decoded_records=len(records),
+        irrelevant_duplicates=irrelevant_duplicates, removed_minerals=removed_minerals, removed_trees=removed_trees)
+    result = rebuild_layout(prepared, res, simulation, progress)
+    _layouts[identity] = prepared
+    _layouts.move_to_end(identity)
+    while len(_layouts) > 2:
+        _layouts.popitem(last=False)
+    return result
+
+
+def rebuild_layout(prepared, res, simulation, progress, *, incremental=False):
+    """Use the same occupancy/rules code for full and local layout rebuilding."""
+    started = time.perf_counter()
+    data = prepared['data']; version = prepared['version']; visual_only = prepared['visual_only']
+    resource_context = res if prepared['has_resource_context'] else None
+    minerals_enabled = prepared['minerals_enabled']; size = prepared['size']; local = prepared['local']; rect = prepared['rect']
+    w, h = size[2:]; rules = dict(prepared['rules'])
+    rules['COLORS'] = dict(rules.get('COLORS', {}))
+    mutable = ('STRUCTURES','UNITS','INFANTRY','AIRCRAFT','TERRAIN')
+    m = {k:dict(v) if k in mutable else v for k,v in prepared['m'].items()}; theater = dict(prepared['theater']); tmp_cache = dict(prepared['tmp_cache'])
+    warnings = list(prepared['warnings']); issues = deepcopy(prepared['issues']); issue_index = {e['message']:e for e in issues}
+    def issue(message, point=None):
+        entry = issue_index.get(message)
+        if entry is None:
+            entry = dict(message=message, count=0, cells=[]); issues.append(entry); issue_index[message] = entry
+        entry['count'] += 1
+        if point is not None: entry['cells'].append(list(point))
+    cliff_mode = prepared['cliff_mode']; crate_minimum = prepared['crate_minimum']; crate_maximum = prepared['crate_maximum']
+    crate_names = prepared['crate_names']; additions = prepared['additions']; decoded_records = prepared['decoded_records']
+    irrelevant_duplicates = prepared['irrelevant_duplicates']; removed_minerals = prepared['removed_minerals']; removed_trees = prepared['removed_trees']
+    from realmap_simulation import changed_points
+    previous = prepared.get('previous') if incremental else None
+    dirty = changed_points(prepared, simulation, previous[0]) if previous else set(prepared['cells'])
+    # Fresh dictionaries for each result; nested immutable geometry is shared.
+    cells = dict(previous[1]) if previous else dict.fromkeys(prepared['cells'])
+    for p in dirty:
+        cells[p] = deepcopy(prepared['cells'][p])
+    simulation_rubble = []
+    if simulation is not None:
+        from realmap_simulation import validate, apply
+        simulation = validate(simulation, data, 'directory' if hasattr(res, 'discovery') else version)
+        simulation_rubble = apply(simulation, m, cells, rules, res.art, dirty=dirty)
+    initialize_bridges(cells, strict=not visual_only, dirty=dirty)
     progress('重建格子属性、占用和高度投影', 35)
     for key, kind in m.get('TERRAIN', {}).items():
         try:
@@ -335,6 +410,8 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
         if visual_only and (not cfg or not art):
             issue('地形物缺少规则或 art 定义：'+kind, p)
             cells[p]['occupancyUnknown'] = True
+        if p not in dirty:
+            continue
         c = cells[p]
         c['terrain'] = kind
         c['occupied'] |= bool(bits & 7)
@@ -413,6 +490,8 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
                         if visual_only:
                             continue
                         raise ValueError('建筑基础超出地图：'+kind)
+                    if q not in dirty:
+                        continue
                     c = cells[q]
                     layer = 'Deck' if elevated(c) and above_ground(section, fields) else 'Ground'
                     c['occupied'+layer] = True
@@ -429,7 +508,8 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
         warnings.append(f'已按 YR 地图加载时的地面位置计入 {len(m["AIRCRAFT"])} 架预置飞机（1×1 占用）；未推进巡逻、起飞或触发任务。')
     if empty_foundation_objects:
         warnings.append(f'地图有 {len(empty_foundation_objects)} 条已登记、但完全没有 rules/art 定义的尤复建筑记录；按引擎默认空基础处理，不占格、无贴图。原记录已保留，不根据生命值猜测删除。')
-    for p, c in cells.items():
+    for p in dirty:
+        c = cells[p]
         c['occupied'] = c['occupiedDeck'] if elevated(c) else c['occupiedGround']
         if visual_only:
             c.update(land=c['rawLand'], postLand=None, usable=usable(c, w, rect), track=False,
@@ -476,18 +556,30 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
                      '使用原版 MIX 资源；不自动加载 loose INI、Ares／Phobos、expand 包或房间规则。',
                      'Rock 标记描述落箱后属性改变，不把普通孤立高原或单纯寻路不通标为异常。'])
     theater['effectiveRules'] = rules
+    theater['mapLighting'] = dict(m.get('LIGHTING', {}))
     theater['mapObjects'] = object_records(m, on_error=issue if visual_only else None)
+    if simulation_rubble:
+        theater['mapObjects'].extend(object_records({'STRUCTURES': dict(simulation_rubble)}))
     theater['emptyFoundationObjectIds'] = [o['id'] for o in empty_foundation_objects]
     theater['mapHouses'] = {o['house']: m[o['house']] for o in theater['mapObjects'] if o['house'] in m}
-    return cells, res, theater, tmp_cache, dict(size=size, localSize=local, visibleRect=rect,
+    meta = dict(size=size, localSize=local, visibleRect=rect,
         theater=theater['name'], version=version, cliffBackImpassability=cliff_mode, bridgeModelVersion=2,
         mapLoadingModelVersion=1,
         mineralsEnabled=bool(minerals_enabled), treesEnabled=bool(minerals_enabled), terrainRemovalVersion=1,
         removedMineralCount=removed_minerals, removedTreeCount=removed_trees,
-        decodedRecords=len(records), cellCount=len(cells), warnings=warnings, loadIssues=issues,
+        decodedRecords=decoded_records, cellCount=len(cells), warnings=warnings, loadIssues=issues,
         sourceSha256=sha(data), rulesSha256=sha(res.rules_bytes), theaterSha256=theater['configSha256'],
         mapTypeAdditions=additions, initialAircraftCount=len(m.get('AIRCRAFT', {})),
         irrelevantDuplicateKeys=irrelevant_duplicates, emptyFoundationObjects=empty_foundation_objects,
         crateLimits=dict(minimum=crate_minimum, maximum=crate_maximum),
+        **({'simulationPlan': simulation} if simulation is not None else {}),
         name=m.get('BASIC', {}).get('NAME', '导入地图'), waypoints=m.get('WAYPOINTS', {}),
         multiplayerOnly=m.get('BASIC', {}).get('MULTIPLAYERONLY', 'yes').lower() in ('yes', 'true', '1'))
+    meta['layoutUpdate'] = dict(decodedReused=bool(incremental), rebuiltCells=len(dirty), totalCells=len(cells),
+                                seconds=time.perf_counter()-started)
+    # Approximate preparation also updates only dirty cells, then records its
+    # completed state below. Copy result dictionaries before probability/render.
+    theater['_layoutPrepared'] = prepared
+    theater['_layoutDirty'] = dirty
+    prepared['previous'] = (simulation, dict(cells))
+    return cells, res, theater, tmp_cache, meta

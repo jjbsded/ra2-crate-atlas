@@ -2,6 +2,7 @@
 (function(root){
  'use strict';
  const arrows=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown']);
+ const movement=arrows;
  function create({move,enabled=()=>true,setTimer=setTimeout,clearTimer=clearTimeout,chordDelay=90,firstRepeatDelay=260,repeatDelay=120}){
   const held=new Set();let timer=null,mode=null,pending=null,moved=false;
   const direction=()=>({horizontal:Number(held.has('ArrowRight'))-Number(held.has('ArrowLeft')),vertical:Number(held.has('ArrowDown'))-Number(held.has('ArrowUp'))});
@@ -15,7 +16,7 @@
    const delay=moved?repeatDelay:firstRepeatDelay;moved=true;pending=null;schedule('repeat',delay);
   }
   function down(key,repeat=false){
-   if(!arrows.has(key))return false;
+   if(!movement.has(key))return false;
    if(!enabled()){cancel();return false;}
    if(repeat||held.has(key))return true;
    if(!held.size)moved=false;
@@ -40,5 +41,5 @@
   }
   return {down,up,cancel};
  }
- const api={create,arrows};root.CrateSelectionKeyboard=api;if(typeof module!=='undefined')module.exports=api;
+ const api={create,arrows,movement};root.CrateSelectionKeyboard=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -6,6 +6,8 @@ This local portable build preserves Python's LICENSE.txt and each Python
 distribution's *.dist-info license files. Application sources and the C scanner
 source are included. Stock game archives are copied from the user’s local installation into assets/original, with fixed source SHA-256 verification.
 
+The seven missing URBAN tree sprites (`TREE29–TREE35`) are supplied from the local installation's `cncnet.mix`. File and archive hashes are recorded in `assets/urban-trees/provenance.json`; Toy carries the corresponding static pixels and `live/urban-trees-provenance.json`. Existing stock assets and explicitly selected directory resources retain priority.
+
 - Python 3.12: Python Software Foundation license; https://www.python.org/
 - Pillow 12.3.0: license in pillow-12.3.0.dist-info; https://python-pillow.org/
 - NumPy 2.3.5 and its bundled numerical libraries: licenses in numpy-2.3.5.dist-info and numpy; https://numpy.org/

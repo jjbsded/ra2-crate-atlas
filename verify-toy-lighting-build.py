@@ -17,6 +17,16 @@ ROOT=Path(__file__).resolve().parent
 
 
 class BakedLightingChecks(unittest.TestCase):
+    def test_component_rules_invalidate_supplemental_library_only(self):
+        before = (capture_stamp(), frame_stamp())
+        read_text = Path.read_text
+        def changed(path, *args, **kwargs):
+            value = read_text(path, *args, **kwargs)
+            return value+'\n# changed component keys\n' if path.name == 'toy_object_components.py' else value
+        with patch.object(Path, 'read_text', changed):
+            self.assertEqual(before[0], capture_stamp())
+            self.assertNotEqual(before[1], frame_stamp())
+
     def test_lighting_and_worker_changes_invalidate_both_caches(self):
         before=(capture_stamp(),frame_stamp())
         read_text=Path.read_text

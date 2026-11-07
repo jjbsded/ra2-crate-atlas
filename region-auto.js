@@ -15,7 +15,7 @@
   get length(){return this.items.length;}
  }
  function flags(navigation,count){
-  if(navigation?.version!==2||navigation.count!==count)throw Error('REGION_NAVIGATION_INVALID');
+  if(navigation?.version!==3||navigation.count!==count)throw Error('REGION_NAVIGATION_INVALID');
   const raw=typeof navigation.flags==='string'?Uint8Array.from(atob(navigation.flags),c=>c.charCodeAt(0)):navigation.flags;
   if(raw.length!==count)throw Error('REGION_NAVIGATION_LENGTH');return raw;
  }
@@ -168,5 +168,5 @@
   onProgress(100);signal?.throwIfAborted();
   return {regions,players:groups.length,activePlayers:players.length,unreachablePlayers:players.filter(p=>p.seed<0).map(p=>p.number),unassigned:cells.filter((c,i)=>(!eligible||eligible.has(key(c)))&&owner[i]<0).length,settings:config};
  }
- const api={defaults,options,teams,partition,ramps};root.CrateRegionAuto=api;if(typeof module!=='undefined')module.exports=api;
+ const api={navigationVersion:3,defaults,options,teams,partition,ramps};root.CrateRegionAuto=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

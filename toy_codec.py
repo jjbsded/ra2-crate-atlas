@@ -1,7 +1,7 @@
 """Lossless static transport. Expanded reports retain the desktop model schema.
 
-Huge exact integers are stored as their finite-retry arithmetic recipe, not
-rounded decimals. Cell columns and repeated search lists are dictionary coded.
+Exact candidate coefficients are reconstructed from their fixed integer period,
+never rounded decimals. Cell columns and repeated search lists are dictionary coded.
 This module deliberately does not participate in the analysis fingerprint.
 """
 from collections import Counter
@@ -65,52 +65,33 @@ def expand_columns(table):
 
 
 def probability_recipe(report, selections):
-    from realmap_exact import integrate_reduced
-    probability = report['probability']
-    statuses = {cell['y']*512+cell['x']:cell['status'] for cell in report['cells']}
-    terminal, ghosts = {}, Counter()
+    from realmap_exact import MODEL, IDS
+    probability=report['probability']
+    assert probability.get('model')==MODEL
+    statuses={c['y']*512+c['x']:c['status'] for c in report['cells']}
+    terminal=Counter();ghost=Counter()
     for picked in selections:
-        n = len(picked)
-        if not n:
-            continue
-        row = terminal.setdefault(n, [0]*n)
-        for r, key in enumerate(picked):
-            status = statuses.get(key)
-            if status in ('crate', 'ghost'):
-                row[r] += 1
-                if status == 'ghost':
-                    ghosts[n, r] += 1
-    period, _, overall, conditional, _ = integrate_reduced(terminal, sorted(terminal))
-    assert period == probability['period']
-    histograms, lookup, ids = [], {}, []
-    for coeff in probability['exact']['coefficients']:
-        histogram = sorted(conditional[coeff['n'], coeff['r']].items())
-        key = dumps(histogram)
-        if key not in lookup:
-            lookup[key] = len(histograms)
-            histograms.append(histogram)
-        ids.append(lookup[key])
-    recipe = dict(histograms=histograms, ids=ids, overall=sorted(overall.items()),
-                  ghosts=[[i, ghosts[c['n'],c['r']]] for i,c in enumerate(probability['exact']['coefficients']) if ghosts[c['n'],c['r']]])
-    # Validate the recipe before ever emitting a package.
-    reconstructed = deepcopy(probability)
-    expand_probability(reconstructed, recipe)
-    assert reconstructed == probability, 'Exact probability recipe changed the model'
+        n=len(picked)
+        for r,key in enumerate(picked):
+            status=statuses.get(key)
+            if status in ('crate','ghost'):terminal[n,r]+=1
+            if status=='ghost':ghost[n,r]+=1
+    recipe=dict(model=MODEL,terminal=[[IDS[p],count] for p,count in sorted(terminal.items())],
+                ghosts=[[IDS[p],count] for p,count in sorted(ghost.items())])
+    reconstructed=deepcopy(probability);expand_probability(reconstructed,recipe)
+    assert reconstructed==probability,'Exact finite-retry recipe changed the result'
     return recipe
 
 
 def expand_probability(probability, recipe):
-    n, limit = probability['sampleCount'], probability['attemptLimit']
-    base = n**limit
-    powers = {t:(n-t)**limit for t,_ in recipe['overall']}
-    weights = {t:(base-power)//t if t else 0 for t,power in powers.items()}
-    exact = probability['exact']
-    numerators = [sum(frames*weights[t] for t,frames in recipe['histograms'][index]) for index in recipe['ids']]
-    exact['denominator'] = str(probability['period']*base)
-    for coeff, value in zip(exact['coefficients'], numerators, strict=True):
-        coeff['numerator'] = str(value)
-    exact['failureNumerator'] = str(sum(frames*powers[t] for t,frames in recipe['overall']))
-    exact['ghostNumerator'] = str(sum(hits*numerators[index] for index,hits in recipe['ghosts']))
+    from realmap_exact import MODEL, PAIRS, retry_kernel
+    if recipe.get('model')!=MODEL or probability.get('model')!=MODEL:raise ValueError('Probability data requires recalculation')
+    terminal={PAIRS[i]:count for i,count in recipe['terminal']}
+    kernel=retry_kernel(terminal,probability['sampleCount'],probability['attemptLimit'])
+    ghost=sum(count*kernel['values'][PAIRS[i]] for i,count in recipe['ghosts'])
+    exact=probability['exact'];exact.update(denominator=str(kernel['denominator']),
+        coefficients=kernel['coefficients'],ghostNumerator=str(ghost),
+        exhaustedNumerator=str(kernel['exhausted']),failureNumerator=str(ghost+kernel['exhausted']))
 
 
 def compact_report(report, recipe, table, base_url):
@@ -122,11 +103,11 @@ def compact_report(report, recipe, table, base_url):
     for field in table['columns'].keys()-encoded.keys():
         overrides[field] = None
     exact = result['probability']['exact']
-    for name in ['denominator', 'failureNumerator', 'ghostNumerator']:
+    for name in ['denominator', 'failureNumerator', 'ghostNumerator', 'exhaustedNumerator']:
         del exact[name]
     for coeff in exact['coefficients']:
         del coeff['numerator']
-    result['_static'] = dict(codec=1, base=base_url, columns=overrides, probability=recipe)
+    result['_static'] = dict(codec=3, base=base_url, columns=overrides, probability=recipe)
     return result
 
 

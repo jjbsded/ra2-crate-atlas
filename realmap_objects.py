@@ -118,6 +118,12 @@ class ObjectPainter:
             raw = self.res.get(['cachemd.mix', 'cache.mix'], name)
             colors = palette(raw)
             if remap and color:
+                from realmap_voxel import simulation_pattern
+                if simulation_pattern(color):
+                    for i in range(16, 32):
+                        colors[i] = (max(colors[i]), 0, 0)
+                    self.palettes[key] = colors
+                    return colors, name
                 hsv = [ini_integer(v)/255 for v in color.split(',')[:3]]
                 if len(hsv) == 3:
                     # Keep the palette's 16-step remap shading; house hue/saturation
@@ -127,6 +133,13 @@ class ObjectPainter:
                         colors[i] = tuple(round(v*255) for v in colorsys.hsv_to_rgb(hsv[0], hsv[1], min(1, hsv[2]*shade)))
             self.palettes[key] = colors
         return self.palettes[key], name
+
+    def patterned(self, art, house, remap=True):
+        from realmap_format import yes
+        from realmap_voxel import simulation_pattern
+        color_name = self.rules.get(house, {}).get('COLOR', '')
+        color = self.rules.get('COLORS', {}).get(color_name.upper())
+        return color if remap and not yes(art.get('TERRAINPALETTE', 'no')) and simulation_pattern(color) else None
 
     def voxel_brightness(self, obj):
         from realmap_palette_lighting import light_step
@@ -182,6 +195,13 @@ class ObjectPainter:
         # excluded by colors(); explicit caller opt-outs remain supported.
         colors, palname = self.colors(art, house, remap=remap)
         im = shp_frame(raw, frame, colors)
+        pattern = self.patterned(art, house, remap)
+        if pattern:
+            import numpy as np
+            from realmap_voxel import simulation_rgba
+            indices = np.asarray(shp_frame(raw, frame, [(i, 0, 0) for i in range(256)]))[:, :, 0]
+            rgba = simulation_rgba(np.array(im), indices, -(im.width//2)+dx, -(im.height//2)+dy, pattern)
+            im = Image.fromarray(rgba)
         shadow, _ = shadow_frame(raw, frame, cfg, art)
         if not yes(art.get('SHADOW', 'yes')):
             shadow = None
@@ -205,10 +225,23 @@ class ObjectPainter:
             return self.cache[key]
         parts = []
         if category == 'STRUCTURES':
+            if obj['health'] == 0:
+                # CellClass's rubble-overlay draw uses the terrain conversion,
+                # not the former owner's unit palette (YR 47F6A0 / 45F170).
+                # A named Rubble SHP uses frame 0; otherwise the body uses 3.
+                if not yes(cfg.get('LEAVERUBBLE', 'no')):
+                    return []
+                rubble = art.get('RUBBLE', image).upper()
+                rubble_art = {**art, 'TERRAINPALETTE': 'yes', 'IMAGE': rubble}
+                frame = 0 if art.get('RUBBLE') else 3
+                raw, _ = self.shape(rubble, rubble_art, True)
+                if struct.unpack_from('<4H', raw)[3] // 2 <= frame:
+                    return []
+                parts = [self.shp(rubble, rubble_art, cfg, '', frame, True, dy=-15, remap=False)]
+                self.cache[key] = parts
+                return parts
             damaged = obj['health'] < 128
             frame = ini_integer(art.get('LOOPSTART', '0')) + int(damaged)
-            if obj['health'] == 0:
-                frame = 3
             if art.get('BIBSHAPE'):
                 bid = art['BIBSHAPE'].upper()
                 try:
@@ -341,10 +374,12 @@ class ObjectPainter:
                 casts = False  # UseTurretShadow applies to SHP turrets, not VXL.
             shadow_section = ini_integer(art.get('SHADOWINDEX', '0')) if casts else None
             shadow_scale = .5 if yes(cfg.get('CONSIDEREDAIRCRAFT', 'no')) else 1.0
-            im, shadow, x, y, sx, sy = self.voxels.draw(vxl, hva, facing, offsets, angle, colors,
-                                                      shadow_section=shadow_section, shadow_scale=shadow_scale)
             dx = ini_integer(cfg.get('TURRETANIMX', '0')) if turret else 0
             dy = ini_integer(cfg.get('TURRETANIMY', '0'))-15 if turret else 0
+            pattern = self.patterned(art, obj['house'])
+            im, shadow, x, y, sx, sy = self.voxels.draw(vxl, hva, facing, offsets, angle, colors,
+                shadow_section=shadow_section, shadow_scale=shadow_scale,
+                remap_origin=(dx,dy) if pattern else None, remap_pattern=pattern)
             parts.append(dict(image=im, shadow=shadow,
                 x=x+dx, y=y+dy, shadowX=sx+dx, shadowY=sy+dy, file=name.lower()+'.vxl', frame=facing, palette=palname,
                 lighting=MODEL, paletteLightStep=self.voxel_brightness(obj),
@@ -355,7 +390,7 @@ class ObjectPainter:
             parts[-2], parts[-1] = parts[-1], parts[-2]
         return parts
 
-    def prepare(self, cells, origin):
+    def prepare(self, cells, origin, *, event_groups=None):
         from realmap_bridges import elevated
         self.cells = cells
         events, counts = [], Counter()
@@ -400,8 +435,14 @@ class ObjectPainter:
                     x += dx; y += dy; depth += dy/15
                 if obj['category'] == 'STRUCTURES':
                     depth += max(dx+dy for dx, dy in visual_foundation(art))
+                group = [] if event_groups is not None else None
                 for part in parts:
-                    events.append((depth, obj['x'], x, y, c['level']+(4 if on_deck else 0), part))
+                    event = (depth, obj['x'], x, y, c['level']+(4 if on_deck else 0), part)
+                    events.append(event)
+                    if event_groups is not None:
+                        group.append(event)
+                if event_groups is not None:
+                    event_groups[obj['id']] = group
                 self.audit.append({**obj, 'renderAnchor': [x, y], 'renderDepth': depth,
                     'onBridgeDeck': on_deck,
                     'parts': [{k:v for k,v in part.items() if k not in ('image','shadow')} for part in parts]})

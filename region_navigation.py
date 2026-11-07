@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 GROUND, WATER, SHORE, DECK, CORE = 1, 2, 4, 8, 16
+VERSION = 3
 
 
 def build(report, rules):
@@ -39,6 +40,10 @@ def build(report, rules):
                 return True
             for kind in objects:
                 category = categories.get(kind)
+                # Mobile objects do not split geographical regions, including
+                # units placed by simulation and units on either bridge layer.
+                if category == 'unit':
+                    continue
                 if category == 'terrain':
                     cfg = rules.get(kind, {})
                     if is_tree(kind, cfg):
@@ -65,8 +70,8 @@ def build(report, rules):
         if high and number(rules.get('ROAD', {}).get('FOOT', '0')) > 0 and not blocked('Deck'):
             value |= DECK
         flags.append(value)
-    return dict(version=2, count=len(flags), flags=base64.b64encode(flags).decode('ascii'),
-                model='foot-cleared-trees-destructible-buildings-layered',
+    return dict(version=VERSION, count=len(flags), flags=base64.b64encode(flags).decode('ascii'),
+                model='foot-ignore-units-cleared-trees-destructible-buildings-layered',
                 approximate=bool(report['metadata'].get('approximate')))
 
 
