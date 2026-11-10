@@ -39,7 +39,11 @@ for(const s of incoming.sources){const i=(s.y-1)*3+s.x-1;assert.equal(s.numerato
 assert.equal(incoming.sources.find(s=>s.x===3&&s.y===1).transferProbability,2/3,'duplicate hits count, failed candidates remain in the denominator');
 assert.equal(incoming.sources.find(s=>s.x===3&&s.y===2).transferProbability,1,'a deterministic search reports 100%, independent of sampling and retries');
 assert.equal(incoming.sources.find(s=>s.x===3&&s.y===2).cell,null,'out-of-map sources survive');
-assert.equal(index.get(cells[1]),null,'direct Overlay retry has no incoming crate');
+assert.equal(index.get(cells[1]).sources[0].transferProbability,1/3,'failed Overlay destinations retain conditional search sources');
+assert.equal(index.get(cells[1]).contributionProbability,0,'failed destinations still contribute no successful boxes');
+assert.deepEqual(index.outgoing(cells[2]).destinations.map(v=>[v.key,v.transferProbability]),[[A,2/3],[B,1/3]],'outgoing search keeps duplicate hits and failed candidates');
+assert(index.outgoing(cells[1]).retryHere,'a direct Overlay retry is explained at its origin');
+assert(index.outgoing(cells.find(c=>c.x===1&&c.y===3)).retryHere,'empty searches retry at their origin');
 assert.equal(index.get(cells.at(-1)),null,'ghost placement has no entity destination');
 assert.equal(index.get(cells[5]),null,'no-search destinations have no overlay');
 for(const c of cells)if(c.status==='crate'){
@@ -48,6 +52,8 @@ for(const c of cells)if(c.status==='crate'){
  assert.equal(total,oracle,'all final probability is explained by direct plus incoming origins');
 }
 assert.equal(Math.max(...incoming.sources.map(s=>s.strength)),1);
+assert.strictEqual(index.get(selected),incoming,'reselecting an unchanged destination reuses its source records');
+for(const s of incoming.sources)assert.equal(s.contributionProbability,require('./probability-display.js').ratio(s.numerator,BigInt(data.probability.exact.denominator)),'lazy final contributions preserve the exact-derived values');
 assert.ok(new Set(incoming.sources.map(s=>T.style(s.strength).fill)).size>1);
 assert.throws(()=>T.create(data,buffer.slice(0,-1)),/不完整|损坏/);
 const extended=new Uint8Array(buffer.byteLength+4);extended.set(new Uint8Array(buffer));assert.throws(()=>T.create(data,extended.buffer),/长度/);
@@ -87,6 +93,46 @@ if(process.argv.includes('--render')){
   assert.deepEqual(arms.map(([a,b])=>[b[0]-a[0],b[1]-a[1]]),[[length,0],[-length,0],[0,length/2],[0,-length/2]],'arms extend inward with vertical length and minimum scaled to the 2:1 diamond');
  }
  console.log('PASS: edge-anchored hollow cross scales vertical length and minimum to the diamond aspect ratio at four zoom scales.');
+
+ const columns=require('./transfer-columns.js'),raised={s:{x:3,y:1,cell:null},c:{x:3,y:1,px:200,py:80,level:4}};
+ const shape=columns.geometry([raised,{s:{cell:c},c}]);assert.equal(shape.cells,1);assert.equal(shape.edges.length,4);assert.equal(shape.bases.length,4);assert.equal(shape.faces.length,2);assert.equal(shape.bounds.bottom,155);
+ const adjacent={s:{cell:null},c:{x:4,y:1,px:230,py:95,level:4}},combined=columns.geometry([raised,adjacent]);
+ assert.equal(combined.edges.length,6,'adjacent cells share two vertical edges');assert.equal(combined.bases.length,7,'shared base edge is drawn once');assert.equal(combined.faces.length,3,'internal prism face is omitted');
+ assert.equal(columns.geometry([{s:{cell:null},c:{...raised.c,level:0}}]).cells,0,'level-zero origins have no columns');
+ const terrain=createCanvas(400,300),ground=terrain.getContext('2d');ground.fillStyle='#777';ground.fillRect(155,110,95,55);
+ const view={...state,image:terrain,data:{rendering:{width:400,height:300}},selected:null},painter=columns.createPainter(createCanvas),plain={lineColor:'#ff0000',lineOpacity:1,lineWidth:2,dashLength:8,dashGap:0,fillFaces:false,showHidden:false,hideOccluded:false};
+ const paint=settings=>{ctx.clearRect(0,0,400,300);painter.draw(ctx,view,area,[raised],{...plain,...settings},raised);return Buffer.from(ctx.getImageData(0,0,400,300).data);};
+ const links=paint({});assert.equal(pixel(links,230,95)[0],255);assert.equal(pixel(links,230,120)[3],0,'real terrain hides the lower connector');
+ const first=painter.stats();paint({});assert.equal(painter.stats().draws,first.draws,'unchanged foreground reuses completed layer');
+ const hidden=paint({showHidden:true,hiddenOpacity:.4});assert(pixel(hidden,230,120)[3]>95&&pixel(hidden,230,120)[3]<110,'occluded connector uses its independent opacity');
+ assert.equal(painter.stats().masks,first.masks,'tuning reuses the terrain mask');
+ const noBase=paint({showHidden:true,hiddenOpacity:1,hiddenBase:false}),withBase=paint({showHidden:true,hiddenOpacity:1,hiddenBase:true});
+ assert.equal(pixel(noBase,215,132)[3],0);assert(pixel(withBase,215,132)[3]>0,'hidden base outline follows its switch');
+ const faces=paint({lineWidth:0,fillFaces:true,faceColor:'#00ff00',faceOpacity:.5});assert(pixel(faces,216,101)[1]>240&&pixel(faces,216,101)[3]>100);assert.equal(pixel(faces,216,120)[3],0,'exposed face fill does not cover terrain');
+ const dashed=paint({dashLength:4,dashGap:7});assert(Array.from({length:25},(_,i)=>pixel(dashed,230,82+i)[3]).some(v=>!v),'dash gaps remain unpainted');
+ assert.equal(painter.stats().builds,1,'line styles never rebuild source geometry');
+ const selfPainter=columns.createPainter(createCanvas),selfView={...view,image:null},selfSources=[raised],front={s:{cell:null},c:{x:4,y:2,px:200,py:110,level:4}},frontSources=[raised,front];
+ const paintSelf=(hideOccluded,sources=selfSources,settings={})=>{ctx.clearRect(0,0,400,300);selfPainter.draw(ctx,selfView,area,sources,{...plain,hideOccluded,...settings},sources);return Buffer.from(ctx.getImageData(0,0,400,300).data);};
+ const transparent=paintSelf(false),solid=paintSelf(true);
+ assert(pixel(transparent,200,80)[3]>250);assert.equal(pixel(solid,200,80)[3],0,'the column cap hides its rear vertical edge');
+ assert(pixel(solid,230,100)[3]>250&&pixel(solid,200,110)[3]>250,'front and silhouette edges remain visible');
+ assert.equal(pixel(solid,215,132)[3],0,'the near side hides its rear base');assert(pixel(solid,215,147)[3]>100,'the near base remains visible');
+ assert(pixel(paintSelf(false,frontSources),200,110)[3]>250);assert.equal(pixel(paintSelf(true,frontSources),200,110)[3],0,'a column in front also hides another column’s wires');
+ assert.deepEqual(paintSelf(false),transparent,'switching back restores every original wire pixel');
+ const hiddenByBoth=paint({hideOccluded:true,showHidden:true,hiddenOpacity:1,hiddenBase:true});assert.equal(pixel(hiddenByBoth,215,132)[3],0,'show-hidden-terrain cannot resurrect a wire behind a virtual column');
+ const clippedWires=columns.visibleWires(shape);assert.strictEqual(columns.visibleWires(shape),clippedWires,'virtual occlusion is computed once per source geometry');
+ const cross={wires:{edges:[{points:[[0,0],[100,0]],levels:[0,0],offset:0}],bases:[]},occluders:[{points:[[20,-10],[40,-10],[40,10],[20,10]],plane:[0,0,1]}]};
+ const fragments=columns.visibleWires(cross).edges;assert.equal(fragments.length,2);assert(Math.abs(fragments[1].offset-40)<1e-6,'partial clipping retains the original dash phase');
+ assert.equal(selfPainter.stats().builds,3,'only changing source geometry rebuilds columns');selfPainter.release();
+ const disabled=paint({enabled:false});assert(disabled.every(v=>v===0),'disabled columns leave the image untouched');
+ const beforeData=JSON.stringify(view.data),moved={...view,x:-20,y:5,scale:1.5};ctx.clearRect(0,0,400,300);painter.draw(ctx,moved,area,[raised],plain,raised);assert.equal(painter.stats().builds,1);assert.equal(JSON.stringify(view.data),beforeData,'display geometry never mutates map data');
+ assert(painter.stats().pixels<=400*300*3,'scratch buffers remain bounded by the viewport');
+ painter.release();assert.equal(painter.stats().pixels,0);assert.equal(painter.stats().cells,0,'deselection releases both scratch pixels and source references');
+ let projections=0;const layer=require('./transfer-overlay.js').create({sourceCell:(...args)=>{projections++;return R.sourceCell(...args);},surface:R.surface,outlineParts:R.outlineParts});
+ const prepared=layer.prepare(state.incoming,state),count=projections;layer.prepare(state.incoming,{...state,x:50,y:10});assert.equal(projections,count,'panning reuses source projection, styles and labels');
+ layer.hide();assert.strictEqual(layer.prepare(state.incoming,state),prepared,'reselecting a retained source set reuses its geometry');layer.clear();layer.prepare(state.incoming,state);assert(projections>count,'explicit reset releases prepared source records');layer.clear();
+ console.log('PASS: level-zero links, shared-edge/face deduplication, terrain alpha occlusion, hidden bases, dashes, independent opacities and bounded cached drawing.');
+ console.log('PASS: virtual column self/inter-column occlusion, front-edge preservation, terrain-mask independence, reversible toggle and cached clipping with dash phase.');
 }
 
 const mapArg=process.argv.indexOf('--map');

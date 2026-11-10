@@ -116,7 +116,7 @@
    ctx.drawImage(cached.image,Math.round((view.x+left)*ratio)/ratio,Math.round((view.y+top)*ratio)/ratio,w,h);
    const result={rebuilt,parts:parts.length,patched,pixels:width*height,full,refined};refined=false;return result;
   }
-  return {render,invalidate,get previewStatus(){return previews?.status;},cancelRefinement(){previews?.cancel();refiner?.cancel();overviewRefiner?.cancel();},clear(){previews?.clear();refiner?.cancel();overviewRefiner?.cancel();cached=null;overview=null;latest=null;refined=false;}};
+  return {render,invalidate,*warmup(target){if(cached?.image){target.drawImage(cached.image,0,0,64,64);yield;}},get previewStatus(){return previews?.status;},cancelRefinement(){previews?.cancel();refiner?.cancel();overviewRefiner?.cancel();},clear(){previews?.clear();refiner?.cancel();overviewRefiner?.cancel();cached=null;overview=null;latest=null;refined=false;}};
  }
  const api={create};root.CrateRegionOverlayCache=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

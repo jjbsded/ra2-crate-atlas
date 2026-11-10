@@ -1,6 +1,9 @@
 """Native cache parity, provenance rejection, recovery and full renderer checks."""
 import argparse
 import csv
+import gzip
+import hashlib
+from functools import lru_cache
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -9,15 +12,77 @@ import tempfile
 import time
 from unittest.mock import patch
 import official_precomputed as cache
-from official_maps import select
+from official_maps import catalog, select
 from realmap import analyze, compute_analysis
 from realmap_parser import parse_map
-from toy_codec import expand_search
+from toy_codec import expand_report, expand_search, selections
 
 ROOT = Path(__file__).resolve().parent
 QA = ROOT/'output/official-precomputed-qa'
 QA.mkdir(parents=True, exist_ok=True)
 assert QA.resolve().is_relative_to((ROOT/'output').resolve())
+
+
+def verify_catalog(directory, toy=None):
+    """Check every stored layout, and optionally every Toy numeric transport."""
+    index = cache.manifest(directory)
+    entries = [e for e in catalog()['maps'] if e['mode'] in ('standard', 'teamgame')]
+    expected = {cache.layout_key(dict(sourceSha256=v['sha256'], version=version, mineralsEnabled=enabled))
+                for e in entries for version, v in e['variants'].items() for enabled in (True, False)}
+    assert set(index['layouts']) == expected, 'Native cache does not cover the complete official catalog'
+    assert index['menuEntries'] == len(entries)
+    assert index['requestedLayouts'] == sum(len(e['variants'])*2 for e in entries)
+
+    @lru_cache(maxsize=2)
+    def read(key):
+        entry = index['layouts'][key]
+        payload = json.loads(cache.checked_blob(directory, entry['report'], entry['reportSha256']))
+        report = expand_report(payload['report'], payload['table'])
+        search = expand_search(cache.checked_blob(directory, entry['search'], entry['searchSha256']))
+        assert report['probability']['model'] == 'finite-retry-v2'
+        for _ in selections(search, report['probability']['sampleCount']):
+            pass
+        return report, search
+
+    if toy is None:
+        for number, key in enumerate(sorted(expected), 1):
+            read(key)
+            if number % 50 == 0 or number == len(expected):
+                print(f'Native cache verified {number}/{len(expected)}', flush=True)
+        return
+    toy = toy.resolve()
+    toy_catalog = json.loads((toy/'catalog.json').read_text('utf8'))
+    assert {e['id'] for e in toy_catalog['maps']} == {e['id'] for e in entries}
+    compared, seen = 0, set()
+    for e in toy_catalog['maps']:
+        for version, variant in e['variants'].items():
+            for layout, relative in variant['reports'].items():
+                path = (toy/relative).resolve()
+                assert path.is_relative_to(toy)
+                value = json.loads(gzip.decompress(path.read_bytes()))
+                base = (path.parent/value['_static']['base']).resolve()
+                assert base.is_relative_to(toy)
+                report = expand_report(value, json.loads(gzip.decompress(base.read_bytes())))
+                m = report['metadata']
+                assert m['version'] == version and m['mineralsEnabled'] == (layout == 'ore')
+                raw, _, _ = select(e['id'], version)
+                assert m['sourceSha256'] == hashlib.sha256(raw).hexdigest()
+                key = cache.layout_key(m)
+                seen.add(key)
+                native, search = read(key)
+                assert all(report[k] == native[k] for k in cache.RESULT_FIELDS), (relative, 'probability/markers/clearance')
+                assert len(report['cells']) == len(native['cells'])
+                for actual, wanted in zip(report['cells'], native['cells'], strict=True):
+                    assert all(actual[k] == v for k, v in wanted.items()), (relative, wanted['x'], wanted['y'])
+                origin = (path.parent/report['precomputed']['search']).resolve()
+                assert origin.is_relative_to(toy)
+                assert expand_search(gzip.decompress(origin.read_bytes())) == search, (relative, 'ordered search')
+                compared += 1
+                if compared % 50 == 0:
+                    print(f'Toy/native parity {compared}', flush=True)
+    assert compared == index['requestedLayouts']
+    assert seen == expected, 'Toy does not cover every native layout'
+    print(f'PASS {len(expected)} native layouts and {compared} Toy reports: exact probabilities, cells, clearance and ordered sources', flush=True)
 
 
 def verify_render_cache():
@@ -163,5 +228,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=Path, default=cache.DATA)
     parser.add_argument('--render', action='store_true')
+    parser.add_argument('--all-layouts', action='store_true', help='Validate every official layout and source stream')
+    parser.add_argument('--toy', type=Path, help='Compare every Toy report with the rebuilt native cache')
     args = parser.parse_args()
     main(args.data.resolve(), args.render)
+    if args.all_layouts or args.toy:
+        verify_catalog(args.data.resolve(), args.toy)

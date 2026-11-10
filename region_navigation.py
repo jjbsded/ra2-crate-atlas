@@ -1,10 +1,12 @@
 """Auxiliary region routes, independent of crate probabilities and caches."""
 import base64
+from copy import copy
+import re
 from functools import lru_cache
 from pathlib import Path
 
 GROUND, WATER, SHORE, DECK, CORE = 1, 2, 4, 8, 16
-VERSION = 3
+VERSION = 4
 
 
 def build(report, rules):
@@ -17,7 +19,9 @@ def build(report, rules):
             continue
         overlay = rules.get(c.get('overlayName'), {})
         high = c.get('bridge', {}).get('kind') == 'high' if c.get('bridge') else False
-        wall = c.get('wall', False)
+        wall = c.get('wall', False) or yes(overlay.get('WALL', 'no')) or (
+            yes(overlay.get('LEGALTARGET', 'no')) and any(re.fullmatch(r'FENCE\d+', name, re.I)
+                for name in (c.get('overlayName') or '', overlay.get('IMAGE', ''))))
         def destroyable(cfg):
             try:
                 return bool(cfg) and not yes(cfg.get('IMMUNE', 'no')) and number(cfg.get('STRENGTH', '1')) > 0
@@ -46,7 +50,7 @@ def build(report, rules):
                     continue
                 if category == 'terrain':
                     cfg = rules.get(kind, {})
-                    if is_tree(kind, cfg):
+                    if is_tree(kind, cfg) and destroyable(cfg):
                         continue
                     # TerrainClass includes rocks, drills, lights and boxes.
                     # Only trees are cleared; non-occupying scenery may remain.
@@ -71,7 +75,7 @@ def build(report, rules):
             value |= DECK
         flags.append(value)
     return dict(version=VERSION, count=len(flags), flags=base64.b64encode(flags).decode('ascii'),
-                model='foot-ignore-units-cleared-trees-destructible-buildings-layered',
+                model='foot-ignore-units-destructible-trees-buildings-layered',
                 approximate=bool(report['metadata'].get('approximate')))
 
 
@@ -80,6 +84,35 @@ def for_report(report, path):
     source_bytes(report, Path(path), required=True)
     _, theater = resource_context(report, path)
     return build(report, theater['effectiveRules'])
+
+
+class State:
+    """Copy-on-write routing checkpoint, indexed in immutable report order."""
+    def __init__(self, cells, metadata, rules, navigation=None):
+        self.positions = {(c['x'], c['y']): i for i, c in enumerate(cells)}
+        self.value = navigation if navigation and navigation.get('version') == VERSION and navigation.get('count') == len(cells) else build(dict(cells=cells, metadata=metadata), rules)
+        self.bits = base64.b64decode(self.value['flags'])
+        if len(self.bits) != len(cells):
+            raise ValueError('Invalid region navigation length')
+
+    def fork(self):
+        # Bytes, the position table and published dicts are never mutated.
+        return copy(self)
+
+    def update(self, cells, metadata, rules):
+        cells = list(cells)
+        if not cells:
+            return self.value
+        flags = base64.b64decode(build(dict(cells=cells, metadata=metadata), rules)['flags'])
+        changed = [(self.positions[c['x'], c['y']], flag)
+                   for c, flag in zip(cells, flags) if self.bits[self.positions[c['x'], c['y']]] != flag]
+        if changed:
+            bits = bytearray(self.bits)
+            for i, flag in changed:
+                bits[i] = flag
+            self.bits = bytes(bits)
+            self.value = dict(self.value, flags=base64.b64encode(self.bits).decode('ascii'))
+        return self.value
 
 
 @lru_cache(maxsize=4)

@@ -28,4 +28,8 @@ assert.equal(P.labelColor(1,'warm',10,true,textStyle),'#326496');assert.equal(P.
 assert.equal(P.labelColor(1,'warm',10,true,{...textStyle,labelMix:0}),'#204060');assert.equal(P.labelColor(1,'warm',10,true,{...textStyle,labelMix:1}),'#4488cc');
 assert.equal(P.labelStrokeWidth(5,textStyle),3);assert.equal(P.labelStrokeWidth(60,textStyle),18);assert.equal(P.labelStrokeWidth(60,{...textStyle,labelStrokeRatio:0}),3);
 for(const key of ['labelBase','labelMix','labelStrokeRatio'])assert(!Object.hasOwn(P.heatStyle(textStyle),key),'Text controls leave the heat-cache key unchanged');
+const extra={...saved,labelMinRatio:2,labelStrokeRatio:2.5,opacityMax:1.5,baselineFactor:2,labelMix:1.5};P.configurePalette(extra);
+assert.equal(P.paletteSettings().labelMinRatio,2);assert.equal(P.labelSize(1),60);assert.equal(P.labelStrokeWidth(20),50);assert.equal(P.paletteOpacity(100,100),1.5);
+assert.equal(P.paletteSettings().baselineFactor,2);assert.equal(P.paletteSettings().labelMix,1.5);assert.match(P.labelColor(100,'warm',100),/^#[0-9a-f]{6}$/);
+assert.equal(require('./probability-display.js').alpha(.5,true,2),.75,'Valid baseline coefficients above one remain usable');P.configurePalette(saved);
 console.log('PASS fixed 1x/new endpoints, low green, shared labels, five-point opacity interpolation, proportional text height and unchanged multicolor');

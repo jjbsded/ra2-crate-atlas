@@ -7,8 +7,10 @@
  const h=(c,u,v)=>{const[a,b,d,e]=c;return a*(1-u)*(1-v)+b*u*(1-v)+d*u*v+e*(1-u)*v;};
  const frame=c=>c.overlayData+(high.has(c.overlayName)&&[0,9].includes(c.overlayData)?variation[(c.x&3)|((c.y&3)<<2)]:0);
  async function patch(report,selected,{radius=10,signal}={}){
-  const scene=O().get(report),lookup=new Map(report.cells.map(c=>[key(c),c])),textures={},sources=new Map(),tiles=new Map(),affected=new Map();
-  const enabled=!report.metadata.previewOnly&&!report.metadata.approximate&&report.metadata.cliffBackImpassability===2;
+  const scene=O()?.get(report,{optional:true});
+  if(!scene)return root.CrateToyTerrain3D.patch(report,selected,{radius,signal});
+  const lookup=new Map(report.cells.map(c=>[key(c),c])),textures={},sources=new Map(),tiles=new Map(),affected=new Map();
+  const enabled=!report.metadata.previewOnly&&(!report.metadata.approximate||!!report.metadata.riskPredictionVersion);
   radius=Math.max(1,Math.min(15,Math.floor(Number(radius)||10)));
   for(const c of report.cells)for(const[x,y]of c.higher||[]){const k=`${x},${y}`;if(!affected.has(k))affected.set(k,[]);affected.get(k).push([c.x,c.y,c.level]);}
   function source(refs){
@@ -46,7 +48,7 @@
     let wall=null;if(parts.length>1&&!c.slope){const s=source(parts.slice(1));wall=sample('wall:'+id,s,64,96,(u,v)=>[s.left+u*s.w,s.top+v*s.h]);}
     tiles.set(id,{top,wall});
    }
-   const tile=tiles.get(id),d={...c,corners:[...shape],texture:tile.top,wallTexture:tile.wall,walls:{},decorations:[],higher:enabled?(c.higher||[]).map(p=>[...p]):[],affected:enabled?(affected.get(key(c))||[]):[],canPlace:!!(enabled&&c.status==='crate'&&c.probability>0&&c.overlay===255&&!c.occupied)};
+   const tile=tiles.get(id),d={...c,corners:[...shape],texture:tile.top,wallTexture:tile.wall,walls:{},decorations:[],higher:(c.higher||[]).map(p=>[...p]),affected:(affected.get(key(c))||[]),canPlace:!!(enabled&&c.riskKnown!==false&&Number.isInteger(c.postLand)&&c.status==='crate'&&c.probability>0&&c.overlay===255&&!c.occupied)};
    for(const[name,overlay,f]of [[c.terrain,0,0],[c.overlayName,1,frame(c)]]){
     if(!name||high.has(name)||/^LOBRD[GB]/.test(name))continue;
     const ref=scene.data.sprites[`${overlay}/${name}/${f}`];if(!ref)continue;
@@ -99,7 +101,7 @@
   }
   for(const c of cells){for(const name of ['texture','wallTexture'])if(rects.has(c[name])){const v=rects.get(c[name]);c[name+'Rect']=v.rect;c[name]=v.id;}c.wallsRect={};for(const edge of Object.keys(c.walls)){const v=rects.get(c.walls[edge]);c.walls[edge]=v.id;c.wallsRect[edge]=v.rect;}for(const d of c.decorations)if(d.flat){const v=rects.get(d.texture);d.texture=v.id;d.textureRect=v.rect;}}
   for(const id of flat)delete textures[id];
-  return {version:1,originalArt:true,batchStatic:true,center:[selected.x,selected.y],radius,cells,textures,metadata:{...report.metadata,predictionEnabled:enabled,missing:[],uniqueTiles:tiles.size,sourceDescription:root.CrateI18n.t('原版贴图 3D：复用当前地图的共享素材、原始高度和坡形；悬崖使用简化几何，对象使用静态贴图。概率与主图一致。')}};
+  return {version:1,originalArt:true,batchStatic:true,center:[selected.x,selected.y],radius,cells,textures,metadata:{...report.metadata,predictionEnabled:enabled,relationsEnabled:true,missing:[],uniqueTiles:tiles.size,sourceDescription:root.CrateI18n.t('原版贴图 3D：复用当前地图的共享素材、原始高度和坡形；悬崖使用简化几何，对象使用静态贴图。概率与主图一致。')}};
  }
  root.CrateToyOriginal3D={patch};
 })(globalThis);

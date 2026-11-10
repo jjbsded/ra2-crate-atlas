@@ -6,9 +6,53 @@ import base64
 import time
 from uuid import uuid4
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor
+import os
 
 
 TILE = 256
+
+
+class ByteLRU(OrderedDict):
+    """On-demand cache ownership; count limits alone thrash on large maps."""
+    def __init__(self, budget, weight):
+        super().__init__()
+        self.budget, self.weight, self.bytes, self.sizes = budget, weight, 0, {}
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.__delitem__(key)
+        size = self.weight(key, value)
+        if size > self.budget:
+            return
+        super().__setitem__(key, value)
+        self.sizes[key] = size
+        self.bytes += size
+        while self.bytes > self.budget:
+            self.popitem(last=False)
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self.bytes -= self.sizes.pop(key)
+
+    def popitem(self, last=True):
+        key, value = super().popitem(last=last)
+        self.bytes -= self.sizes.pop(key)
+        return key, value
+
+    def clear(self):
+        super().clear()
+        self.sizes.clear()
+        self.bytes = 0
+
+
+def image_token(image):
+    if image is None:
+        return None
+    token = getattr(image, '_crate_atlas_render_token', None)
+    if token is None:
+        token = image._crate_atlas_render_token = uuid4().hex
+    return token
 
 
 class SharedVoxelFrames:
@@ -68,10 +112,8 @@ class Scene:
         self.sprites = defaultdict(set)
         self.sprite_tiles = {}
         self.tile_revisions = {}
-        self.flat_tiles = OrderedDict()
-        self.ground_encodings = OrderedDict()
+        self.init_caches()
         self.ground_epoch = uuid4().hex
-        self.painted_tiles = OrderedDict()
         self.tank_records = {}
         self.tank_tiles = defaultdict(dict)
         self.tank_active = False
@@ -128,7 +170,7 @@ class Scene:
         other.sprites = defaultdict(set, ((key, set(value)) for key,value in self.sprites.items()))
         other.sprite_tiles = {key:set(value) for key,value in self.sprite_tiles.items()}
         other.tile_revisions = {}
-        other.flat_tiles, other.ground_encodings, other.painted_tiles = OrderedDict(), OrderedDict(), OrderedDict()
+        other.init_caches()
         other.ground_epoch = uuid4().hex
         other.tank_records, other.tank_tiles, other.tank_active = {}, defaultdict(dict), False
         other.opaque_parts = {}
@@ -140,6 +182,23 @@ class Scene:
             owner['users'] += 1
         other._background_owner, other._closed = owner, False
         return other
+
+    def init_caches(self):
+        self.flat_tiles = ByteLRU(128*1024*1024, lambda k,v: v[0].width*v[0].height*4+v[1].nbytes+128)
+        self.ground_encodings = ByteLRU(32*1024*1024, lambda k,v: len(v)+128)
+        weight = lambda k,v: len(v['patch'].get('ground',''))+len(v['patch']['objects'])+len(repr(k))*2+256
+        self.painted_tiles = ByteLRU(32*1024*1024, weight)
+        self.tile_history = ByteLRU(64*1024*1024, weight)
+        self.encoder = None
+
+    def tile_signature(self, tile, events, bridge_flags):
+        if not hasattr(self, 'assets'):
+            return None
+        sprites = tuple((p,self.cells[p]['overlayName'],self.cells[p]['overlayData'],self.cells[p]['terrain'],bool(self.cells[p].get('simulationOverlay')))
+                        for p in sorted(self.sprites.get(tile, ())))
+        parts = tuple((*event[:5],image_token(event[5]['image']),image_token(event[5]['shadow']),
+                       event[5]['x'],event[5]['y'],event[5].get('shadowX'),event[5].get('shadowY')) for event in events)
+        return tile, bridge_flags, sprites, parts
 
     def anchor(self, cell):
         x, y = cell['x'], cell['y']
@@ -308,14 +367,12 @@ class Scene:
             self.flat_tiles[tile] = ground, np.asarray(owner), next(iter(levels))
         ground, owners, level = self.flat_tiles[tile]
         self.flat_tiles.move_to_end(tile)
-        if len(self.flat_tiles)>64:
-            self.flat_tiles.popitem(last=False)
         # Different elevations can allow a foreground TMP to cover an object.
         if any(event[4] != level for event in events):
             return None
         for *_, part in events:
             image = part['image']
-            key = id(image)
+            key = image_token(image)
             if key not in self.opaque_parts:
                 self.opaque_parts[key] = not any(image.getchannel('A').histogram()[1:255])
             if not self.opaque_parts[key]:
@@ -352,6 +409,14 @@ class Scene:
         bridge_names = {name for p in self.sprite_tiles
                         if (name := self.cells[p]['overlayName']) and (name in HIGH_NAMES or name.startswith(('LOBRDG', 'LOBRDB')))}
         patches = []
+        pending = []
+        if not hasattr(self, 'encoder'):
+            self.encoder = None
+        if self.encoder is None:
+            self.encoder = ThreadPoolExecutor(max_workers=min(4,max(1,(os.cpu_count() or 2)-2)),thread_name_prefix='crate-tile-codec')
+        def encoded(image):
+            at=time.perf_counter()
+            return encode(image),(time.perf_counter()-at)*1000
         fast_count = 0
         encode_ms = raster_ms = 0.0
         ground_reused = tile_reused = 0
@@ -362,6 +427,13 @@ class Scene:
             box = [x,y,w,h]
             tile_events = self.events.get(tile, ())
             cached = self.painted_tiles.get(tile)
+            signature = self.tile_signature(tile,tile_events,(bool(bridge_names & HIGH_NAMES),bool(bridge_names)))
+            if (not cached or cached['revision'] != self.tile_revisions[tile]) and signature is not None:
+                previous = self.tile_history.get(signature)
+                if previous is not None:
+                    cached = dict(previous,revision=self.tile_revisions[tile])
+                    self.tile_history.move_to_end(signature)
+                    self.painted_tiles[tile] = cached
             if cached and cached['revision'] == self.tile_revisions[tile]:
                 item = dict(cached['patch'])
                 self.painted_tiles.move_to_end(tile)
@@ -373,29 +445,9 @@ class Scene:
                 fast_count += cached['flat']
                 continue
             def receive(ground, objects, _origin, flat=False):
-                nonlocal encode_ms, ground_reused
-                at = time.perf_counter()
-                item = dict(box=box, objects=encode(objects))
-                if flat:
-                    key = f'{self.ground_epoch}:{tile[0]},{tile[1]}'
-                    if tile not in self.ground_encodings:
-                        self.ground_encodings[tile] = encode(ground)
-                    self.ground_encodings.move_to_end(tile)
-                    while len(self.ground_encodings) > 64:
-                        self.ground_encodings.popitem(last=False)
-                    item.update(ground=self.ground_encodings[tile], groundKey=key)
-                else:
-                    item['ground'] = encode(ground)
-                self.painted_tiles[tile] = dict(revision=self.tile_revisions[tile], patch=item, flat=int(flat))
-                self.painted_tiles.move_to_end(tile)
-                while len(self.painted_tiles) > 96:
-                    self.painted_tiles.popitem(last=False)
-                output = dict(item)
-                if output.get('groundKey') in known_ground:
-                    output.pop('ground', None)
-                    ground_reused += 1
-                patches.append(output)
-                encode_ms += (time.perf_counter()-at)*1000
+                saved = self.ground_encodings.get(tile) if flat else None
+                pending.append((tile,box,signature,flat,self.encoder.submit(encoded,objects),saved or self.encoder.submit(encoded,ground)))
+                patches.append(None)
             raster_at=time.perf_counter()
             fast=self.flat_replay(tile,box,tile_events)
             raster_ms+=(time.perf_counter()-raster_at)*1000
@@ -414,6 +466,25 @@ class Scene:
             render(self.cells, self.res, theater, self.tmps, self.path.parent,
                    self.metadata, lambda *_: None, save_images=False, image_sink=receive, replay=replay)
             raster_ms+=(time.perf_counter()-raster_at)*1000-(encode_ms-encoded_before)
+        iterator=iter(pending)
+        for i, patch in enumerate(patches):
+            if patch is not None:
+                continue
+            tile,box,signature,flat,objects,ground=next(iterator)
+            objects,ms=objects.result();encode_ms+=ms
+            if not isinstance(ground,str):
+                ground,ms=ground.result();encode_ms+=ms
+                if flat:self.ground_encodings[tile]=ground
+            elif flat:self.ground_encodings.move_to_end(tile)
+            item=dict(box=box,objects=objects,ground=ground)
+            if flat:item['groundKey']=f'{self.ground_epoch}:{tile[0]},{tile[1]}'
+            cached=dict(revision=self.tile_revisions[tile],patch=item,flat=int(flat))
+            self.painted_tiles[tile]=cached
+            if signature is not None:self.tile_history[signature]=cached
+            output=dict(item)
+            if output.get('groundKey') in known_ground:
+                output.pop('ground',None);ground_reused+=1
+            patches[i]=output
         return dict(patches=patches, flatTiles=fast_count, groundReused=ground_reused,tileReused=tile_reused,rasterMs=round(raster_ms,3),encodeMs=round(encode_ms,3),paintMs=round((time.perf_counter()-started)*1000, 2),
                     offset=offset, done=end, total=total)
 
@@ -421,6 +492,9 @@ class Scene:
         if getattr(self, '_closed', False):
             return
         self._closed = True
+        if getattr(self,'encoder',None) is not None:
+            self.encoder.shutdown(wait=True,cancel_futures=True)
+            self.encoder=None
         owner = getattr(self, '_background_owner', None)
         if owner is not None:
             with owner['lock']:
@@ -431,6 +505,8 @@ class Scene:
             self.background.close()
         if self.painter.voxels is not None:
             self.painter.voxels.close()
+        for name in ('flat_tiles','ground_encodings','painted_tiles','tile_history'):
+            getattr(self,name,{}).clear()
 
 
 def patch(payload):

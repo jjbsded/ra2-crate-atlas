@@ -23,7 +23,7 @@ class References(HTMLParser):
                 self.refs.append(attrs[name])
 
 
-def verify(root, cache, modes=None, cases_path=None):
+def verify(root, cache, modes=None, cases_path=None, *, verify_archive=True):
     catalog = json.loads((root/'catalog.json').read_text('utf-8'))
     manifest = json.loads((root/'build-manifest.json').read_text('utf-8'))
     if modes:
@@ -73,8 +73,10 @@ def verify(root, cache, modes=None, cases_path=None):
                     report = expand_report(report, json.loads(gzip.decompress(base.read_bytes())))
                 meta = report['metadata']
                 if manifest.get('regionNavigationVersion'):
+                    from region_navigation import VERSION
                     navigation=report['regionNavigation']
-                    assert navigation['version']==2 and navigation['count']==len(report['cells'])
+                    assert navigation['version']==manifest['regionNavigationVersion']==VERSION
+                    assert navigation['count']==len(report['cells'])
                     assert len(base64.b64decode(navigation['flags'],validate=True))==len(report['cells'])
                 assert meta['officialMap']['id'] == entry['id']
                 assert meta['version'] == version and meta['mineralsEnabled'] == (layout == 'ore')
@@ -145,14 +147,16 @@ def verify(root, cache, modes=None, cases_path=None):
         cases_path.parent.mkdir(exist_ok=True,parents=True)
         cases_path.write_text(json.dumps(cases),encoding='utf-8')
     archive_path = Path(str(root)+'.zip')
-    assert archive_path.with_suffix('.zip.sha256').read_text('utf-8').split()[0] == hashlib.sha256(archive_path.read_bytes()).hexdigest()
-    if manifest.get('zipBudgetBytes'):
-        assert archive_path.stat().st_size<=manifest['zipBudgetBytes']
-    with zipfile.ZipFile(archive_path) as archive:
-        assert set(archive.namelist()) == actual_files | {'build-manifest.json'}
-        assert archive.testzip() is None
+    if verify_archive:
+        assert archive_path.with_suffix('.zip.sha256').read_text('utf-8').split()[0] == hashlib.sha256(archive_path.read_bytes()).hexdigest()
+        if manifest.get('zipBudgetBytes'):
+            assert archive_path.stat().st_size<=manifest['zipBudgetBytes']
+        with zipfile.ZipFile(archive_path) as archive:
+            assert set(archive.namelist()) == actual_files | {'build-manifest.json'}
+            assert archive.testzip() is None
     result = dict(status='PASS', entries=len(catalog['maps']), reports=reports,
-                  files=len(actual_files)+1, zipBytes=archive_path.stat().st_size,
+                  files=len(actual_files)+1, zipBytes=archive_path.stat().st_size if verify_archive else None,
+                  archiveVerified=verify_archive,
                   exact_cells_and_search_unchanged=True)
     all_files = [path for path in root.rglob('*') if path.is_file()]
     result['storage'] = dict(unpackedBytes=sum(path.stat().st_size for path in all_files),
@@ -170,8 +174,9 @@ if __name__ == '__main__':
     parser.add_argument('--mode', action='append', help='Require the complete official catalog for these modes')
     parser.add_argument('--report', type=Path, help='Write verification and per-map storage measurements as JSON')
     parser.add_argument('--cases', type=Path, help='Write cross-language comparison inputs for verify-toy-codec.cjs')
+    parser.add_argument('--directory-only', action='store_true', help='Verify data, artwork and runtime directory without requiring or changing an archive')
     args = parser.parse_args()
-    result = verify(args.root, args.cache, args.mode, args.cases)
+    result = verify(args.root, args.cache, args.mode, args.cases, verify_archive=not args.directory_only)
     if args.report:
         args.report.parent.mkdir(parents=True,exist_ok=True)
         args.report.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')

@@ -1,6 +1,7 @@
 """Baseline reuse, resource invalidation, editor isolation and shared worker lifetime."""
 from copy import copy, deepcopy
 from pathlib import Path
+import os
 from tempfile import TemporaryDirectory
 from threading import Thread
 from time import sleep
@@ -9,7 +10,7 @@ import runtime_bootstrap
 import simulation_live as L
 from simulation_visual import SharedVoxelFrames
 
-path=Path('output/CrateAtlas-Windows-x64-Simulation-20261104/output/map-22309489b5d3/result.json.gz')
+path=Path(os.environ.get('LIVE_RESULT','output/CrateAtlas-Windows-x64-Simulation-20261104/output/map-22309489b5d3/result.json.gz'))
 a,_=L.prepared_session(path,0)
 try:
     before=a.store.checksum();plan=deepcopy(a.plan)
@@ -45,7 +46,7 @@ with TemporaryDirectory() as folder:
     assert key!=L.baseline_key(checkpoint,inputs)
     res=copy(inputs[3]);res.rules_bytes+=b'changed';assert L.baseline_key(checkpoint,inputs)!=L.baseline_key(checkpoint,(*inputs[:3],res))
     res=copy(inputs[3]);res.art_hash='changed';assert L.baseline_key(checkpoint,inputs)!=L.baseline_key(checkpoint,(*inputs[:3],res))
-    res=copy(inputs[3]);res.discovery=dict(res.discovery,fingerprint='changed');assert L.baseline_key(checkpoint,inputs)!=L.baseline_key(checkpoint,(*inputs[:3],res))
+    res=copy(inputs[3]);res.discovery=dict(getattr(res,'discovery',{}),fingerprint='changed');assert L.baseline_key(checkpoint,inputs)!=L.baseline_key(checkpoint,(*inputs[:3],res))
 with patch.object(L,'resource_context',side_effect=ValueError('Resource changed')):
     try:L.prepared_session(path,0)
     except ValueError as error:assert str(error)=='Resource changed'

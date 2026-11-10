@@ -40,6 +40,20 @@ async function main(){
  const stopped=new AbortController(),cancelReader=createReader({fetch:async()=>({ok:true,json:async()=>({...data,probability:{model:'legacy'}})}),upgrade:async()=>{stopped.abort();return '/new/result.json';}});
  await assert.rejects(cancelReader('/old/result.json',{signal:stopped.signal}),{name:'AbortError'});
  console.log('PASS: old-model upgrade, repeated stale result rejection, and upgrade cancellation.');
+ for(const metadata of [{previewOnly:true},{approximate:true}]){
+  let count=0;
+  const recover=createReader({Image:class{decode(){return Promise.resolve();}},readJSON:async url=>({...data,metadata:url.includes('/new/')?{approximate:true,riskPredictionVersion:1}:metadata}),upgrade:async()=>{count++;return '/new/result.json';}});
+  assert.equal((await recover('/old/result.json')).data.metadata.riskPredictionVersion,1);assert.equal(count,1);
+  const fallback=createReader({Image:class{decode(){return Promise.resolve();}},readJSON:async()=>({...data,metadata}),upgrade:async()=>{throw Error('source unavailable');}});
+  const kept=await fallback('/old/result.json');assert.equal(kept.data.metadata.recoveryError,'source unavailable');assert(kept.data.metadata.loadIssues[0].message.includes('source unavailable'));assert(kept.im);
+ }
+ console.log('PASS: legacy preview/risk recovery and retaining readable artwork when recovery fails.');
+ for(const broken of ['objects','ground','both']){
+  const fallback={width:100,height:100,draw(){}},reader=createReader({readJSON:async()=>data,Image:class{decode(){return broken==='both'||this.src.includes(broken)?Promise.reject(Error('missing '+broken)):Promise.resolve();}},fallbackArtwork:()=>fallback});
+  const recovered=await reader('/output/art/result.json');assert(recovered.im);assert.equal(recovered.data.metadata.loadIssues.length,broken==='both'?2:1);assert.equal(data.metadata.loadIssues,undefined);
+  if(broken==='objects')assert.equal(recovered.objectImage,null);else assert.equal(recovered.im,fallback);
+ }
+ console.log('PASS: independent ground/object image failures retain readable layers and computation data.');
 
  let attempts=0;
  const retryReader=createReader({Image:class{decode(){return Promise.resolve();}},fetch:async url=>{

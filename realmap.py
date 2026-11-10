@@ -67,24 +67,41 @@ def clearance_risks(cells, folder, meta, rules, progress=lambda *args: None):
     candidates, risks = {}, {}
     crate_rules = rules.get('CRATERULES', {})
     crate_names = [crate_rules.get('CRATEIMG', 'CRATE'), crate_rules.get('WATERCRATEIMG', 'WCRATE')]
+    approximate = bool(meta.get('approximate'))
+    unknown = 0
     for p, c in cells.items():
-        removed = c['removable']
-        mineral = any(o['category'] == 'mineral' for o in removed)
-        overlay_name = None if mineral else c['overlayName']
-        cfg = rules.get(overlay_name, {}) if overlay_name else None
-        land = land_after(c['rawLand'], c['slope'], cfg, c['higher'], meta['cliffBackImpassability'])
-        cost = rules[LANDS[land].upper()]
-        track, floating, foot = (number(cost.get(k, '0')) != 0 for k in ('TRACK', 'FLOAT', 'FOOT'))
-        if elevated(c):
-            track = floating = foot = True
-        candidate = c['usable'] and not (cfg and yes(cfg.get('WALL', 'no')))
-        key = p[1]*512+p[0]
-        grid[key] = ((int(track) | (int(floating) << 1)) if candidate else 0) | (4 if c['primary'] else 0) | (8 if land == 2 else 0)
-        post = land_after(c['rawLand'], c['slope'], rules[crate_names[int(land == 2)].upper()], c['higher'], meta['cliffBackImpassability'])
-        post_cost = rules[LANDS[post].upper()]
-        transition = bool(not elevated(c) and candidate and overlay_name is None and c['slope'] <= 4 and land != 3 and post == 3
-                          and (track or foot) and number(post_cost.get('TRACK', '0')) == 0
-                          and number(post_cost.get('FOOT', '0')) == 0)
+        if approximate and (not c.get('riskKnown') or c.get('assumedRetry')):
+            # Preserve the current search assumptions for an unreadable cell;
+            # never clear an unknown footprint and label its result certain.
+            grid[p[1]*512+p[0]] = ((int(c['track']) | (int(c['float']) << 1)) if c['candidate'] else 0) | (4 if c['primary'] else 0) | (8 if c['land'] == 2 else 0)
+            unknown += 1
+            continue
+        try:
+            removed = c['removable']
+            mineral = any(o['category'] == 'mineral' for o in removed)
+            overlay_name = None if mineral else c['overlayName']
+            cfg = rules.get(overlay_name, {}) if overlay_name else None
+            land = land_after(c['rawLand'], c['slope'], cfg, c['higher'], meta['cliffBackImpassability'])
+            cost = rules[LANDS[land].upper()]
+            track, floating, foot = (number(cost.get(k, '0')) != 0 for k in ('TRACK', 'FLOAT', 'FOOT'))
+            if elevated(c):
+                track = floating = foot = True
+            candidate = c['usable'] and not (cfg and yes(cfg.get('WALL', 'no')))
+            key = p[1]*512+p[0]
+            grid[key] = ((int(track) | (int(floating) << 1)) if candidate else 0) | (4 if c['primary'] else 0) | (8 if land == 2 else 0)
+            crate_cfg = rules.get(crate_names[int(land == 2)].upper())
+            if not crate_cfg or not yes(crate_cfg.get('CRATE', 'no')) or yes(crate_cfg.get('WALL', 'no')):
+                raise ValueError('Unsupported cleared-cell crate rule')
+            post = land_after(c['rawLand'], c['slope'], crate_cfg, c['higher'], meta['cliffBackImpassability'])
+            post_cost = rules[LANDS[post].upper()]
+            transition = bool(not elevated(c) and candidate and overlay_name is None and c['slope'] <= 4 and land != 3 and post == 3
+                              and (track or foot) and number(post_cost.get('TRACK', '0')) == 0
+                              and number(post_cost.get('FOOT', '0')) == 0)
+        except (ValueError, TypeError, KeyError, IndexError):
+            if not approximate: raise
+            grid[p[1]*512+p[0]] = ((int(c['track']) | (int(c['float']) << 1)) if c['candidate'] else 0) | (4 if c['primary'] else 0) | (8 if c['land'] == 2 else 0)
+            unknown += 1
+            continue
         if removed or transition:
             risks[p] = dict(land=land, postLand=post, rockTransition=transition, supported=False)
         if transition:
@@ -118,9 +135,11 @@ def clearance_risks(cells, folder, meta, rules, progress=lambda *args: None):
             if risk is None: c.pop('clearance', None)
             else: c['clearance'] = risk
     markers = [[c['x'], c['y']] for c in cells.values() if c['potentialMarked']]
-    return markers, dict(model='all-supported-objects-cleared', probabilityComputed=False,
+    result = dict(model='all-supported-objects-cleared', probabilityComputed=False,
         description='假设地图预置建筑、矿物、树木／地形物及地面单位／步兵全部完全移除，且不留下废墟或新覆盖物；保持地形、高度、其他 Overlay 和规则不变。斜纹格在此布局有随机落箱路径，随后变为禁行；不表示当前出箱概率，也不推演实际拆除过程。',
         removedCellCount=sum(bool(c['removable']) for c in cells.values()))
+    if approximate: result.update(model='readable-objects-cleared', approximate=True, unknownCellCount=unknown)
+    return markers, result
 
 
 def finish_preview(cells, res, theater, tmps, meta, folder, filename, progress, start, reason=None):
@@ -247,7 +266,7 @@ def compute_analysis(cells, folder, meta, theater, progress):
     for p, raw in cells.items():
         value = result_cells.get(p[1]*512+p[0], zero)
         old = previous_cells.get(p)
-        if previous_inputs.get(p) is raw and old is not None and all(old.get(k) == v for k,v in value.items()):
+        if previous_inputs.get(p) is raw and old is not None and all(old.get(k) == v for k,v in value.items()) and all(old.get(k) == raw.get(k) for k in ('riskKnown', 'postLand', 'rockTransition')):
             c = cells[p] = old; reused += 1
         else:
             c = cells[p] = {**raw, **value}
@@ -257,11 +276,7 @@ def compute_analysis(cells, folder, meta, theater, progress):
             markers.append([p[0], p[1]])
         elif c['rockTransition'] and c['candidate'] and (c['track'] or c['float']):
             shadowed.append([p[0], p[1]])
-    if approximate:
-        potential, clearance = [], dict(model='unverified', probabilityComputed=False,
-            description='近似计算仅估计落箱概率，尚未验证放箱后／清空对象后的禁行风险。')
-    else:
-        potential, clearance = clearance_risks(cells, folder, meta, theater['effectiveRules'], progress)
+    potential, clearance = clearance_risks(cells, folder, meta, theater['effectiveRules'], progress)
     if prepared is not None:
         prepared['computed'] = inputs, dict(cells)
     meta.setdefault('layoutUpdate', {}).update(reusedResultCells=reused)
@@ -282,6 +297,8 @@ def finish_analysis(cells, res, theater, tmps, meta, folder, filename, progress,
         computed = compute_analysis(cells, folder, meta, theater, progress)
         meta.setdefault('calculationSource', dict(kind='live', reason='forced' if not use_precomputed else 'not-covered'))
     markers, potential, clearance = computed['markers'], computed['potentialMarkers'], computed['clearance']
+    from region_navigation import build as build_navigation
+    computed = dict(computed, regionNavigation=build_navigation(dict(cells=list(cells.values()), metadata=meta), theater['effectiveRules']))
     from incremental_probability import publish_probability
     publish_probability(cells, computed, meta)
     from incremental_probability import defer_render_requested
@@ -310,14 +327,15 @@ def complete_analysis(cells, res, theater, tmps, meta, folder, progress, start, 
     meta['elapsedSeconds'] = round(time.perf_counter()-start, 3)
     report = dict(schemaVersion=3 if approximate else 2, model='approximate-unknown-failure' if approximate else ('original-YR-1.001' if version == 'yr' else 'original-RA2-1.006')+'-static-next-crate', metadata=meta, rendering=rendering,
                   **computed, cells=list(cells.values()))
-    from region_navigation import build as build_navigation
-    report['regionNavigation'] = build_navigation(report, theater['effectiveRules'])
+    if 'regionNavigation' not in report:
+        from region_navigation import build as build_navigation
+        report['regionNavigation'] = build_navigation(report, theater['effectiveRules'])
     write_report(folder/'result.json', report, compressed=False)
     with (folder/'cells.csv').open('w', encoding='utf-8-sig', newline='') as output:
         names = ['x', 'y', 'level', 'slope', 'rawLand', 'land', 'postLand', 'overlayName', 'terrain', 'occupied',
                  'occupiedGround', 'occupiedDeck', 'status', 'ghostReason',
                  'usable', 'primary', 'probability', 'multiplier', 'rockTransition', 'marked', 'potentialMarked', 'removable', 'clearance',
-                 'approximate', 'assumedRetry', 'retryAssumptions']
+                 'approximate', 'assumedRetry', 'retryAssumptions', 'riskKnown']
         writer = csv.DictWriter(output, fieldnames=names, extrasaction='ignore'); writer.writeheader()
         writer.writerows({**c, 'approximate': approximate, 'retryAssumptions': json.dumps(c.get('retryAssumptions', []), ensure_ascii=False), 'removable': json.dumps(c['removable'], ensure_ascii=False),
                           'clearance': json.dumps(c.get('clearance'), ensure_ascii=False)} for c in cells.values())

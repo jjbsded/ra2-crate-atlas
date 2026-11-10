@@ -398,7 +398,7 @@ class ObjectPainter:
         roofs = {}
         empty_foundations = set(self.theater.get('emptyFoundationObjectIds', []))
         for obj in self.theater.get('mapObjects', []):
-            if obj['category'] != 'STRUCTURES' or obj['id'] in empty_foundations:
+            if obj['category'] != 'STRUCTURES' or obj['health'] == 0 or obj['id'] in empty_foundations:
                 continue
             _, _, art = self.art_for(obj['type'])
             footprint = visual_foundation(art)
@@ -434,7 +434,9 @@ class ObjectPainter:
                     dx, dy = {2:(15,0), 3:(-15,0), 4:(0,7)}.get(obj['subcell'], (0,0))
                     x += dx; y += dy; depth += dy/15
                 if obj['category'] == 'STRUCTURES':
-                    depth += max(dx+dy for dx, dy in visual_foundation(art))
+                    # Flat rubble stays below every mobile object within its
+                    # foundation, including the unit at its rear anchor cell.
+                    depth = obj['x']+obj['y']+.2 if obj['health'] == 0 else depth+max(dx+dy for dx, dy in visual_foundation(art))
                 group = [] if event_groups is not None else None
                 for part in parts:
                     event = (depth, obj['x'], x, y, c['level']+(4 if on_deck else 0), part)

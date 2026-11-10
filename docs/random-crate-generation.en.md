@@ -1,6 +1,6 @@
-> Scope: the tool now integrates finite retries mathematically. See [probability-model.md](probability-model.md) for the current implementation contract.
-
 **English** | [简体中文](random-crate-generation.md)
+
+> Scope: the tool now integrates finite retries mathematically. See [probability-model.md](probability-model.md) for the current implementation contract.
 
 # Random crate coordinates, nearby search and failed placement
 

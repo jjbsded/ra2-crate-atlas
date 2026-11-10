@@ -2,6 +2,7 @@
 (function(root){
  'use strict';
  function ratio(n,d){
+  if(root.CrateFiniteRetry?.ratio)return root.CrateFiniteRetry.ratio(n,d);
   if(n===0n)return 0;
   if(n<0n||d<=0n)throw Error('CODEC_RATIO');
   let exponent=n.toString(2).length-d.toString(2).length;

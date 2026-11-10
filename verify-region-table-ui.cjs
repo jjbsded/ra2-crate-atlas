@@ -1,22 +1,31 @@
 'use strict';
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const toy=process.env.SIM_EDITION==='toy',english=process.env.UI_LANG==='en',base=process.env.SIM_BASE||'http://127.0.0.1:8767/',qa=path.resolve('output/region-table-qa');
+const toy=process.env.SIM_EDITION==='toy',english=process.env.UI_LANG==='en',base=process.env.SIM_BASE||'http://127.0.0.1:8767/',qa=path.resolve(process.env.SIM_QA_OUTPUT||'output/region-table-qa');
 (async()=>{fs.mkdirSync(qa,{recursive:true});const browser=await chromium.launch({channel:'msedge',headless:true});try{
- const p=await browser.newPage({viewport:{width:1900,height:1300}}),errors=[],jobs=[];let capture=false;
+ const p=await browser.newPage({viewport:{width:1900,height:1300},deviceScaleFactor:Number(process.env.UI_DPR)||1}),errors=[],jobs=[];let capture=false;
  p.on('pageerror',e=>errors.push(e.message));p.on('request',r=>{if(capture&&r.method()==='POST'&&/\/api\/maps\/(analyze|simulation|recompute)/.test(new URL(r.url()).pathname))jobs.push(r.url());});
  await p.route('**/language-settings.js*',r=>r.fulfill({contentType:'application/javascript',body:'globalThis.CrateLanguageSettings={saved:'+JSON.stringify(english?'en':'zh-CN')+'};'}));
  await p.addInitScript(lang=>{localStorage.removeItem('crate-atlas.region-table.v1');localStorage.setItem('crate-atlas.language.v1',lang);},english?'en':'zh-CN');
- await p.goto(base+(toy?'maps.html':'maps.html?result=/output/map-22309489b5d3/result.json'));
+ await p.goto(base+(toy?'maps.html':'maps.html?result='+(process.env.SIM_RESULT||'/output/map-22309489b5d3/result.json')));
  await p.waitForFunction(()=>window.CrateMapViewer?.simulation.model&&!CrateMapViewer.state.busy,null,{timeout:120000});
  if(toy){await p.locator('#mapFile').setInputFiles('D:/SteamLibrary/steamapps/common/Command & Conquer Red Alert II/SAVE537E-20261104-155756-719000.map');await p.waitForFunction(()=>CrateMapViewer.state.data.metadata.filename==='SAVE537E-20261104-155756-719000.map'&&!CrateMapViewer.state.busy,null,{timeout:120000});}
  assert(await p.locator('#regionSummary').isVisible());
  for(const [id,mode,pattern]of [['simulationPlaceTab','place',english?/Left-drag to draw/:/左键绘制/],['regionToggle','region',english?/assign regions/:/左键划分/],['viewMode',null,english?/Click to select/:/点击选格/]]){
   await p.locator('#'+id).click();assert.equal(await p.evaluate(()=>CrateMapViewer.state.editMode),mode);assert(await p.locator('#mapInteractionHint').isVisible());assert.match(await p.locator('#mapInteractionHint').innerText(),pattern);assert(await p.locator('#regionSummary').isVisible());
  }
- assert(await p.locator('#cellAside').isVisible());assert(await p.locator('#regionAsideTabs').isHidden());
+ assert(await p.locator('#cellAside').isVisible());assert(await p.locator('#regionAsideTabs').isVisible());
  await p.waitForFunction(()=>document.getElementById('regionRows').children.length>2&&!CrateMapViewer.state.regionPending&&!CrateMapViewer.state.unitBuffPending&&!CrateMapViewer.state.busy,null,{timeout:120000});
  await p.evaluate(()=>new Promise(resolve=>requestIdleCallback(resolve,{timeout:500})));capture=true;
  const header=p.locator('#regionTable thead');
+ const separated=async label=>{
+  const gaps=await header.locator('th[data-drag-column]').evaluateAll(nodes=>nodes.flatMap(th=>{
+   const grip=th.querySelector('.region-column-grip').getBoundingClientRect(),bounds=th.getBoundingClientRect(),buttons=[...th.querySelectorAll('.region-column-sort')];
+   const labels=buttons.length?buttons.map(b=>b.getBoundingClientRect()):[...th.childNodes].filter(n=>n.nodeType===Node.TEXT_NODE&&n.textContent.trim()).map(n=>{const r=document.createRange();r.selectNodeContents(n);return r.getBoundingClientRect();});
+   return labels.map(r=>({column:th.dataset.dragColumn,gap:r.left-grip.right,right:r.right-bounds.right}));
+  }));
+  assert(gaps.length>10);assert(gaps.every(r=>r.gap>=4&&r.right<=.5),label+': '+JSON.stringify(gaps));
+ };
+ await separated('Regular paired columns');await p.locator('#regionCompact').check();await separated('Compact paired columns');await p.locator('#regionCompact').uncheck();
  const labels=await header.locator('[data-column-group] .region-column-sort>span:first-child').allTextContents();assert.deepEqual(labels,english?['Land','Water','Land & water','Grizzly buff','Sea Scorpion buff','Hover Transport buff']:['陆地','海洋','海陆','灰熊buff','海蝎buff','气垫船buff']);
  assert.deepEqual(await header.locator('[data-column="name"] .region-column-sort>span:first-child').allTextContents(),english?['No.','Name','Area']:['编号','名称','面积']);
  const aligned=()=>header.locator('[data-column="name"] .region-column-sort>span:first-child').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().left));let headingLeft=await aligned();assert(headingLeft.every(x=>Math.abs(x-headingLeft[0])<.5));
@@ -40,6 +49,7 @@ const toy=process.env.SIM_EDITION==='toy',english=process.env.UI_LANG==='en',bas
  let values=await rowValues();assert(values.every((v,i)=>!i||v<=values[i-1]));const descending=await p.locator('#regionRows>tr').first().getAttribute('data-region-id');
  await sort('sea.total',true);values=await rowValues();assert(values.every((v,i)=>!i||v>=values[i-1]));
  await p.locator('#regionTotalsVisible').uncheck();assert.equal(await p.locator('#regionTable tbody [data-column$=".total"]:visible').count(),0);
+ await separated('Regular single average columns');await p.locator('#regionCompact').check();await separated('Compact single average columns');await p.locator('#regionCompact').uncheck();
  const single=await header.evaluate(head=>Array.from(head.querySelectorAll('[data-column-group]')).map(group=>({group:group.getBoundingClientRect().width,leaf:head.querySelector('[data-column="'+group.dataset.columnGroup+'.average"]').getBoundingClientRect().width})));assert(single.every(w=>Math.abs(w.group-w.leaf)<1));
  await p.locator('.region-column-picker>summary').click();
  const choice=k=>p.locator('[data-column-choice="'+k+'"]');await choice('sea.total').check();
@@ -55,6 +65,7 @@ const toy=process.env.SIM_EDITION==='toy',english=process.env.UI_LANG==='en',bas
  await choice('preview').uncheck();assert.equal(await p.locator('.region-preview:visible').count(),0);await choice('preview').check();
  await p.locator('.region-column-picker>summary').click();
  await p.locator('#regionCompact').check();assert(await p.locator('#regionTable').evaluate(e=>e.classList.contains('region-table-compact')));
+ await separated('Compact restored columns');
  headingLeft=await aligned();assert(headingLeft.every(x=>Math.abs(x-headingLeft[0])<.5),'Header text stays aligned in compact mode');
  const before=await header.locator('[data-column]').evaluateAll(nodes=>nodes.map(e=>e.dataset.column));
  // Native HTML drag swaps the two fixed columns, then moves an entire metric group.
@@ -65,6 +76,7 @@ const toy=process.env.SIM_EDITION==='toy',english=process.env.UI_LANG==='en',bas
  // Individual metric columns can move independently; cell/header alignment follows.
  await header.locator('[data-drag-column="sea.average"]').dragTo(header.locator('[data-drag-column="land.average"]'));
  const order=await p.evaluate(()=>JSON.parse(localStorage.getItem('crate-atlas.region-table.v1')).order);
+ await separated('Reordered column groups and leaves');
  assert.deepEqual(await p.locator('#regionRows>tr').first().locator('td').evaluateAll(nodes=>nodes.map(e=>e.dataset.column)),order);
  assert.notDeepEqual(order,before);const retained=await p.evaluate(()=>({retained:tableCanvases.filter(c=>c.isConnected).length,total:tableCanvases.length,sameData:CrateMapViewer.state.data===tableData,pending:CrateMapViewer.state.regionPending}));assert(retained.retained===retained.total&&retained.sameData,JSON.stringify(retained));
  await p.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

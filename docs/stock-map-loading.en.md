@@ -4,6 +4,24 @@
 
 These rules resolved the last ten previously unsupported official map files. They apply to bundled RA2 1.006 / YR 1.001 resources and initial file state, without advancing triggers, missions or ore growth. Source map bytes remain unchanged.
 
+## Version selection for custom imports
+
+`map-import-version.js` keeps the user's resource policy separate from the last map's displayed version. Opening an official RA2 map does not permanently force later imports to RA2. Automatic imports use a YR hint for `.yrm`, an RA2 hint for `.mpr`, and default to YR for ambiguous `.map` filenames. A configured game directory retains priority in desktop automatic mode, and explicit user resource choices remain authoritative. Full and Toy share the upload flow instead of injecting a separate Toy upload implementation during builds.
+
+Reading YR CAMACH with RA2 resources reports missing stock building art and falls back to approximate analysis. This neither means YR artwork is missing nor that the map has no risk cells. Approximate reports now retain blocking predictions for readable cells. The YRM regression map produces 38 current risk cells and zero additional cleared-object risks with YR resources. `verify-map-import-version.cjs` and `verify-resource-ui.cjs` cover preference boundaries; `verify-map-import-version-ui.cjs` opens an official RA2 map, uploads a YRM, and checks exact analysis and risk lists in both editions. Input maps remain read-only.
+
+## Error isolation and recovery
+
+Warnings and approximation no longer lock whole-map features. Full (including local game directories) and Toy continue probabilities, Buff expectation, simulation, regions, exports and 3D wherever data is readable. Unknown local results remain diagnosed rather than becoming zero.
+
+- Missing unit artwork retains known single-cell occupancy. Unknown buildings use readable foundations or the origin fallback; their complete footprint is not guessed.
+- Approximate reports use `metadata.riskPredictionVersion=1` for local blocking predictions. `riskKnown=false` identifies an unknown post-crate surface; `riskUnknownCellCount` counts these cells. `overlayUnknown` distinguishes a damaged layer from an empty overlay. Invalid movement/crate rules suppress only dependent predictions.
+- Current/cleared-object risks, details, CSV and 3D post-crate previews retain predictable cells. Height relationships are independent of crate prediction. Unknown cells cannot demonstrate a definite post-crate change. Clearance records its own `unknownCellCount`.
+- Legacy previews and reports without local predictions attempt one analysis recovery, retaining the readable old result if recovery fails. Ground, object-image and Toy-atlas failures retain successful layers and can fall back to simple cell artwork, including 3D materials. Artwork failure does not alter probabilities or occupancy.
+- Unreadable core map/coordinate data still produces an error. Recovery does not promise arbitrary corrupt files can be analyzed, nor claim unmodeled Mod behavior is exact.
+
+`verify-error-isolation.py` / `.cjs` compare native and Toy fractions, cells, ordered sources and risks across seven error cases; `--game-root` also covers directory resources. `verify-error-isolation-ui.cjs` operates risk display/CSV, 3D, placement/undo, regions and Buff in both editions, with legacy-preview/image/atlas fault injection. Complete stock inputs retain their original numerical results.
+
 ## Ore on ordinary ramps
 
 Five affected RA2 files were the freeway map, the Large Ore Field Land Rush variant, Heartland Battle / Megawealth and the critical-point map. The native Overlay::Mark functions (YR `5FC570`, RA2 `5DA970`) allow slopes 0–4. Ore adjacency recalculation (YR `4818E0`, RA2 `476BA0`) changes density frames without deleting ore on those ramps.
@@ -45,3 +63,11 @@ Strict INI parsing still rejects conflicting keys in general. Sight is the speci
 - `verify-official-maps.py`: hashes for 248 original files, catalog merging and selection validation.
 
 Native tests execute instructions from fixed-hash game binaries in isolated Unicorn memory, without starting the game or modifying game files. Scripts identify fixture replacements for INI lookup, allocation, general object services and redraw. These checks are not a complete match or a dynamic route-accessibility test. Binary fingerprints are listed in [bridge research](bridge-crates.en.md).
+
+## Official cache rebuild and validation (2026-11-09)
+
+All 278 unique standard/team-game layouts were rebuilt with the current engine: 131 menu entries and 294 version/layout reports. Their numerical payloads remain identical to the previous build. The model fingerprint is `4f9f6f45d809f0bd4f74de209c5ab2a31067f5099124f5091c72fc814b21b851`. Rebuild with `build-official-precomputed.py --output NEW_DIRECTORY --jobs 4`; do not relabel an old manifest. `verify-official-precomputed.py --data NEW_DIRECTORY --render --all-layouts` checks cached/live values, ordered sources, rendered pixels, CSV exports and invalidation.
+
+Toy probability refresh supports `jobs=4` with serial behavior as the default. Inputs are checked before writes; shared tables are replaced atomically and every report retains its lossless round-trip check. Baked layout/artwork provenance is preserved, probability provenance is separate, and all 294 auxiliary navigation masks were refreshed to version 4. `verify-official-precomputed.py --toy TOY_DIRECTORY` compares every Toy report with the rebuilt native cache.
+
+For directory-only validation, use `verify-toy.py TOY_DIRECTORY --directory-only --mode standard --mode teamgame`. `build-toy.finalize(..., make_archive=False)` updates the directory manifest without touching an archive. Browser checks cover five climates, both game rulesets, exact cache signatures, Buff precompute/display, enabled editors, placement and undo. Toy must make no analysis API requests. The nine native package-preflight checks now pass; no package, commit or push was made in this round.

@@ -1,13 +1,14 @@
 """Exact resume checkpoints: aligned, artwork ahead, probability ahead, partial undo."""
 from copy import deepcopy
 from pathlib import Path
+import os
 import base64
 from io import BytesIO
 import runtime_bootstrap
 from PIL import Image
 from simulation_live import LiveSession, prepared_session, close_all
 
-path=Path('output/CrateAtlas-Windows-x64-Simulation-20261104/output/map-22309489b5d3/result.json.gz')
+path=Path(os.environ.get('LIVE_RESULT','output/CrateAtlas-Windows-x64-Simulation-20261104/output/map-22309489b5d3/result.json.gz'))
 a=LiveSession(path)
 try:
     points=[p for p,c in a.original_cells.items() if c['usable'] and c['level']==0 and c['overlay']==255 and not c['bridge'] and not c['objects'] and c['status']=='crate' and c['candidate']]
@@ -52,7 +53,7 @@ try:
 finally:a.close()
 
 fixture=Path('output/live-recovery-qa/rebased-path.txt')
-if fixture.is_file() and fixture.read_text('utf8').strip():
+if not os.environ.get('LIVE_RESULT') and fixture.is_file() and fixture.read_text('utf8').strip():
     b=prepared_session(Path(fixture.read_text('utf8').strip()),0)[0]
     c=prepared_session(path,0)[0]
     try:

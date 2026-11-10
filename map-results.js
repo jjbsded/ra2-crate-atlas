@@ -5,7 +5,7 @@
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
  function createReader({fetch=(...args)=>root.fetch(...args),Image=root.Image,readJSON=null,readBinary=null,upgrade=null,
-  createSources=(...args)=>root.CrateTransferOrigins.create(...args)}={}){
+  createSources=(...args)=>root.CrateTransferOrigins.create(...args),fallbackArtwork=data=>root.CrateMapArtwork?.fallback?.(data)}={}){
   return async function read(url,{signal,upgraded=false,onMetadata=null}={}){
    let data;
    if(readJSON)data=await readJSON(url,{signal});
@@ -15,6 +15,12 @@
    if(data.probability&&data.probability.model!=='finite-retry-v2'&&upgrade){
     if(upgraded)throw Error(_t('分析结果需要重新计算'));
     const current=await upgrade(url,{signal});signal?.throwIfAborted();return read(current,{signal,upgraded:true,onMetadata});
+   }
+   // Legacy previews / approximate reports may predate local risk recovery.
+   // Retry their readable source once. Failure retains the existing view.
+   if(upgrade&&!upgraded&&(data.metadata?.previewOnly||data.metadata?.approximate&&!data.metadata.riskPredictionVersion)){
+    try{const current=await upgrade(url,{signal});signal?.throwIfAborted();return await read(current,{signal,upgraded:true,onMetadata});}
+    catch(error){if(signal?.aborted||error.name==='AbortError')throw error;data={...data,metadata:{...data.metadata,recoveryError:error.message,loadIssues:[...(data.metadata.loadIssues||[]),{message:_t('恢复分析失败，保留已读取的内容：')+error.message,count:1,cells:[]}]}};}
    }
    const base=url.slice(0,url.lastIndexOf('/')+1);
    _i18n?.diagnostics(data);
@@ -28,16 +34,19 @@
     await image.decode();return image;
    }
    let im,objectImage;
+   const artworkIssue=(error,layer)=>{if(signal?.aborted||error.name==='AbortError')throw error;data={...data,metadata:{...data.metadata,loadIssues:[...(data.metadata.loadIssues||[]),{message:_t('贴图加载失败，保留可读地图和计算结果：')+layer+' · '+error.message,count:1,cells:[]}]}};};
    if(data.rendering.original){
-    if(!root.CrateToyOriginal||!readJSON)throw Error('Original Toy artwork loader is unavailable');
-    ({im,objectImage}=await root.CrateToyOriginal.create(data,base,readJSON,{signal}));
+    try{if(!root.CrateToyOriginal||!readJSON)throw Error('Original Toy artwork loader is unavailable');({im,objectImage}=await root.CrateToyOriginal.create(data,base,readJSON,{signal}));}catch(error){artworkIssue(error,'atlas');im=fallbackArtwork(data);if(!im)throw error;}
    }else if(data.rendering.simplified){
-    if(data.rendering.simplified.version!==1||!root.CrateToyTerrain)throw Error('Unsupported Toy artwork format');
-    ({im,objectImage}=root.CrateToyTerrain.create(data));
+    try{if(data.rendering.simplified.version!==1||!root.CrateToyTerrain)throw Error('Unsupported Toy artwork format');({im,objectImage}=root.CrateToyTerrain.create(data));}catch(error){artworkIssue(error,'terrain');im=fallbackArtwork(data);if(!im)throw error;}
    }else{
-    const [ground,other]=await Promise.all([picture(data.rendering.image),data.rendering.objectImage===data.rendering.image?null:picture(data.rendering.objectImage)]);
-    im=ground;objectImage=data.rendering.objectImage===data.rendering.image?im:other;
+    const layers=await Promise.allSettled([picture(data.rendering.image),data.rendering.objectImage===data.rendering.image?null:picture(data.rendering.objectImage)]);
+    for(let i=0;i<layers.length;i++)if(layers[i].status==='rejected')artworkIssue(layers[i].reason,i?'objects':'ground');
+    im=layers[0].status==='fulfilled'?layers[0].value:null;objectImage=data.rendering.objectImage===data.rendering.image?im:layers[1].status==='fulfilled'?layers[1].value:null;
+    if(!im)im=fallbackArtwork(data);if(!im)throw layers[0].reason||Error(_t('地图贴图无法读取'));
    }
+   signal?.throwIfAborted();
+   if(root.CrateProbabilityDisplay?.mapAsync)await root.CrateProbabilityDisplay.mapAsync(data,{valid:()=>!signal?.aborted});
    signal?.throwIfAborted();
    let sourceIndex=null;
    function getSources(){

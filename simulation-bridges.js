@@ -11,14 +11,14 @@
    const cells=[-1,0,1].map(n=>key(x+n*width[0],y+n*width[1])).filter(q=>same(lookup.get(q)));out.push({id,kind:'low',x,y,...info,owners:cells,cells});
   }return out;
  }
- function edit(segments,lookup,targets,write,restore=false){const byId=new Map(segments.map(s=>[s.id,s])),at=new Map(),fallen=new Set();for(const s of segments)for(const p of s.cells)at.set(p,s);
-  const chosen=new Set([...targets].map(p=>at.get(p)).filter(Boolean));const get=s=>lookup.get(s.id),neighbor=(s,d)=>byId.get(key(s.x+(s.axis==='x'?d:0),s.y+(s.axis==='y'?d:0)));
+ function edit(segments,lookup,targets,write,restore=false,canDamage=()=>true){const byId=new Map(segments.map(s=>[s.id,s])),at=new Map(),fallen=new Set();for(const s of segments)for(const p of s.cells)at.set(p,s);
+  const chosen=new Set([...targets].map(p=>at.get(p)).filter(s=>s&&(restore||canDamage(s))));const get=s=>lookup.get(s.id),neighbor=(s,d)=>byId.get(key(s.x+(s.axis==='x'?d:0),s.y+(s.axis==='y'?d:0)));
   function set(p,index,frame){const c=lookup.get(p);if(!c)return;write(p,[index,frame]);c.overlay=index;c.overlayData=frame;}
   function setStrip(s,index){for(const p of s.cells){const c=lookup.get(p);set(p,index,c.overlayData);}if(index===s.base+26||index===s.base+27)for(const p of s.cells)fallen.add(p);}
-  function highEdge(s,d){const n=neighbor(s,d);if(!n||n.kind!=='high'||n.axis!==s.axis||!high.has(get(n)?.overlay))return;const c=get(n),vertical=s.axis==='y',edge=vertical?(d>0?17:16):(d>0?7:8),opposite=vertical?(d>0?16:17):(d>0?8:7);
+  function highEdge(s,d){const n=neighbor(s,d);if(!n||n.kind!=='high'||n.axis!==s.axis||!canDamage(n)||!high.has(get(n)?.overlay))return;const c=get(n),vertical=s.axis==='y',edge=vertical?(d>0?17:16):(d>0?7:8),opposite=vertical?(d>0?16:17):(d>0?8:7);
    if(c.overlayData===opposite){set(n.id,255,0);for(const p of n.cells)fallen.add(p);highEdge(n,d);}else if(c.overlayData<=(vertical?15:6))set(n.id,c.overlay,edge);
   }
-  function lowEdge(s){const c=get(s);if(!c||low(c.overlay)?.base!==s.base)return;const n=c.overlay-s.base,rot=s.axis==='y',a=get(neighbor(s,rot?-1:1)||{}),b=get(neighbor(s,rot?1:-1)||{}),offset=rot?9:0;
+  function lowEdge(s){const c=get(s);if(!c||!canDamage(s)||low(c.overlay)?.base!==s.base)return;const n=c.overlay-s.base,rot=s.axis==='y',a=get(neighbor(s,rot?-1:1)||{}),b=get(neighbor(s,rot?1:-1)||{}),offset=rot?9:0;
    const av=a?a.overlay-s.base:-1,bv=b?b.overlay-s.base:-1;
    const mask=([4+offset,6+offset,8+offset,rot?23:19].includes(av)?1:[7+offset,rot?27:26].includes(av)?2:0)|([5+offset,6+offset,7+offset,rot?25:21].includes(bv)?4:[8+offset,rot?27:26].includes(bv)?8:0);
    if(!mask)return;let value;if(n<18){const table={1:5,2:8,4:4,5:6,6:8,8:7,9:7,10:rot?18:26};value=table[mask];if(value===undefined)return;value+=offset;}else if([18,20,22,24].includes(n))value=n+1;else return;

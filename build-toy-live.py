@@ -79,6 +79,8 @@ def simulation_sources(source, directory):
 
 def frontend(source, out):
     builder=importlib.import_module('build-toy')
+    for name in ('original-terrain3d.js', 'terrain3d-patch.js'):
+        shutil.copy2(ROOT/'toy'/name, out/name)
     directory = out/'live'
     for path in (ROOT/'toy-live').iterdir():
         if path.is_file():shutil.copy2(path,directory/path.name)
@@ -87,13 +89,10 @@ def frontend(source, out):
     html=builder.page(ROOT/'maps.html')
     html=html.replace('树木与可摧毁建筑按清除后通过；岩石、矿石钻井、单位及其他阻挡物保留。',
                       '忽略载具、步兵和飞行器的占用；树木与可摧毁建筑按清除后通过，岩石、矿石钻井及其他阻挡物保留。')
-    html=html.replace('<script src="realmap-ui.js', '<script src="live/mixed-painter.js"></script><script src="live/components.js"></script><script src="live/objects.js"></script><script src="live/artwork.js"></script><script src="live/platform.js"></script><script src="realmap-ui.js',1)
+    html=html.replace('<script src="realmap-ui.js', '<script src="live/mixed-painter.js"></script><script src="live/raster.js"></script><script src="live/components.js"></script><script src="live/objects.js"></script><script src="live/artwork.js"></script><script src="live/report-transfer.js"></script><script src="live/platform.js"></script><script src="realmap-ui.js',1)
     html=html.replace('</body>','<script src="live/page.js"></script></body>')
     (out/'maps.html').write_text(html,'utf8')
     ui=(ROOT/'realmap-ui.js').read_text('utf8')
-    old="if(!official)throw Error(_t('此地图版本不在当前预计算列表中。'));"
-    assert old in ui
-    ui=ui.replace(old,"if(file&&platform.upload){await loadResult(await platform.upload(file,$('version').value,true,status=>{message(status.progress>=80?_t('正在绘制地图…'):_t('正在分析地图…'));$('progress').value=status.progress;}),true);return;}"+old)
     ui=ui.replace("platform?_t('预计算地图已加载')", "platform?(data.metadata.liveComputed?_t('本地计算完成 / Local analysis complete'):_t('预计算地图已加载'))")
     (out/'realmap-ui.js').write_text(ui,'utf8')
     reader=(ROOT/'map-results.js').read_text('utf8').replace('if(data.rendering.original){', 'if(data.metadata.liveComputed){({im,objectImage}=await root.CrateLiveArtwork.create(data,{signal}));}else if(data.rendering.original){',1)
@@ -115,6 +114,8 @@ def frontend(source, out):
     worker=worker.replace("'stock-'+version+'.json.gz'","'stock-'+version+'.json.gz?v='+"+stock_versions+"[version]")
     worker=re.sub(r"'([^']+\.js)'",lambda m:"'"+m[1]+'?v='+version(directory/m[1])+"'",worker)
     (directory/'worker.js').write_text(worker,'utf8')
+    raster=(directory/'raster-worker.js').read_text('utf8').replace("'mixed-painter.js'", "'mixed-painter.js?v="+version(directory/'mixed-painter.js')+"'")
+    (directory/'raster-worker.js').write_text(raster,'utf8')
     boot=(source/'toy-boot.js').read_text('utf8')
     revision_hash=hashlib.sha256()
     for path in sorted(directory.rglob('*'))+sorted((out/'data').rglob('result.json.gz'))+sorted((out/'simulation-assets').glob('*')):
@@ -158,7 +159,7 @@ def refresh_ui(args):
         from toy_probability_refresh import share_cells
         share_cells(out, manifest)
     for name in builder.FRONTEND:shutil.copy2(ROOT/name,out/name)
-    for name in ('simulation-mode.md','incremental-probability.md','probability-model.md','random-crate-generation.md','random-crate-generation.en.md'):
+    for name in ('simulation-mode.md','incremental-probability.md','probability-model.md','random-crate-generation.md','random-crate-generation.en.md','buff-expectation-performance.md'):
         shutil.copy2(ROOT/'docs'/name,out/'docs'/name)
     if getattr(args, 'refresh_runtime', False):
         # Update browser-local analysis and the separate missing-sprite

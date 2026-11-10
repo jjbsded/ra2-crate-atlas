@@ -16,7 +16,7 @@
   const {lookup,affected}=index(data),meta=data.metadata;
   if(!lookup.has(key(selected)))throw Error('Selected cell is outside the map');
   radius=Math.max(1,Math.min(15,Math.floor(Number(radius)||10)));
-  const enabled=!meta.previewOnly&&!meta.approximate&&meta.cliffBackImpassability===2;
+  const enabled=!meta.previewOnly&&(!meta.approximate||!!meta.riskPredictionVersion);
   const palette=art.palettes[meta.theater]||art.palettes.TEMPERATE,textures={};
   // Shared tiny canvases, not full-map images. Texture ownership stays with the
   // bounded view so closing/recentering releases all GPU resources.
@@ -36,8 +36,8 @@
   for(let y=selected.y-radius;y<=selected.y+radius;y++)for(let x=selected.x-radius;x<=selected.x+radius;x++){
    const c=lookup.get(`${x},${y}`);if(!c)continue;
    const d={...c,corners:[...(art.ramps[c.slope]||art.ramps[0])],texture:ground(c),wallTexture:wall,
-    higher:enabled?(c.higher||[]).map(p=>[...p]):[],affected:enabled?(affected.get(key(c))||[]).map(p=>[...p]):[],
-    canPlace:!!(enabled&&c.status==='crate'&&c.probability>0&&c.overlay===255&&!c.occupied),decorations:[]};
+    higher:(c.higher||[]).map(p=>[...p]),affected:(affected.get(key(c))||[]).map(p=>[...p]),
+    canPlace:!!(enabled&&c.riskKnown!==false&&Number.isInteger(c.postLand)&&c.status==='crate'&&c.probability>0&&c.overlay===255&&!c.occupied),decorations:[]};
    if(c.terrain)d.decorations.push(billboard(/^TREE\d+$/.test(c.terrain)?'tree':/^TIBTRE/.test(c.terrain)?'drill':/ROCK/.test(c.terrain)?'rock':'scenery'));
    if(/^[ST]ROCK/.test(c.overlayName||''))d.decorations.push(billboard('rock'));
    if(/^(TIB|GEM)\d+/.test(c.overlayName||'')){
@@ -64,7 +64,7 @@
   }
   signal?.throwIfAborted();
   return {version:1,simplified:true,center:[selected.x,selected.y],radius,cells,textures,
-   metadata:{...meta,predictionEnabled:enabled,missing:[],uniqueTiles:Object.keys(textures).length}};
+   metadata:{...meta,predictionEnabled:enabled,relationsEnabled:true,missing:[],uniqueTiles:Object.keys(textures).length}};
  }
  const api={patch};root.CrateToyTerrain3D=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

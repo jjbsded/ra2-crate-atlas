@@ -34,8 +34,8 @@
   return {get:meta=>result.get(identity(meta)),pages:pages.size};
  }
  async function preview(source,choice,level,color=''){
-  const lib=await library(),cfg=source.rules[choice.type]||{},art=source.art[(cfg.IMAGE||choice.type).toUpperCase()]||{},yes=v=>/^(yes|true|1)$/i.test(String(v)),category=choice.category;
-  const signature=[category,lib.visualFields.map(k=>String(cfg[k]??(k==='IMAGE'?choice.type:'')).toUpperCase()),color?'stripe-3-region-'+color:'stripe-3-yellow-black-fixed',2,category==='INFANTRY'?2:category==='STRUCTURES'&&!yes(cfg.TURRET)?0:64,'',[]];
+  const lib=await library(),cfg=source.rules[choice.type]||{},art=source.art[(cfg.IMAGE||choice.type).toUpperCase()]||{},yes=v=>/^(yes|true|1)$/i.test(String(v)),category=choice.rubble?'STRUCTURES':choice.category;
+  const signature=[category,lib.visualFields.map(k=>String(cfg[k]??(k==='IMAGE'?choice.type:'')).toUpperCase()),choice.rubble?'':color?'stripe-3-region-'+color:'stripe-3-yellow-black-fixed',choice.rubble?0:2,category==='INFANTRY'?2:category==='STRUCTURES'&&!yes(cfg.TURRET)?0:64,'',[]];
   if(category==='UNITS'&&yes(art.VOXEL)||category==='STRUCTURES'&&yes(cfg.TURRET)&&cfg.TURRETANIM&&yes(cfg.TURRETANIMISVOXEL)){
    const light=source.map.LIGHTING||{},finite=(o,k,d)=>{const s=String(o[k]??d).split(';')[0].trim(),n=s?Number(s):NaN;return Number.isFinite(n)?n:d;},intensity=finite(light,'AMBIENT',1)-finite(light,'GROUND',0)+finite(light,'LEVEL',0)*level+(category==='UNITS'?finite(source.rules.AUDIOVISUAL||{},'EXTRAUNITLIGHT',0):0),shade=Math.min(254,(261*Math.trunc(Math.max(0,Math.min(2,intensity))*1000))>>11);
    signature.push(Math.min(62,Math.trunc(127*shade*62/32258)));

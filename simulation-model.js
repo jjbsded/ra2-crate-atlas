@@ -5,6 +5,7 @@
  const key=(x,y)=>`${x},${y}`,clone=v=>structuredClone(v),own=(o,k)=>Object.hasOwn(o,k);
  const bridgesAPI=root.CrateSimulationBridges||(typeof require==='function'?require('./simulation-bridges.js'):null);
  const sections=['STRUCTURES','UNITS','INFANTRY','AIRCRAFT'];
+ const isUnit=o=>['UNITS','INFANTRY','AIRCRAFT'].includes(o.category),isRubble=o=>o.isRubble||o.initialRubble||o.category==='RUBBLE';
  const infantrySlots=[3,4,2],infantryOffsets=[[-15,0],[0,7],[15,0]];
  function infantrySlotsUsed(occupants,onBridge){
   const used=new Set();
@@ -21,22 +22,24 @@
  function foundation(art){const m=/^(\d+)x(\d+)$/i.exec(art?.FOUNDATION||'1x1');if(!m||+m[1]>10||+m[2]>10)return null;return Array.from({length:+m[1]},(_,x)=>Array.from({length:+m[2]},(_,y)=>[x,y])).flat();}
  const foundationKey=(footprint,water)=>JSON.stringify([footprint,water]);
  function tree(kind,cfg){return !['SPAWNSTIBERIUM','ISVEINHOLE','WATERBOUND'].some(k=>yes(cfg[k]))&&!/^(TIBTRE|VEINTREE)/i.test(kind)&&(/^TREE\d+$/i.test(cfg.IMAGE||kind)||/\b(tree|trees|palm|palms)\b|树|樹/i.test(cfg.NAME||''));}
+ function wallType(kind,cfg){return yes(cfg.WALL)||yes(cfg.LEGALTARGET)&&(/^FENCE\d+$/i.test(kind||'')||/^FENCE\d+$/i.test(cfg.IMAGE||''));}
  function empty(source){return {schema:1,map:{sha256:source.sourceSha256,version:source.version},objects:{},overlays:{},placements:[]};}
  function objects(source){const result=[];for(const category of sections)for(const[id,line]of Object.entries(source.map[category]||{})){
   const f=line.split(',').map(v=>v.trim()),type=f[1]?.toUpperCase(),cfg=source.rules[type]||{},art=source.art[(cfg.IMAGE||type)?.toUpperCase()]||{},x=Number(f[3]),y=Number(f[4]);
   if(!Number.isInteger(x)||!Number.isInteger(y))continue;const footprint=category==='STRUCTURES'?foundation(art):[[0,0]];
-  result.push({id:category+'/'+id,category,type,x,y,fields:f,footprint:footprint||[[0,0]],unknownFoundation:!footprint,immune:yes(cfg.IMMUNE)||num(cfg.STRENGTH,1)<=0,rubble:yes(cfg.LEAVERUBBLE),onBridge:yes(f[category==='INFANTRY'?12:11])});
+  result.push({id:category+'/'+id,category,type,x,y,fields:f,footprint:footprint||[[0,0]],unknownFoundation:!footprint,immune:yes(cfg.IMMUNE)||num(cfg.STRENGTH,1)<=0,rubble:yes(cfg.LEAVERUBBLE),initialRubble:category==='STRUCTURES'&&num(f[2],256)<=0,onBridge:yes(f[category==='INFANTRY'?12:11])});
  }for(const[position,typeValue]of Object.entries(source.map.TERRAIN||{})){const n=Number(position),type=typeValue.toUpperCase(),cfg=source.rules[type]||{};if(!Number.isInteger(n))continue;result.push({id:'TERRAIN/'+position,category:'TERRAIN',type,x:n%1000,y:Math.floor(n/1000),footprint:[[0,0]],immune:yes(cfg.IMMUNE)||num(cfg.STRENGTH,1)<=0,tree:tree(type,cfg),mine:yes(cfg.SPAWNSTIBERIUM)});}return result;}
  function catalog(source){const list=[['MTNK','灰熊坦克'],['HYD','海蝎'],['YHVR','尤里气垫船']].map(([type,label])=>({type,category:'UNITS',label,footprint:[[0,0]]})).filter(o=>source.rules[o.type]);const seen=new Map();
   for(const type of Object.values(source.rules.BUILDINGTYPES||{})){const name=type.toUpperCase(),cfg=source.rules[name]||{},art=source.art[(cfg.IMAGE||name).toUpperCase()]||{},fp=foundation(art),yard=name==='NACNST';
    // Construction yards deploy from MCVs: stock TechLevel=-1 / no BuildCat.
    // Include the requested Soviet yard, retaining terrain and footprint checks.
-   if(!fp||!cfg.OWNER||yes(cfg.WALL)||cfg.POWERSUPBUILDING||!yard&&(num(cfg.TECHLEVEL,-1)<0||!cfg.BUILDCAT))continue;
+   if(name==='CAOILD'||!fp||!cfg.OWNER||yes(cfg.WALL)||cfg.POWERSUPBUILDING||!yard&&(num(cfg.TECHLEVEL,-1)<0||!cfg.BUILDCAT))continue;
    const water=yes(cfg.WATERBOUND),signature=foundationKey(fp,water);if(seen.has(signature)&&!yard)continue;
    const w=Math.max(...fp.map(p=>p[0]))+1,h=Math.max(...fp.map(p=>p[1]))+1,prefix=w===4&&h===4?`4x4[${water?'Water':'Land'}]`:`${w}×${h}`;
    const choice={type:name,category:'STRUCTURES',footprint:fp,label:`${prefix} · ${yard?'苏军基地':cfg.NAME||name}`,water};
    if(seen.has(signature))list[seen.get(signature)]=choice;else{seen.set(signature,list.length);list.push(choice);}
-  }const overlays=Object.values(source.rules.OVERLAYTYPES||{}).map(v=>v.toUpperCase());if(overlays.includes('GAWALL'))list.push({type:'GAWALL',category:'OVERLAY',label:'盟军围墙',footprint:[[0,0]],wall:true});const treeType=[source.simulationAssets?.tree,...source.simulationAssets?.legacyTrees||[],'TREE01'].find(n=>source.rules[n]);if(source.rules[treeType])list.push({type:treeType,category:'TERRAIN',label:'树木',footprint:[[0,0]],tree:true});const ore=overlays.find(n=>/^(TIB|GOLD)\d+$/.test(n)&&yes(source.rules[n]?.TIBERIUM));if(ore)list.push({type:ore,category:'OVERLAY',label:'矿石',footprint:[[0,0]],ore:true});return list;
+  }const overlays=Object.values(source.rules.OVERLAYTYPES||{}).map(v=>v.toUpperCase());if(overlays.includes('GAWALL'))list.push({type:'GAWALL',category:'OVERLAY',label:'盟军围墙',footprint:[[0,0]],wall:true});const treeType=[source.simulationAssets?.tree,...source.simulationAssets?.legacyTrees||[],'TREE01'].find(n=>source.rules[n]);if(source.rules[treeType])list.push({type:treeType,category:'TERRAIN',label:'树木',footprint:[[0,0]],tree:true});const ore=overlays.find(n=>/^(TIB|GOLD)\d+$/.test(n)&&yes(source.rules[n]?.TIBERIUM));if(ore)list.push({type:ore,category:'OVERLAY',label:'矿石',footprint:[[0,0]],ore:true});
+  const oil=source.rules.CAOILD,fp=oil&&foundation(source.art[(oil.IMAGE||'CAOILD').toUpperCase()]);if(fp&&yes(oil.LEAVERUBBLE)&&overlays.includes('RUBBLE_OVERLAY'))list.push({type:'CAOILD',category:'RUBBLE',label:'油井废墟',footprint:fp,rubble:true});return list;
  }
  function create(source){
   const baseline=new Map(source.cells.map(c=>[key(c.x,c.y),c])),original=objects(source),byId=new Map(original.map(o=>[o.id,o])),choices=catalog(source),choiceMap=new Map(choices.map(o=>[o.type,o]));
@@ -45,10 +48,28 @@
   const overlayTypes=Object.entries(source.rules.OVERLAYTYPES||{}).sort((a,b)=>Number(a[0])-Number(b[0])).map(p=>p[1].toUpperCase());
   const cfgFor=c=>source.rules[overlayTypes[c?.overlay]]||{},points=o=>o.footprint.map(([x,y])=>key(o.x+x,o.y+y));
   const buildings=new Map(choices.filter(c=>c.category==='STRUCTURES').map(c=>[foundationKey(c.footprint,c.water),c.type]));
-  const ore=choices.find(c=>c.ore)?.type,wall=choices.find(c=>c.wall)?.type,shrub=choices.find(c=>c.tree)?.type;
+  const originalAt=new Map(),originalOrder=new Map();original.forEach((o,i)=>{originalOrder.set(o.id,i);for(const p of points(o)){if(!originalAt.has(p))originalAt.set(p,[]);originalAt.get(p).push(o);}});
+  const objectLookups=new WeakMap(),countCache=new WeakMap();
+  let spatialPlan=null,spatialCount=-1,spatialItems=new Set(),spatialCells=new Map(),spatialOrder=new Map();
+  function nearbyObjects(state,targets){
+   if(targets.size>=state.objects.length)return state.objects;
+   if(spatialPlan!==plan||spatialCount!==plan.placements.length){
+    const items=new Set(plan.placements);
+    for(const o of spatialItems)if(!items.has(o))for(const p of points({...o,footprint:choiceMap.get(o.type).footprint})){const list=spatialCells.get(p).filter(item=>item!==o);if(list.length)spatialCells.set(p,list);else spatialCells.delete(p);}
+    for(const o of items)if(!spatialItems.has(o))for(const p of points({...o,footprint:choiceMap.get(o.type).footprint})){if(!spatialCells.has(p))spatialCells.set(p,[]);spatialCells.get(p).push(o);}
+    spatialItems=items;spatialOrder=new Map(plan.placements.map((o,i)=>[o.id,original.length+i]));spatialPlan=plan;spatialCount=plan.placements.length;
+   }
+   let lookup=objectLookups.get(state);if(!lookup){lookup=new Map(state.objects.map(o=>[o.id,o]));objectLookups.set(state,lookup);}
+   const found=new Set();for(const p of targets)for(const o of [...(originalAt.get(p)||[]),...(spatialCells.get(p)||[])])if(lookup.has(o.id))found.add(o.id);
+   const order=id=>originalOrder.get(id)??spatialOrder.get(id);
+   return [...found].sort((a,b)=>order(a)-order(b)).map(id=>lookup.get(id));
+  }
+  const ore=choices.find(c=>c.ore)?.type,wall=choices.find(c=>c.wall)?.type,shrub=choices.find(c=>c.tree)?.type,rubble=choices.find(c=>c.rubble)?.type;
+  function coverRubble(cells,o){for(const p of points(o)){const c=cells.get(p);if(c){c.overlay=overlayTypes.indexOf('RUBBLE_OVERLAY');c.overlayData=0;c.overlayName='RUBBLE_OVERLAY';}}}
   const unitSamples=new Map();
   function sampleObject(o){
-   if(!o||o.isRubble)return null;
+   if(!o)return null;
+   if(o.isRubble||o.initialRubble||o.category==='RUBBLE')return rubble?{type:rubble,priority:0}:null;
    let type,priority;
    if(o.category==='UNITS'||o.category==='INFANTRY'||o.category==='AIRCRAFT'){
     const token=o.category+'/'+o.type;
@@ -79,22 +100,23 @@
    }
    const overlay=cfgFor(cell);
    if(yes(overlay.WALL)&&wall&&(!selected||selected.priority<3))selected={type:wall,priority:3};
-   if(yes(overlay.TIBERIUM)&&ore&&!selected)selected={type:ore,priority:1};
+   if(yes(overlay.TIBERIUM)&&ore&&(!selected||selected.priority<1))selected={type:ore,priority:1};
+   if(yes(overlay.ISRUBBLE)&&rubble&&!selected)selected={type:rubble,priority:0};
    return selected?.type??fallback;
   }
-  let plan=empty(source),undo=[],redo=[],cachedPlan=null,cachedState=null,transaction=null;const bridges=bridgesAPI.segments(source,baseline),bridgeAt=new Map();for(const b of bridges)for(const p of b.cells){if(!bridgeAt.has(p))bridgeAt.set(p,[]);bridgeAt.get(p).push(b);}
+  let plan=empty(source),undo=[],redo=[],cachedPlan=null,cachedState=null,transaction=null,protectedUnderlay=null;const bridges=bridgesAPI.segments(source,baseline),bridgeAt=new Map();for(const b of bridges)for(const p of b.cells){if(!bridgeAt.has(p))bridgeAt.set(p,[]);bridgeAt.get(p).push(b);}
   function normalized(value){
    if(!value||value.schema!==1||value.map?.sha256!==source.sourceSha256||value.map?.version!==source.version)throw Error('增量方案与当前地图或游戏版本不匹配');
    if(!value.objects||Array.isArray(value.objects)||!value.overlays||Array.isArray(value.overlays)||!Array.isArray(value.placements)||value.placements.length>20000)throw Error('增量方案格式无效');
-   const out=empty(source);for(const[id,mode]of Object.entries(value.objects)){const o=byId.get(id);if(!o||!['remove','rubble','delete'].includes(mode)||mode==='delete'&&!['UNITS','INFANTRY','AIRCRAFT'].includes(o.category)||o.immune&&mode!=='delete'||mode==='rubble'&&(!o.rubble||o.category!=='STRUCTURES'))throw Error('方案包含无效或不可摧毁的对象');out.objects[id]=mode;}
+   const out=empty(source);for(const[id,mode]of Object.entries(value.objects)){const o=byId.get(id);if(!o||!['remove','rubble','delete','magnet'].includes(mode)||mode==='delete'&&!['UNITS','INFANTRY','AIRCRAFT'].includes(o.category)||o.immune&&!['delete','magnet'].includes(mode)||mode==='rubble'&&(!o.rubble||o.category!=='STRUCTURES'))throw Error('方案包含无效或不可摧毁的对象');out.objects[id]=mode;}
    for(const[p,pair]of Object.entries(value.overlays)){if(!baseline.has(p)||!Array.isArray(pair)||pair.length!==2||!pair.every(Number.isInteger)||pair[0]<0||pair[0]>255||pair[1]<0||pair[1]>255||pair[0]!==255&&!source.rules[overlayTypes[pair[0]]])throw Error('方案包含无效覆盖物');out.overlays[p]=pair.slice();}
    const ids=new Set();for(const o of value.placements){const c=choiceMap.get(o.type);if(!c||c.category!==o.category||typeof o.id!=='string'||!/^sim-[a-z0-9-]{1,64}$/.test(o.id)||ids.has(o.id)||![o.x,o.y,o.facing,o.subcell].every(Number.isInteger)||o.facing<0||o.facing>255||o.subcell<0||o.subcell>2||typeof o.onBridge!=='boolean'||!points({...o,footprint:c.footprint}).every(p=>baseline.has(p)))throw Error('方案包含无效放置对象');ids.add(o.id);out.placements.push({id:o.id,type:o.type,category:o.category,x:o.x,y:o.y,facing:o.facing,subcell:o.subcell,onBridge:o.onBridge});}
-   const state=current({...out,placements:[]});for(const o of out.placements){const check=placement(o.type,o.x,o.y,{ignoreLand:true,existing:true,state});if(!check.allowed||!!check.onBridge!==o.onBridge)throw Error('方案中的放置位置被占用或地形不允许');const entry={...o,...choiceMap.get(o.type),placed:true};for(const p of points(entry)){const occupants=state.occupants.get(p)||[];if(o.category==='INFANTRY'&&infantrySlotsUsed(occupants,o.onBridge).has(o.subcell))throw Error('方案中的步兵位置重复');if(o.category==='OVERLAY'){const c=state.cells.get(p);c.overlay=overlayTypes.indexOf(o.type);c.overlayName=o.type;c.overlayData=entry.ore?11:0;c.simulationOverlay=o.id;}else{occupants.push(entry);state.occupants.set(p,occupants);}}}
+   const state=current({...out,placements:[]});for(const o of out.placements){const check=placement(o.type,o.x,o.y,{ignoreLand:true,existing:true,state});if(!check.allowed||!!check.onBridge!==o.onBridge)throw Error('方案中的放置位置被占用或地形不允许');const entry={...o,...choiceMap.get(o.type),placed:true,isRubble:!!choiceMap.get(o.type).rubble};if(entry.isRubble){coverRubble(state.cells,entry);continue;}for(const p of points(entry)){const occupants=state.occupants.get(p)||[];if(o.category==='INFANTRY'&&infantrySlotsUsed(occupants,o.onBridge).has(o.subcell))throw Error('方案中的步兵位置重复');if(o.category==='OVERLAY'){const c=state.cells.get(p);c.overlay=overlayTypes.indexOf(o.type);c.overlayName=o.type;c.overlayData=entry.ore?11:0;c.simulationOverlay=o.id;}else{occupants.push(entry);state.occupants.set(p,occupants);}}}
    return out;
   }
   function current(value=plan){if(value===plan&&value===cachedPlan)return cachedState;const cells=new Map([...baseline].map(([k,c])=>[k,{...c}]));for(const[p,[overlay,overlayData]]of Object.entries(value.overlays)){const c=cells.get(p);c.overlay=overlay;c.overlayData=overlayData;c.overlayName=overlayTypes[overlay]||null;}
-   const active=[];for(const o of original){const mode=value.objects[o.id];if(mode==='remove'||mode==='delete')continue;if(mode==='rubble'){const index=overlayTypes.indexOf('RUBBLE_OVERLAY');for(const p of points(o)){const c=cells.get(p);if(c){c.overlay=index;c.overlayData=0;c.overlayName='RUBBLE_OVERLAY';}}active.push({...o,isRubble:true});}else active.push(o);}
-   for(const o of value.placements){const entry={...o,...choiceMap.get(o.type),placed:true,immune:yes(source.rules[o.type]?.IMMUNE)||num(source.rules[o.type]?.STRENGTH,1)<=0};active.push(entry);if(o.category==='OVERLAY'){const c=cells.get(key(o.x,o.y));c.overlay=overlayTypes.indexOf(o.type);c.overlayName=o.type;c.overlayData=entry.ore?11:0;c.simulationOverlay=o.id;}}
+   const active=[];for(const o of original){const mode=value.objects[o.id];if(['remove','delete','magnet'].includes(mode))continue;if(mode==='rubble'){const index=overlayTypes.indexOf('RUBBLE_OVERLAY');for(const p of points(o)){const c=cells.get(p);if(c){c.overlay=index;c.overlayData=0;c.overlayName='RUBBLE_OVERLAY';}}active.push({...o,isRubble:true});}else active.push(o);}
+   for(const o of value.placements){const entry={...o,...choiceMap.get(o.type),placed:true,isRubble:!!choiceMap.get(o.type).rubble,immune:!choiceMap.get(o.type).rubble&&(yes(source.rules[o.type]?.IMMUNE)||num(source.rules[o.type]?.STRENGTH,1)<=0)};active.push(entry);if(entry.isRubble)coverRubble(cells,entry);else if(o.category==='OVERLAY'){const c=cells.get(key(o.x,o.y));c.overlay=overlayTypes.indexOf(o.type);c.overlayName=o.type;c.overlayData=entry.ore?11:0;c.simulationOverlay=o.id;}}
    for(const c of cells.values()){c.terrain=null;c.simulationTerrain=null;}for(const o of active)if(o.category==='TERRAIN'&&!o.isRubble){const c=cells.get(key(o.x,o.y));if(c){c.terrain=o.type;c.simulationTerrain=o.placed?o.id:null;}}
    const wallPoints=new Set(Object.keys(value.overlays));for(const o of value.placements)if(o.category==='OVERLAY')wallPoints.add(key(o.x,o.y));for(const p of [...wallPoints]){const c=cells.get(p);if(c)for(const[dx,dy]of [[0,-1],[1,0],[0,1],[-1,0]])wallPoints.add(key(c.x+dx,c.y+dy));}for(const p of wallPoints){const c=cells.get(p);if(c&&yes(cfgFor(c).WALL)){let mask=0;for(const[dx,dy,bit]of [[0,-1,1],[1,0,2],[0,1,4],[-1,0,8]])if(cells.get(key(c.x+dx,c.y+dy))?.overlay===c.overlay)mask|=bit;c.overlayData=(c.overlayData&~15)|mask;}}
    const occupants=new Map();for(const o of active)if(!o.isRubble&&o.category!=='OVERLAY')for(const p of points(o)){if(!occupants.has(p))occupants.set(p,[]);occupants.get(p).push(o);}
@@ -105,27 +127,37 @@
   function oreAllowed(c,occupants){return c&&c.usable&&c.overlay===255&&!c.bridge&&c.slope===0&&yes(source.rules[landNames[c.tileLand??c.rawLand]]?.BUILDABLE)&&source.simulationAssets?.allowOre?.[c.file]!==false&&!occupants.some(o=>o.category==='STRUCTURES'&&!yes(source.rules[o.type]?.INVISIBLE)&&!yes(source.rules[o.type]?.INVISIBLEINGAME)||o.mine||yes(source.rules[o.type]?.SPAWNSTIBERIUM));}
   function placement(type,x,y,{ignoreLand=false,existing=false,state=current()}={}){const choice=choiceMap.get(type);if(!choice||choice.unplaceable&&!existing)return {allowed:false,cells:[],reason:'未支持的对象'};const base=state.cells.get(key(x,y)),results=[];
    for(const[dx,dy]of choice.footprint){const c=state.cells.get(key(x+dx,y+dy));let reason='';if(!c||!c.usable)reason='地图可用范围之外';else if(c.terrainError||c.rawLand==null)reason='地形未知，无法验证放置条件';else if(c.overlayError&&c.overlay!==255)reason='覆盖物未知，无法验证放置条件';else{
-    const speed=String(source.rules[type]?.SPEEDTYPE||(choice.category==='INFANTRY'?'Foot':'Track')).toUpperCase(),cfg=cfgFor(c),occupants=state.occupants.get(key(c.x,c.y))||[],bridge=c.bridge?.kind==='high',deck=choice.category==='UNITS'&&speed!=='FLOAT'&&bridge||choice.category==='INFANTRY'&&bridge,blocking=occupants.filter(o=>deck?o.onBridge:!o.onBridge);
+    const speed=String(source.rules[type]?.SPEEDTYPE||(choice.category==='INFANTRY'?'Foot':'Track')).toUpperCase(),cfg=cfgFor(c),occupants=state.occupants.get(key(c.x,c.y))||[],bridge=c.bridge?.kind==='high',deck=choice.category==='UNITS'&&speed!=='FLOAT'&&bridge||choice.category==='INFANTRY'&&bridge,blocking=occupants.filter(o=>(deck?o.onBridge:!o.onBridge)&&(!choice.rubble||!isUnit(o)));
     if(choice.ore){if(!oreAllowed(c,occupants))reason='矿石不能在此生成';}
     else if(choice.category==='INFANTRY'?blocking.some(o=>o.category!=='INFANTRY')||blocking.length>=3:blocking.length)reason='已有对象占用';
-    else if((choice.category==='STRUCTURES'||choice.wall||choice.tree)&&(c.slope!==0||c.level!==base?.level||c.bridge))reason='建筑要求平整地面且不能压在桥上';
-    else if(yes(cfg.WALL)||yes(cfg.ISVEINS)||(choice.category==='STRUCTURES'||choice.wall||choice.tree)&&c.overlay!==255)reason='覆盖物阻挡';
+    else if((choice.category==='STRUCTURES'||choice.rubble||choice.wall||choice.tree)&&(c.slope!==0||c.level!==base?.level||c.bridge))reason='建筑要求平整地面且不能压在桥上';
+    else if(yes(cfg.WALL)||yes(cfg.ISVEINS)||(choice.category==='STRUCTURES'||choice.rubble||choice.wall||choice.tree)&&c.overlay!==255)reason='覆盖物阻挡';
     else if(!choice.ore&&!deck){const overlayLand=landNames.indexOf((cfg.LAND||'Clear').toUpperCase()),usesOverlay=c.overlay!==255&&(yes(cfg.NOUSETILELANDTYPE??'yes')||[4,9].includes(overlayLand)),land=landNames[usesOverlay?overlayLand:c.rawLand],cost=source.rules[land]||{},water=land==='WATER';
-     if(choice.category==='STRUCTURES'||choice.wall||choice.tree){if(!(ignoreLand&&choice.category==='STRUCTURES')&&water!==!!choice.water)reason=choice.water?'需要水面':'需要陆地';else if(!water&&!yes(cost.BUILDABLE)&&!(ignoreLand&&choice.category==='STRUCTURES'&&land==='BEACH'))reason='地形不能建造';}
+     if(choice.category==='STRUCTURES'||choice.rubble||choice.wall||choice.tree){if(!(ignoreLand&&choice.category==='STRUCTURES')&&water!==!!choice.water)reason=choice.water?'需要水面':'需要陆地';else if(!water&&!yes(cost.BUILDABLE)&&!(ignoreLand&&choice.category==='STRUCTURES'&&land==='BEACH'))reason='地形不能建造';}
      else if(num(cost[speed])===0)reason='单位不能通过该地形';
     }
    }results.push({x:x+dx,y:y+dy,allowed:!reason,reason});}
    const occ=state.occupants.get(key(x,y))||[],subcells=infantrySlotsUsed(occ,base?.bridge?.kind==='high');
    return {allowed:results.every(c=>c.allowed),cells:results,reason:results.find(c=>c.reason)?.reason||'',onBridge:['UNITS','INFANTRY'].includes(choice.category)&&String(source.rules[type]?.SPEEDTYPE||'Track').toUpperCase()!=='FLOAT'&&base?.bridge?.kind==='high',subcell:[0,1,2].find(n=>!subcells.has(n))??0};
   }
-  function change(fn){const before=JSON.stringify(plan),next=clone(plan);fn(next);if(JSON.stringify(next)===before)return false;if(!transaction){undo.push(plan);if(undo.length>100)undo.shift();redo=[];}plan=next;return true;}
+  function samePlan(a,b){
+   const record=(x,y,equal=(a,b)=>a===b)=>{const keys=Object.keys(x);return keys.length===Object.keys(y).length&&keys.every(k=>own(y,k)&&equal(x[k],y[k]));};
+   return a.schema===b.schema&&a.map.sha256===b.map.sha256&&a.map.version===b.map.version&&record(a.objects,b.objects)&&record(a.overlays,b.overlays,(x,y)=>x===y||x[0]===y[0]&&x[1]===y[1])&&a.placements.length===b.placements.length&&a.placements.every((o,i)=>o===b.placements[i]||['id','type','category','x','y','facing','subcell','onBridge'].every(k=>o[k]===b.placements[i][k]));
+  }
+  function change(fn){
+   // Editors replace map entries, overlay tuples and placement records rather
+   // than mutating their contents. Copy the editable containers only; published
+   // snapshots/history keep their original records and public reads still clone.
+   const next={...plan,map:{...plan.map},objects:{...plan.objects},overlays:{...plan.overlays},placements:plan.placements.slice()};
+   fn(next);if(samePlan(plan,next))return false;if(!transaction){undo.push(plan);if(undo.length>100)undo.shift();redo=[];}plan=next;return true;
+  }
   // One stroke owns one history entry. Terrain/bridge indexes are unchanged by
   // placement: update only the occupied footprint, never clone the map per tank.
   function beginPlacement(){if(transaction)throw Error('已有放置笔画');const state=current();transaction=plan;plan={...plan,placements:plan.placements.slice()};cachedPlan=plan;cachedState=state;}
-  function appendPlacement(type,x,y,options){if(!transaction)throw Error('尚未开始放置笔画');if(plan.placements.length>=20000)return false;const check=placement(type,x,y,options);if(!check.allowed)return false;const item={id:'sim-'+crypto.randomUUID(),type,category:choiceMap.get(type).category,x,y,facing:64,subcell:check.subcell,onBridge:!!check.onBridge},entry={...item,...choiceMap.get(type),placed:true,immune:yes(source.rules[type]?.IMMUNE)||num(source.rules[type]?.STRENGTH,1)<=0};plan.placements.push(item);cachedState.objects.push(entry);if(entry.category==='OVERLAY'){const c=cachedState.cells.get(key(x,y));c.overlay=overlayTypes.indexOf(type);c.overlayName=type;c.overlayData=entry.ore?11:0;c.simulationOverlay=item.id;for(const [dx,dy] of [[0,0],[0,-1],[1,0],[0,1],[-1,0]]){const n=cachedState.cells.get(key(x+dx,y+dy));if(!n||!yes(cfgFor(n).WALL))continue;let mask=0;for(const[a,b,bit] of [[0,-1,1],[1,0,2],[0,1,4],[-1,0,8]])if(cachedState.cells.get(key(n.x+a,n.y+b))?.overlay===n.overlay)mask|=bit;n.overlayData=(n.overlayData&~15)|mask;}return true;}if(entry.category==='TERRAIN'){const c=cachedState.cells.get(key(x,y));c.terrain=type;c.simulationTerrain=item.id;}for(const p of points(entry)){if(!cachedState.occupants.has(p))cachedState.occupants.set(p,[]);cachedState.occupants.get(p).push(entry);}return true;}
+  function appendPlacement(type,x,y,options){if(!transaction)throw Error('尚未开始放置笔画');if(plan.placements.length>=20000)return false;const check=placement(type,x,y,options);if(!check.allowed)return false;const item={id:'sim-'+crypto.randomUUID(),type,category:choiceMap.get(type).category,x,y,facing:64,subcell:check.subcell,onBridge:!!check.onBridge},entry={...item,...choiceMap.get(type),placed:true,isRubble:!!choiceMap.get(type).rubble,immune:!choiceMap.get(type).rubble&&(yes(source.rules[type]?.IMMUNE)||num(source.rules[type]?.STRENGTH,1)<=0)};plan.placements.push(item);cachedState.objects.push(entry);objectLookups.delete(cachedState);if(entry.isRubble){coverRubble(cachedState.cells,entry);return true;}if(entry.category==='OVERLAY'){const c=cachedState.cells.get(key(x,y));c.overlay=overlayTypes.indexOf(type);c.overlayName=type;c.overlayData=entry.ore?11:0;c.simulationOverlay=item.id;for(const [dx,dy] of [[0,0],[0,-1],[1,0],[0,1],[-1,0]]){const n=cachedState.cells.get(key(x+dx,y+dy));if(!n||!yes(cfgFor(n).WALL))continue;let mask=0;for(const[a,b,bit] of [[0,-1,1],[1,0,2],[0,1,4],[-1,0,8]])if(cachedState.cells.get(key(n.x+a,n.y+b))?.overlay===n.overlay)mask|=bit;n.overlayData=(n.overlayData&~15)|mask;}return true;}if(entry.category==='TERRAIN'){const c=cachedState.cells.get(key(x,y));c.terrain=type;c.simulationTerrain=item.id;}for(const p of points(entry)){if(!cachedState.occupants.has(p))cachedState.occupants.set(p,[]);cachedState.occupants.get(p).push(entry);}return true;}
   function endPlacement(cancel=false){if(!transaction)return false;const before=transaction;transaction=null;const changed=before.placements.length!==plan.placements.length;if(cancel||!changed){plan=before;cachedPlan=null;cachedState=null;return false;}undo.push(before);if(undo.length>100)undo.shift();redo=[];return true;}
-  function beginPaint(){if(transaction)throw Error('已有放置笔画');transaction=plan;}
-  function endPaint(){if(!transaction)return false;const before=transaction;transaction=null;if(JSON.stringify(before)===JSON.stringify(plan))return false;undo.push(before);if(undo.length>100)undo.shift();redo=[];return true;}
+  function beginPaint(mode=null){if(transaction)throw Error('已有放置笔画');protectedUnderlay=mode==='restore'?null:coveredUnits(current());transaction=plan;}
+  function endPaint(){protectedUnderlay=null;if(!transaction)return false;const before=transaction;transaction=null;if(samePlan(before,plan))return false;undo.push(before);if(undo.length>100)undo.shift();redo=[];return true;}
   function brush(x,y,size=1,shape='square'){
    const points=[],radius=(size-1)/2,start=-Math.floor(radius);
    for(let i=0;i<size;i++)for(let j=0;j<size;j++){
@@ -136,31 +168,42 @@
    return points;
   }
   function removeOverlay(next,p,pair=[255,0]){const c=baseline.get(p);if(!c)return;if(c.overlay===pair[0]&&c.overlayData===pair[1])delete next.overlays[p];else next.overlays[p]=pair;}
-  function editBridges(next,state,targets,restoring=false){
+  function editBridges(next,state,targets,restoring=false,canDamage){
    if(![...targets].some(p=>bridgeAt.has(p)))return {fallen:new Set(),selected:[]};
    const copies=new Map();
    const cells={get(p){
     if(!copies.has(p)){const c=state.cells.get(p);copies.set(p,c?{...c}:undefined);}
     return copies.get(p);
    }};
-   return bridgesAPI.edit(bridges,cells,targets,(p,pair)=>removeOverlay(next,p,pair),restoring?baseline:false);
+   return bridgesAPI.edit(bridges,cells,targets,(p,pair)=>removeOverlay(next,p,pair),restoring?baseline:false,canDamage);
   }
-  function destroy(next,area,mode,filter=null){const state=current(),targets=new Set(area);for(const o of state.objects){if(o.immune&&mode!=='delete'||o.isRubble&&mode==='normal'||filter&&!filter(o)||!points(o).some(p=>targets.has(p)))continue;if(o.placed)next.placements=next.placements.filter(p=>p.id!==o.id);else next.objects[o.id]=mode==='delete'?'delete':mode==='normal'&&o.rubble&&!o.isRubble?'rubble':'remove';}
-   if(filter)return;const {fallen}=editBridges(next,state,targets);
-   if(fallen.size)for(const o of state.objects)if((o.onBridge||points(o).some(p=>baseline.get(p)?.bridge?.kind==='low'))&&points(o).some(p=>fallen.has(p))&&!o.immune){if(o.placed)next.placements=next.placements.filter(p=>p.id!==o.id);else next.objects[o.id]='remove';}
-   for(const p of targets){if(bridgeAt.has(p))continue;const c=state.cells.get(p);if(!c||c.simulationOverlay)continue;const cfg=cfgFor(c);if(!yes(cfg.IMMUNE)&&(yes(cfg.TIBERIUM)||yes(cfg.WALL)||mode==='chrono'&&yes(cfg.ISRUBBLE)||yes(cfg.LEGALTARGET)))removeOverlay(next,p);}
+  function coveredUnits(state){const rubble=new Set(),covered=new Set();for(const o of state.objects)if(isRubble(o))for(const p of points(o))rubble.add(p);for(const o of state.objects)if(isUnit(o))for(const p of points(o)){const cfg=cfgFor(state.cells.get(p));if(rubble.has(p)||yes(cfg.ISRUBBLE)||yes(cfg.TIBERIUM))covered.add(p);}return covered;}
+  function protectionFor(state){if(protectedUnderlay)return protectedUnderlay;if(!transaction)return coveredUnits(state);return protectedUnderlay=coveredUnits(transaction===plan?state:current(transaction));}
+  function destroy(next,area,mode,filter=null){const state=current(),targets=new Set(area),placed=new Set(),protectedCells=filter?new Set():protectionFor(state);for(const o of nearbyObjects(state,targets)){const footprint=points(o);if(o.immune&&!['delete','magnet'].includes(mode)||isRubble(o)&&mode==='normal'||!isUnit(o)&&footprint.some(p=>protectedCells.has(p))||filter&&!filter(o)||!footprint.some(p=>targets.has(p)))continue;if(o.placed)placed.add(o.id);else next.objects[o.id]=mode==='magnet'?'magnet':mode==='delete'?'delete':mode==='normal'&&o.rubble&&!isRubble(o)?'rubble':'remove';}
+   if(placed.size)next.placements=next.placements.filter(o=>!placed.has(o.id));
+   if(filter)return;const lowerTargets=new Set([...targets].filter(p=>!protectedCells.has(p))),canDamage=s=>!s.cells.some(p=>protectedCells.has(p))&&s.owners.every(p=>{const cfg=cfgFor(state.cells.get(p));return !yes(cfg.IMMUNE)&&num(cfg.STRENGTH,1)>0;});const {fallen}=editBridges(next,state,lowerTargets,false,canDamage);
+   removeFallen(next,state,fallen);
+   for(const p of lowerTargets){if(bridgeAt.has(p))continue;const c=state.cells.get(p);if(!c||c.simulationOverlay)continue;const cfg=cfgFor(c);if((mode==='magnet'||!yes(cfg.IMMUNE))&&(yes(cfg.TIBERIUM)||yes(cfg.WALL)||['chrono','magnet'].includes(mode)&&yes(cfg.ISRUBBLE)||yes(cfg.LEGALTARGET)))removeOverlay(next,p);}
 
    wallConnections(next);
   }
   function wallConnections(next){} // Derived locally by current(); never rewrite unchanged source wall frames.
-  function restore(next,area){const targets=new Set(area),changed=editBridges(next,current(),targets,true);for(const p of changed.selected)targets.add(p);
+  function removeFallen(next,state,fallen){if(!fallen.size)return;const placed=new Set();for(const o of state.objects)if((o.onBridge||points(o).some(p=>baseline.get(p)?.bridge?.kind==='low'))&&points(o).some(p=>fallen.has(p))&&!o.immune){if(o.placed)placed.add(o.id);else next.objects[o.id]='remove';}if(placed.size)next.placements=next.placements.filter(o=>!placed.has(o.id));}
+  function restore(next,area){const targets=new Set(area),changed=[...targets].some(p=>bridgeAt.has(p))?editBridges(next,current(),targets,true):{selected:[]};for(const p of changed.selected)targets.add(p);
    // Restoring a footprint is atomic; include overlapping originals until stable.
-   let grew=true;while(grew){grew=false;for(const o of original)if(points(o).some(p=>targets.has(p))){delete next.objects[o.id];for(const p of points(o))if(!targets.has(p)){targets.add(p);grew=true;}}}
+   const queue=[...targets],seen=new Set();for(let i=0;i<queue.length;i++)for(const o of originalAt.get(queue[i])||[]){if(seen.has(o))continue;seen.add(o);delete next.objects[o.id];for(const p of points(o))if(!targets.has(p)){targets.add(p);queue.push(p);}}
    next.placements=next.placements.filter(o=>!points({...o,footprint:choiceMap.get(o.type).footprint}).some(p=>targets.has(p)));for(const p of targets)if(!bridgeAt.has(p))delete next.overlays[p];wallConnections(next);
   }
   function quick(action,mode='normal'){return change(next=>{const all=[...baseline.keys()];if(action==='mine'){next.placements=next.placements.filter(o=>!choiceMap.get(o.type).ore);const state=current(next);for(const[p,c]of state.cells)if(yes(cfgFor(c).TIBERIUM)){removeOverlay(next,p);c.overlay=255;c.overlayData=0;c.overlayName=null;}const ore=overlayTypes.findIndex(n=>/^(TIB|GOLD)\d+$/i.test(n));for(const o of state.objects)if(o.mine&&!o.isRubble)for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){if(!dx&&!dy)continue;const p=key(o.x+dx,o.y+dy),c=state.cells.get(p);if(ore>=0&&oreAllowed(c,state.occupants.get(p)||[]))removeOverlay(next,p,[ore,11]);}}
-    else if(action==='trees')destroy(next,all,mode,o=>o.tree);else if(action==='buildings')destroy(next,all,mode,o=>o.category==='STRUCTURES');else if(action==='units')destroy(next,all,'delete',o=>['UNITS','INFANTRY','AIRCRAFT'].includes(o.category));else throw Error('未知快捷操作');});}
-  function count(){const set=new Set(Object.keys(plan.overlays));for(const id of Object.keys(plan.objects))for(const p of points(byId.get(id)))set.add(p);for(const o of plan.placements)for(const p of points({...o,footprint:choiceMap.get(o.type).footprint}))set.add(p);return set.size;}
+    else if(action==='walls'){
+     const state=current(),destructible=cfg=>!yes(cfg.IMMUNE)&&num(cfg.STRENGTH,1)>0;
+     next.placements=next.placements.filter(o=>{const cfg=source.rules[o.type]||{};return !['TERRAIN','OVERLAY'].includes(o.category)||!wallType(o.type,cfg)||!destructible(cfg);});
+     for(const o of state.objects)if(!o.placed&&!o.isRubble&&!o.immune&&['TERRAIN','OVERLAY'].includes(o.category)&&wallType(o.type,source.rules[o.type]||{}))next.objects[o.id]='remove';
+     for(const [p,c]of state.cells){const cfg=cfgFor(c);if(wallType(overlayTypes[c.overlay],cfg)&&destructible(cfg))removeOverlay(next,p);}
+    }
+    else if(action==='bridges'){const state=current(),canDamage=s=>s.owners.every(p=>{const cfg=cfgFor(state.cells.get(p));return !yes(cfg.IMMUNE)&&num(cfg.STRENGTH,1)>0;}),targets=new Set(bridges.filter(canDamage).flatMap(s=>s.cells));const {fallen}=editBridges(next,state,targets,false,canDamage);removeFallen(next,state,fallen);}
+    else if(action==='trees')destroy(next,all,mode,o=>o.tree);else if(action==='buildings')destroy(next,all,mode,o=>(o.category==='STRUCTURES'||mode==='chrono'&&o.category==='RUBBLE')&&!o.initialRubble);else if(action==='units')destroy(next,all,'delete',o=>['UNITS','INFANTRY','AIRCRAFT'].includes(o.category));else throw Error('未知快捷操作');});}
+  function count(){const cached=countCache.get(plan);if(cached?.placements===plan.placements.length)return cached.value;const set=new Set(Object.keys(plan.overlays));for(const id of Object.keys(plan.objects))for(const p of points(byId.get(id)))set.add(p);for(const o of plan.placements)for(const p of points({...o,footprint:choiceMap.get(o.type).footprint}))set.add(p);const value=set.size;countCache.set(plan,{placements:plan.placements.length,value});return value;}
   // Compare edits with the plan behind the displayed probability snapshot.
   // This is an edit footprint, not a bound on nearby-search dependencies.
   // Work scales with the delta, without rebuilding/copying the source map.
@@ -178,6 +221,7 @@
    paint:(area,mode)=>change(p=>mode==='restore'?restore(p,area):destroy(p,area,mode)),quick,
    import:value=>{const next=normalized(value);return change(p=>{Object.assign(p,next);});},
    reset:()=>change(p=>Object.assign(p,empty(source))),
+   clearRedo:()=>{redo=[];},
    undo:()=>{if(!undo.length)return false;redo.push(plan);plan=undo.pop();return true;},redo:()=>{if(!redo.length)return false;undo.push(plan);plan=redo.pop();return true;}
   };
  }
@@ -192,6 +236,7 @@
     (map.COLORS||={})[house]='stripe-3-region-'+color;
    }
    const prefix=[house,o.type,'256',o.x,o.y];let f;
+   if(o.category==='RUBBLE'){const f=[prefix[0],o.type,'0',o.x,o.y,0,'None',1,0,1,0,0,'None','None','None',0,0];(map.STRUCTURES||={})[o.id]=f.join(',');rubble.add('STRUCTURES/'+o.id);continue;}
    if(o.category==='STRUCTURES')f=[...prefix,o.facing,'None',1,0,1,0,0,'None','None','None',0,0];
    else if(o.category==='INFANTRY')f=[...prefix,infantrySlots[o.subcell],'Guard',o.facing,'None',0,-1,0,+o.onBridge];
    else f=[...prefix,o.facing,'Guard','None',0,-1,0,+o.onBridge,1,0];(map[o.category]||={})[o.id]=f.join(',');

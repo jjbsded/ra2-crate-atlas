@@ -17,7 +17,7 @@ scene.width, scene.height = 100*V.TILE, V.TILE
 scene.tile_revisions = {(0, 0): 1}
 scene.events, scene.sprite_tiles = {}, {}
 scene.ground_epoch = 'test-scene'
-scene.ground_encodings, scene.painted_tiles = OrderedDict(), OrderedDict()
+scene.init_caches()
 ground = Image.new('RGBA', (256, 256), (199, 175, 141, 255))
 objects = ground.copy()
 objects.putpixel((120, 135), (72, 255, 104, 255))
@@ -63,5 +63,17 @@ assert png.startswith('data:image/png;') and decode(png).tobytes() == alpha.toby
 for x in range(1, 99):
     scene.tile_revisions = {(x, 0): 3}
     scene.paint({}, 2)
-assert len(scene.ground_encodings) == 64 and len(scene.painted_tiles) == 96
-print('PASS exact RGBA transport, immutable grounds, tile revision reuse, old clients and bounded LRUs')
+assert len(scene.ground_encodings) == 99 and len(scene.painted_tiles) == 99
+assert scene.ground_encodings.bytes <= scene.ground_encodings.budget
+assert scene.painted_tiles.bytes <= scene.painted_tiles.budget
+from types import SimpleNamespace
+scene.painter,scene.background=SimpleNamespace(voxels=None),None
+scene.close()
+assert scene.encoder is None and scene.painted_tiles.bytes == 0
+cache=V.ByteLRU(5,lambda k,v:len(v))
+cache['a']='aaa';cache['b']='bb';cache.move_to_end('a');cache['c']='c'
+assert list(cache)==['a','c'] and cache.bytes==4
+cache['a']='a';assert cache.bytes==2
+cache['big']='abcdef';assert 'big' not in cache and cache.bytes==2
+cache.clear();assert not cache and not cache.bytes
+print('PASS exact threaded RGBA transport, immutable grounds, 99-tile working set, byte-bounded LRUs and executor cleanup')

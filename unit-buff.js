@@ -17,8 +17,8 @@
   function setPending(value){if(pending===value)return;pending=value;onPending?.(value);}
   function cancel(){if(timer!==null||task||job){clearTimeout(timer);timer=null;task=null;job?.iterator.return();job=null;diagnostics.cancelled++;}}
   function defer(fn,delay=0){
-   if(delay){timer=root.setTimeout(()=>{timer=null;fn();},delay);return;}
-   const token=task={};const run=()=>{if(task!==token)return;task=null;fn();};
+   if(delay){timer=root.setTimeout(()=>{timer=null;if(root.CrateMapPriority?.blocked)defer(fn);else fn();},delay);return;}
+   const token=task={};const run=()=>{if(task!==token)return;if(root.CrateMapPriority?.blocked){root.CrateMapPriority.wait().then(run);return;}task=null;fn();};
    if(root.scheduler?.postTask)root.scheduler.postTask(run,{priority:'user-visible'}).catch(()=>{if(task===token)timer=root.setTimeout(run,0);});
    else timer=root.setTimeout(run,0);
   }
@@ -145,25 +145,35 @@
    const units=entries.slice(),style={...options,paletteColors:{...(options.paletteColors||reference.paletteSettings())},maximum:options.maximum??maximum};return (ctx,view,area)=>paint(ctx,view,area,units,style);
   }
   function paint(ctx,view,area,units=values(),options={}){
-   const seen=new Set(),colors=new Map(),size=reference.labelSize(view.scale,Math.max(9,Math.min(14,10*view.scale)),options.paletteColors);
+   const showLabels=options.values!==false&&view.scale*30>=26,showHeat=!!options.heatmap;
+   if(!showLabels&&!showHeat)return {colored:0,labels:0};
+   const seen=new Set(),colors=new Map(),heatColors=new Map(),maximumValue=options.maximum??maximum,size=reference.labelSize(view.scale,options.labelSize||12,options.paletteColors),opacityAt=showHeat?(root.CrateProbability||(typeof require==='function'?require('./probability.js'):null)).opacityCurve(maximumValue,options.paletteColors):null;
+   let colored=0,labels=0;
    ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();
    ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.lineJoin='round';
    ctx.font='700 '+size+'px "Microsoft YaHei",sans-serif';
    for(const {unit,cell,value} of units){
-    if(options.baselineValues===false&&reference.isBaseline(value))continue;
+    if(!(value>0)&&!options.zeroLayer&&!options.zeroValues||value<(options.threshold||0)||options.filter&&options.filter!=='all'&&(options.filter==='water'?cell.land!==2:cell.land===2))continue;
+    const baseline=reference.isBaseline(value),selected=view.selected?.x===unit.x&&view.selected?.y===unit.y;
     const x=view.x+(cell.px+(cell.labelOffset?.[0]||0))*view.scale;
     const y=view.y+(cell.py+(cell.labelOffset?.[1]||0)-(unit.onBridge?60:0))*view.scale+size/3;
-    if(x<area.x-30||x>area.x+area.w+30||y<area.y||y>area.y+area.h+16)continue;
+    if(x<area.x-60*view.scale-size||x>area.x+area.w+60*view.scale+size||y<area.y-30*view.scale-size||y>area.y+area.h+30*view.scale+size)continue;
     const k=key(unit.x,unit.y)+':'+unit.onBridge;
     if(seen.has(k))continue;
     seen.add(k);
+    if(showHeat&&(value>0||options.zeroLayer)&&(options.baselineLayer!==false||!baseline||selected)){
+     if(!heatColors.has(value))heatColors.set(value,reference.color(value,options.palette,maximumValue,options.paletteColors));ctx.fillStyle=heatColors.get(value);ctx.globalAlpha=options.opaqueLayers?1:root.CrateProbabilityDisplay.alpha((1-(options.opacity??0)/100)*opacityAt(value),baseline,options.paletteColors?.baselineFactor);ctx.beginPath();
+     for(const ring of cell.visibleSurface||cell.surface||[[[0,-15],[30,0],[0,15],[-30,0]]]){ring.forEach(([dx,dy],i)=>ctx[i?'lineTo':'moveTo'](view.x+(cell.px+dx)*view.scale,view.y+(cell.py+dy-(unit.onBridge?60:0))*view.scale));ctx.closePath();}ctx.fill('evenodd');ctx.globalAlpha=1;colored++;
+    }
+    if(!showLabels||!value&&!options.zeroValues||options.baselineValues===false&&baseline&&!selected)continue;
     const label=amount(value);
     ctx.strokeStyle='#10212d';ctx.lineWidth=reference.labelStrokeWidth(size,options.paletteColors);ctx.strokeText(label,x,y);
-    if(!colors.has(value))colors.set(value,reference.textColor(value,options.palette||'warm',options.maximum??maximum,options.colorText,options.paletteColors));ctx.fillStyle=colors.get(value);ctx.fillText(label,x,y);
+    if(!colors.has(value))colors.set(value,options.fixedColor||reference.textColor(value,options.palette||'warm',maximumValue,options.colorText,options.paletteColors));ctx.fillStyle=colors.get(value);ctx.fillText(label,x,y);labels++;
    }
    ctx.restore();
+   return {colored,labels};
   }
-  return {statistics,paint,snapshot,refresh,updateCells,get maximum(){return maximum;},get status(){return {...diagnostics,pending,requestedRadius:desired?.radius,appliedRadius:committed?.radius};}};
+  return {values,statistics,paint,snapshot,refresh,updateCells,get maximum(){return maximum;},get status(){return {...diagnostics,pending,requestedRadius:desired?.radius,appliedRadius:committed?.radius};}};
  }
  root.CrateUnitBuff={create,radius,baseline,amount};
  if(typeof module!=='undefined')module.exports=root.CrateUnitBuff;

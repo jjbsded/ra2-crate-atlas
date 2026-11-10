@@ -20,7 +20,7 @@ from realmap_bridges import HIGH_NAMES, sprite_frame
 from terrain_depth import relief_mesh
 
 LOCK = threading.Lock()
-VERSION = 7
+VERSION = 8
 # Top/right/bottom/left height deltas, as documented by FA2SPHE's RampTypes.
 # These are visual vertex offsets only; Cell.Level still drives the cliff test.
 RAMPS = [(0,0,0,0), (0,1,1,0), (0,0,1,1), (1,0,0,1), (1,1,0,0),
@@ -225,7 +225,7 @@ def add_bridge_layers(records, lookup, res, theater, put_texture, missing):
 def build_patch(report, lookup, path, x, y, radius):
     if (x,y) not in lookup:
         raise ValueError('选中的格子不在地图内')
-    meta = report['metadata']; enabled = not meta.get('previewOnly') and not meta.get('approximate') and meta.get('cliffBackImpassability') == 2
+    meta = report['metadata']; enabled = not meta.get('previewOnly') and (not meta.get('approximate') or bool(meta.get('riskPredictionVersion')))
     nearby = [c for (cx,cy),c in lookup.items() if abs(cx-x)<=radius and abs(cy-y)<=radius]
     res,theater = resource_context(report,path)
     colors = palette(theater['palette'])
@@ -261,12 +261,12 @@ def build_patch(report, lookup, path, x, y, radius):
                         tiles[key]['relief']=ident
             except (ValueError,IndexError,KeyError,OSError) as error:
                 missing.add(f'{name}/{sub}：{error}');tiles[key] = dict(top=None,wall=None)
-        higher,affected = relation_data(c,lookup,enabled)
+        higher,affected = relation_data(c,lookup,True)
         records.append({k:c.get(k) for k in ('x','y','level','slope','rawLand','land','postLand','marked',
-                        'potentialMarked','status','probability','overlay','occupied','usable','terrain','overlayName','primary','clearance','bridge')}
+                        'potentialMarked','status','probability','overlay','occupied','usable','terrain','overlayName','primary','clearance','bridge','riskKnown')}
                        | dict(file=name,subTile=sub,texture=tiles[key]['top'],wallTexture=tiles[key]['wall'],relief=tiles[key].get('relief'),
                               corners=corner_heights(c['slope']),higher=higher,affected=affected,
-                              walls=[None]*4,canPlace=bool(enabled and c.get('status')=='crate' and c.get('probability',0)
+                              walls=[None]*4,canPlace=bool(enabled and c.get('riskKnown', True) and c.get('postLand') is not None and c.get('status')=='crate' and c.get('probability',0)
                                             and c['overlay']==255 and not c['occupied']),decorations=[]))
         out = records[-1]
         for kind,is_overlay,frame in ((c.get('terrain'),False,0),(c.get('overlayName'),True,c.get('overlayData',0))):
@@ -331,7 +331,7 @@ def build_patch(report, lookup, path, x, y, radius):
     return dict(version=VERSION,center=[x,y],radius=radius,cells=records,textures=textures,reliefs=reliefs,
                 bounds=[min(c['x'] for c in records),min(c['y'] for c in records),max(c['x'] for c in records),max(c['y'] for c in records)],
                 metadata=dict(filename=meta.get('filename','地图'),theater=meta['theater'],version=meta['version'],
-                              sourceSha256=meta['sourceSha256'],predictionEnabled=enabled,previewOnly=bool(meta.get('previewOnly')),
+                              sourceSha256=meta['sourceSha256'],predictionEnabled=enabled,relationsEnabled=True,previewOnly=bool(meta.get('previewOnly')),
                               partialAnalysis=bool(meta.get('partialAnalysis')), approximate=bool(meta.get('approximate')),
                               mineralsEnabled=meta.get('mineralsEnabled',True),
                               treesEnabled=meta.get('treesEnabled',True),

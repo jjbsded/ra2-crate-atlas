@@ -95,6 +95,8 @@ async function main(){
  assert.equal(await stock,'yr');
  const explicit=h.api.resolve('ra2');h.requests.shift().resolve(h.state('new'));
  assert.equal(await explicit,'ra2','explicit stock selection overrides the saved directory');
+ const mpr=h.api.resolve('auto','ra2');h.requests.shift().resolve(h.state(''));assert.equal(await mpr,'ra2','Automatic stock resources follow an original-map hint');
+ const directory=h.api.resolve('auto','ra2');h.requests.shift().resolve(h.state('new'));assert.equal(await directory,'directory','A map hint must not override a configured directory');
  console.log('PASS: directory drafts survive delayed reads; saves supersede stale reads; closed-dialog errors are ignored; initial stock checks are retained.');
  console.log('PASS: native folder selection fills only the draft; cancellation/network failure preserve it; stale reads cannot overwrite it.');
 }

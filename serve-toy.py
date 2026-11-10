@@ -15,6 +15,7 @@ PREFIX = '/toy/crate-atlas/'
 
 class StaticServer(ThreadingHTTPServer):
     allow_reuse_address = False
+    request_queue_size = 128
 
     def server_bind(self):
         # Windows SO_REUSEADDR may otherwise allow duplicate preview servers.

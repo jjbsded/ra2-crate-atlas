@@ -4,6 +4,14 @@
  'use strict';
  const diamond=[[0,-15],[30,0],[0,15],[-30,0]];
  const defaults=Object.freeze({dark:'#202329',light:'#5f656d',lineWidth:1,widthMode:'map',borderStyle:'solid'});
+ function hitTest(state,x,y,contains){
+  const candidates=state.spatialIndex?state.spatialIndex.query(x-65,y-130,x+65,y+130):state.cells;
+  for(let i=candidates.length-1;i>=0;i--){
+   const record=candidates[i],c=state.lookup?state.lookup.get(record.x+','+record.y):record;
+   if(c&&Math.abs(x-c.px)<=65&&Math.abs(y-c.py)<=130&&contains(c,x,y))return c;
+  }
+  const flat=state.coordinateSpace?.point(x,y);return flat?.virtual?flat:null;
+ }
  function create(data,lookup,{makeCanvas=()=>document.createElement('canvas'),makePath=()=>new Path2D()}={}){
   const size=data.metadata?.size,origin=data.rendering?.origin;if(!Array.isArray(size)||!origin)return null;
   const max=size[2]+size[3]-1;if(!Number.isInteger(max)||max<1||max>511)return null;
@@ -44,7 +52,7 @@
    if(settings.lineWidth>0){const unit=settings.widthMode==='screen'?1/view.scale:1;ctx.strokeStyle=settings.light;ctx.lineWidth=settings.lineWidth*unit;ctx.lineCap='butt';ctx.setLineDash(settings.borderStyle==='dashed'?[6*unit,4*unit]:[]);ctx.stroke(gridGeometry());}ctx.restore();
   };}
   let paint=painter(style);
-  function configure(value){const width=Number(value.lineWidth),next={dark:/^#[0-9a-f]{6}$/i.test(value.dark)?value.dark:defaults.dark,light:/^#[0-9a-f]{6}$/i.test(value.light)?value.light:defaults.light,lineWidth:Math.max(0,Math.min(12,Number.isFinite(width)?width:defaults.lineWidth)),widthMode:value.widthMode==='screen'?'screen':'map',borderStyle:value.borderStyle==='dashed'?'dashed':'solid'};if(JSON.stringify(style)===JSON.stringify(next))return false;style=next;paint=painter(style);return true;}
+  function configure(value){const width=Number(value.lineWidth),next={dark:/^#[0-9a-f]{6}$/i.test(value.dark)?value.dark:defaults.dark,light:/^#[0-9a-f]{6}$/i.test(value.light)?value.light:defaults.light,lineWidth:Number.isFinite(width)&&width>=0?width:defaults.lineWidth,widthMode:value.widthMode==='screen'?'screen':'map',borderStyle:value.borderStyle==='dashed'?'dashed':'solid'};if(JSON.stringify(style)===JSON.stringify(next))return false;style=next;paint=painter(style);return true;}
   function clipTerrain(ctx,view){
    geometry();const transform=ctx.getTransform();ctx.translate(view.x,view.y);ctx.scale(view.scale,view.scale);ctx.clip(terrainMask);ctx.setTransform(transform);
   }
@@ -52,5 +60,5 @@
   const styleKey=()=>key+'|'+JSON.stringify(style);
   return {max,bounds,get key(){return styleKey();},valid,get,point,paint:(...args)=>paint(...args),configure,clipTerrain,snapshot(){geometry();return {key:styleKey(),bounds:{...bounds},paint,clipTerrain};},getKey:key=>{const[x,y]=key.split(',').map(Number);return get(x,y);}};
  }
- const api={create,defaults};root.CrateMapCoordinates=api;if(typeof module!=='undefined')module.exports=api;
+ const api={create,defaults,hitTest};root.CrateMapCoordinates=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

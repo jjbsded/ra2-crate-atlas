@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict'),{create}=require('./edit-history.js');
+(async()=>{
+ const notices=[],h=create({onTravel:e=>notices.push(e)}),states={regions:[],simulation:[]};
+ for(const channel of Object.keys(states))h.register(channel,{limit:channel==='regions'?2:100,undo(){states[channel].pop();return true;},redo(){states[channel].push('restored');return true;}});
+ const edit=(channel,label)=>{states[channel].push(label);h.record(channel,label);};
+ edit('regions','paint A');edit('simulation','tank A');edit('regions','rename A');
+ await h.undo();await h.undo();await h.undo();assert.deepEqual(notices.map(n=>n.label),['rename A','tank A','paint A']);assert(!h.status.canUndo);
+ await h.redo();await h.redo();assert.equal(h.status.redoLabel,'rename A');
+ edit('simulation','tank B');assert(!h.status.canRedo);await h.undo();assert.equal(notices.at(-1).label,'tank B');
+ h.reset();edit('regions','1');edit('simulation','2');edit('regions','3');edit('regions','4');
+ assert.equal(h.status.undoLabel,'4');await h.undo();await h.undo();await h.undo();assert(!h.status.canUndo,'Pruning a region snapshot preserves intervening simulation edits');
+ let release;const blocked=new Promise(r=>release=r),errors=[];
+ const asynchronous=create({onError:e=>errors.push(e.message)});asynchronous.register('s',{undo:()=>blocked,redo:()=>false});asynchronous.record('s','async');
+ const pending=asynchronous.undo();assert(asynchronous.status.busy);assert.equal(await asynchronous.undo(),false);
+ asynchronous.reset();release(true);assert.equal(await pending,false);assert(!asynchronous.status.canRedo,'A reset invalidates pending travel');
+ asynchronous.register('s',{undo(){throw Error('failed');}});asynchronous.record('s','failure');assert.equal(await asynchronous.undo(),false);assert(asynchronous.status.canUndo);assert.deepEqual(errors,['failed']);
+ let ready=false;asynchronous.register('s',{ready:()=>ready,undo:()=>false});assert(!asynchronous.status.canUndo);ready=true;assert.equal(await asynchronous.undo(),false);assert(asynchronous.status.canUndo,'A rejected edit does not move history');
+ console.log('PASS shared chronological undo/redo, branching, channel capacity, failure, reset and stale async travel');
+})().catch(e=>{console.error(e);process.exitCode=1;});

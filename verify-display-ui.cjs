@@ -59,7 +59,7 @@ const out=process.env.DISPLAY_QA||'output/display-verification-20261103';fs.mkdi
   assert.ok(layers.b.colored<layers.a.colored&&layers.b.cacheRebuilt);assert.equal(layers.off.colored,0);
   const pixels=await page.evaluate(()=>{const source=document.createElement('canvas');source.width=source.height=2;const s=source.getContext('2d');s.fillStyle='#000';s.fillRect(0,0,2,2);s.fillStyle='#fff';s.fillRect(0,0,1,1);s.fillRect(1,1,1,1);const target=document.createElement('canvas');target.width=target.height=16;const c=target.getContext('2d');c.scale(2,2);CrateMapArtwork.draw(c,source,0,0,8,8);return [...new Set(c.getImageData(0,0,16,16).data)];});
   assert.deepEqual(pixels.sort((a,b)=>a-b),[0,255],'Magnified art must not invent interpolated colors');
-  await page.locator('#baselineLayer').check();await page.locator('#probabilityToggle').click();assert.equal(await page.locator('#heatmap').isChecked(),false);
+  await page.locator('#baselineLayer').check();await page.locator('#probabilityToggle').click({button:'right'});assert.equal(await page.locator('#heatmap').isChecked(),false);
   assert.equal(await page.locator('#baselineLayer').isChecked(),true,'Master preserves layer preference');
   await page.waitForFunction(()=>!qaMapRender.options.heatmap&&qaMapRender.colored===0);
   assert.deepEqual(errors,[]);await context.close();

@@ -70,14 +70,15 @@ assert.equal(R.apply(eraser,game.slice(0,3),true),false,'Erasing already empty c
 assert.equal(R.revision(eraser.regions[0]),1,'No-op erasing must reuse geometry/statistic caches.');
 assert.ok(R.apply(eraser,game.slice(3,4),true));
 assert.equal(R.encode(R.decode(R.encode(eraser),valid)),R.encode(eraser),'Empty survives backup roundtrip without adding a region.');
-// Fill uses edge connectivity and land/sea type, never distant equal colors.
+// Fill follows the same physical routes as automatic partition, within source membership.
 const fillCells=[{x:1,y:1,land:0},{x:2,y:1,land:0},{x:3,y:1,land:2},{x:4,y:1,land:0},{x:3,y:2,land:0}],fillLookup=new Map(fillCells.map(c=>[R.key(c),c])),fillDoc=R.defaults();
+for(const c of fillCells)Object.assign(c,{level:0,slope:0});const fillNavigation={cells:fillCells,navigation:{version:4,count:fillCells.length,flags:fillCells.map(c=>c.land===2?2:17)}};
 fillDoc.regions[1].cells=new Set(fillLookup.keys());fillDoc.active='r1';
-assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],fillLookup),[R.key(fillCells[0]),R.key(fillCells[1])]);
-assert.deepEqual(R.fillKeys(fillDoc,fillCells[2],fillLookup),[R.key(fillCells[2])]);
-fillDoc.regions[1].cells.delete(R.key(fillCells[1]));assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],fillLookup),[R.key(fillCells[0])]);
-assert.deepEqual(R.fillKeys(fillDoc,fillCells[1],fillLookup),[R.key(fillCells[1])],'Unassigned cells form their own fill membership');
-const cut=new Map(fillLookup);cut.delete(R.key(fillCells[0]));assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],cut),[]);
+assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],fillLookup,fillNavigation),[...fillLookup.keys()]);
+assert.deepEqual(R.fillKeys(fillDoc,fillCells[2],fillLookup,fillNavigation),[R.key(fillCells[2]),R.key(fillCells[3]),R.key(fillCells[4]),R.key(fillCells[1]),R.key(fillCells[0])]);
+fillDoc.regions[1].cells.delete(R.key(fillCells[1]));assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],fillLookup,fillNavigation),[R.key(fillCells[0])]);
+assert.deepEqual(R.fillKeys(fillDoc,fillCells[1],fillLookup,fillNavigation),[R.key(fillCells[1])],'Unassigned cells form their own fill membership');
+const cut=new Map(fillLookup);cut.delete(R.key(fillCells[0]));assert.deepEqual(R.fillKeys(fillDoc,fillCells[0],cut,fillNavigation),[]);
 const dirty=JSON.parse(R.encode(doc));dirty.regions[0].cells=[9999999];dirty.regions[0].color='url(bad)';
 assert.equal(R.decode(JSON.stringify(dirty),valid).regions[0].cells.size,0);
 assert.equal(R.decode(JSON.stringify(dirty),valid).regions[0].color,R.colors[0]);

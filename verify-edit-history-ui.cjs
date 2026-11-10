@@ -1,0 +1,47 @@
+/* Native mixed-editor history, independent preferences and stacked notices. */
+'use strict';
+const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const toy=process.env.SIM_EDITION==='toy',edition=toy?'toy':'full',base=process.env.SIM_BASE||'http://127.0.0.1:8767/';
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const p=await browser.newPage({viewport:{width:1900,height:1300}}),errors=[];
+ p.on('pageerror',e=>errors.push(e.stack));
+ await p.addInitScript(language=>localStorage.setItem('crate-atlas.language.v1',language),toy?'en':'zh-CN');
+ await p.route('**/language-settings.js*',r=>r.fulfill({contentType:'application/javascript',body:'globalThis.CrateLanguageSettings={saved:"zh-CN"};'}));
+ await p.route('**/region-statistics-ui.js*',async route=>{const response=await route.fetch(),body=await response.text();
+  const hook=`window.historyRegions={snapshot:()=>JSON.parse(R.encode(doc)),activate,staticAnchors(){const s=state(),view={x:s.x,y:s.y,scale:s.scale},labels=labelData(),cv=document.createElement('canvas'),ctx=cv.getContext('2d'),ops=[];ctx.strokeText=function(text,x,y){const m=this.measureText(text);ops.push({text,x,y,width:m.width,dy:(m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2});};ctx.fillText=()=>{};paintLabels(ctx,view,labels,area,s.data.rendering.cameraRect);const anchors=[];for(let i=0;i<ops.length;i+=4){const a=ops[i],b=ops[i+2],label=labels.find(l=>l.name===a.text);anchors.push({name:a.text,x:(a.x+b.x+b.width)/2,y:a.y-a.dy,expectedX:view.x+label.center.x*view.scale,expectedY:view.y+label.center.y*view.scale});}return anchors;}};\n`;
+  assert(body.includes('  return {load,beforeLoad:'));await route.fulfill({response,body:body.replace('  return {load,beforeLoad:',hook+'  return {load,beforeLoad:')});
+ });
+ await p.goto(base+(toy?'index.html':'maps.html?result=/output/map-22309489b5d3/result.json'));
+ const ready=()=>p.waitForFunction(()=>{const v=window.CrateMapViewer,s=v?.state;return v?.simulation.model&&!s.busy&&!s.simulationPending&&!s.simulationWaiting&&!s.regionPending&&!s.unitBuffPending&&!v.simulation.computing;},null,{timeout:120000});
+ await ready();if(toy){await p.locator('#mapFile').setInputFiles('D:/SteamLibrary/steamapps/common/Command & Conquer Red Alert II/SAVE537E-20261104-155756-719000.map');await p.waitForFunction(()=>CrateMapViewer.state.data.metadata.filename==='SAVE537E-20261104-155756-719000.map',null,{timeout:120000});await ready();}
+ await p.waitForFunction(()=>historyRegions.snapshot().autoHandled&&!CrateMapViewer.state.regionPending);
+ await p.locator('#minimap').uncheck();await p.locator('#regionToggle').click();
+ const fixture=await p.evaluate(()=>{const v=CrateMapViewer,m=v.simulation.model,d=historyRegions.snapshot(),r=d.regions.find(r=>r.cells.length&&r.generatedName?.kind==='land')||d.regions.find(r=>r.cells.length),keys=new Set(r.cells);historyRegions.activate(r.id);const c=m.source.cells.find(c=>c.level===0&&keys.has(c.x*1024+c.y)&&m.placement('MTNK',c.x,c.y).allowed);if(!c)throw Error('No editable regional land');const tile=v.state.lookup.get(c.x+','+c.y);v.state.scale=1;v.state.x=v.area.x+v.area.w/2-tile.px;v.state.y=v.area.y+v.area.h/2-tile.py;v.draw();return {x:c.x,y:c.y,key:c.x*1024+c.y,region:r.id,count:r.cells.length,regions:d.regions.length};});
+ const click=async()=>{await p.locator('#map').scrollIntoViewIfNeeded();const xy=await p.evaluate(c=>{const v=CrateMapViewer,t=v.state.lookup.get(c.x+','+c.y),r=document.getElementById('map').getBoundingClientRect(),k=r.width/v.viewport.width;return [r.x+(v.state.x+t.px*v.state.scale)*k,r.y+(v.state.y+t.py*v.state.scale)*k];},fixture);await p.mouse.click(...xy);await ready();};
+ const regionCount=()=>p.evaluate(id=>historyRegions.snapshot().regions.find(r=>r.id===id).cells.length,fixture.region);
+ await p.locator('#regionTool').selectOption('brush-game');await p.locator('#regionWidth').fill('1');await p.locator('#regionHeight').evaluate(e=>e.value='1');await p.locator('#regionOperation').selectOption('remove');await click();assert.equal(await regionCount(),fixture.count-1);
+ await p.locator('#simulationPlaceTab').click();await p.locator('#simulationPlaceShape').selectOption('brush',{force:true});await click();assert.equal(await p.evaluate(()=>CrateMapViewer.simulation.model.plan.placements.length),1);
+ await p.locator('#regionToggle').click();await p.locator('#regionToolbarActive').click();await p.locator('#regionToolbarOptions button[value="add"]').click();await ready();assert.equal(await p.evaluate(()=>historyRegions.snapshot().regions.length),fixture.regions+1);
+ await p.locator('#regionShowTotals').click();await p.locator('#dynamicRegionTitles').uncheck();await p.locator('#unitDisplay').selectOption('translucent');await p.locator('#palette').selectOption('cool');await p.locator('#viewMode').click();
+ async function unchanged(){assert.equal(await p.locator('#regionShowTotals').getAttribute('aria-pressed'),'false');assert.equal(await p.locator('#dynamicRegionTitles').isChecked(),false);assert.equal(await p.locator('#unitDisplay').inputValue(),'translucent');assert.equal(await p.locator('#palette').inputValue(),'cool');assert.equal(await p.evaluate(()=>CrateMapViewer.state.editMode),null);}
+ await p.locator('#simulationUndo').click();await ready();await unchanged();assert.equal(await p.evaluate(()=>historyRegions.snapshot().regions.length),fixture.regions);
+ await p.locator('#regionUndo').click();await ready();await unchanged();assert.equal(await p.evaluate(()=>CrateMapViewer.simulation.model.plan.placements.length),0);assert.equal(await regionCount(),fixture.count-1);
+ await p.locator('#map').focus();await p.keyboard.press('Control+z');await ready();await unchanged();assert.equal(await regionCount(),fixture.count);
+ await p.keyboard.press('Control+Shift+z');await ready();assert.equal(await regionCount(),fixture.count-1);
+ await p.locator('#regionRedo').click();await ready();assert.equal(await p.evaluate(()=>CrateMapViewer.simulation.model.plan.placements.length),1);
+ await p.locator('#simulationRedo').click();await ready();await unchanged();assert.equal(await p.evaluate(()=>historyRegions.snapshot().regions.length),fixture.regions+1);
+ const toasts=await p.locator('.edit-history-notice').allTextContents();assert(toasts.length>=2,toasts.join('\n'));assert(toasts.some(t=>/MTNK|坦克|Tank/.test(t)));const boxes=await p.locator('.edit-history-notice').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().top));assert(boxes.every((y,i)=>!i||y>=boxes[i-1]));
+ const qa=path.resolve('output/edit-history-qa');fs.mkdirSync(qa,{recursive:true});await p.screenshot({path:path.join(qa,edition+'-notices.png')});
+ // Redo branches are shared: a new region edit also discards tank redos.
+ await p.locator('#simulationUndo').click();await ready();await p.locator('#regionUndo').click();await ready();await p.locator('#regionToggle').click();await p.locator('#regionToolbarActive').click();await p.locator('#regionToolbarOptions button[value="add"]').click();await ready();
+ assert(await p.locator('#simulationRedo').isDisabled());assert(await p.locator('#regionRedo').isDisabled());assert.equal(await p.evaluate(()=>CrateMapViewer.simulation.model.canRedo),false);
+ // Opacity remains an explicit undoable edit, while visibility stays independent.
+ await p.locator('#regionTransparency').evaluate(e=>{e.value='25';e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));});await p.locator('#simulationUndo').click();await ready();assert.equal(await p.locator('#regionTransparency').inputValue(),'80');assert.equal(await p.locator('#regionShowTotals').getAttribute('aria-pressed'),'false');
+ await p.locator('#regionShowTotals').click();let anchors=await p.evaluate(()=>historyRegions.staticAnchors());assert(anchors.length);assert(anchors.every(a=>Math.abs(a.x-a.expectedX)<.01&&Math.abs(a.y-a.expectedY)<.01));
+ await p.evaluate(()=>{CrateMapViewer.state.x+=37;CrateMapViewer.state.y+=19;CrateMapViewer.draw();});anchors=await p.evaluate(()=>historyRegions.staticAnchors());assert(anchors.every(a=>Math.abs(a.x-a.expectedX)<.01&&Math.abs(a.y-a.expectedY)<.01));
+ await p.waitForTimeout(3500);assert.equal(await p.locator('.edit-history-notice').count(),0,'Notices fade and leave the stack');
+ await p.evaluate(()=>{window.noticeProbe=CrateEditHistory.createNotices();noticeProbe('first notice');});await p.waitForTimeout(500);await p.evaluate(()=>noticeProbe('second notice'));
+ const second=p.locator('.edit-history-notice').filter({hasText:'second notice'}),before=(await second.boundingBox()).y;await p.waitForTimeout(2870);
+ assert.equal(await p.locator('.edit-history-notice').filter({hasText:'first notice'}).count(),0);assert((await second.boundingBox()).y<before-20,'Remaining notices move upward after an older notice leaves');
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(qa,edition+'.json'),JSON.stringify({status:'PASS',mixedChronology:true,buttonsAndHotkeys:true,preferencesPreserved:true,sharedRedoBranch:true,explicitOpacityUndo:true,staticMapAnchors:true,toasts,noticesExpired:true,errors},null,2));console.log('PASS',edition,'mixed history, preserved settings, shared branches, stacked notices and static region titles');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

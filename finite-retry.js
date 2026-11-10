@@ -4,16 +4,24 @@
  const MODEL='finite-retry-v2',LIMIT=1000,PERIOD=5354228880;
  const gcd=(a,b)=>b?gcd(b,a%b):a,lcm=(a,b)=>a/gcd(a,b)*b,add=(m,k,n)=>m.set(k,(m.get(k)||0)+n);
  const pairs=[],ids=new Map();for(let n=1;n<=24;n++)for(let r=0;r<n;r++){ids.set(n*32+r,pairs.length);pairs.push([n,r]);}
+ const denominators=new Map(),nibbleBits=[0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4];
+ function bitLength(value){const hex=value.toString(16);return (hex.length-1)*4+nibbleBits[parseInt(hex[0],16)];}
+ function denominatorInfo(d){let entry=denominators.get(d);if(entry){denominators.delete(d);denominators.set(d,entry);return entry;}const bits=bitLength(d),drop=Math.max(0,bits-112);entry={bits,drop,head:d>>BigInt(drop)};denominators.set(d,entry);if(denominators.size>32)denominators.delete(denominators.keys().next().value);return entry;}
+ // The truncated operands bound the exact quotient. If their floors differ
+ // by one, a full-integer comparison resolves the boundary; wider intervals
+ // use ordinary division. No rounded decimal approximation reaches callers.
+ function positiveDivide(a,b,info=denominatorInfo(b),extraShift=0){const drop=info.drop+extraShift;if(drop<=0)return a/b;const head=a>>BigInt(drop),lo=head/(info.head+1n),hi=(head+1n)/info.head;return hi-lo<=1n?(a<hi*b?lo:hi):a/b;}
+ function divide(n,d){if(!d)return n/d;const negative=(n<0n)!==(d<0n);if(n<0n)n=-n;if(d<0n)d=-d;const q=positiveDivide(n,d);return negative?-q:q;}
  function ratio(n,d){
   if(n===0n)return 0;
   if(n<0n||d<=0n)throw Error('CODEC_RATIO');
-  let exponent=n.toString(2).length-d.toString(2).length;
+  const info=denominatorInfo(d);let exponent=bitLength(n)-info.bits;
   if(exponent>=0?n<(d<<BigInt(exponent)):(n<<BigInt(-exponent))<d)exponent--;
   // Round the rational to IEEE 754, nearest with ties to even, just as Python
   // integer true division does. Never coerce enormous integers to Number.
   if(exponent>1023)return Infinity;
   const shift=52-Math.max(exponent,-1022),a=shift>=0?n<<BigInt(shift):n,b=shift>=0?d:d<<BigInt(-shift);
-  let q=a/b;const remainder=a%b;
+  let q=positiveDivide(a,b,info,Math.max(0,-shift));const remainder=a-q*b;
   if(remainder*2n>b||(remainder*2n===b&&(q&1n)))q++;
   return Number(q)*2**(-shift);
  }
@@ -52,5 +60,5 @@
   let exhausted=0n;for(const[t,frames]of overall)exhausted+=BigInt(frames)*powers.get(t);
   return{...integrated,denominator,values,coefficients,exhausted,terminalCountRange:[Math.min(...overall.keys()),Math.max(...overall.keys())]};
  }
- const api={MODEL,LIMIT,PERIOD,pairs,ids,signature,kernel,integrate,ratio};root.CrateFiniteRetry=api;if(typeof module!=='undefined')module.exports=api;
+ const api={MODEL,LIMIT,PERIOD,pairs,ids,signature,kernel,integrate,ratio,divide};root.CrateFiniteRetry=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

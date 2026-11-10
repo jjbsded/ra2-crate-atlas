@@ -18,6 +18,7 @@ from realmap import TOOLS, ensure_tools, run
 from realmap_exact import read_search
 from realmap_parser import object_records, parse_map, rebuild_layout
 from realmap_simulation import HOUSE, apply, changed_points
+from region_navigation import State as NavigationState
 from simulation_visual import Scene
 
 
@@ -133,6 +134,8 @@ class LiveSession:
         self.grid, self.statuses = grid, statuses
         self.layout_version = self.art_version = revision
         self.latest_scene = revision, self.plan, cells, theater
+        self.navigation = NavigationState([cells[p] for p in self.display_cells], meta, theater['effectiveRules'], report.get('regionNavigation'))
+        self.sent_navigation = report.get('regionNavigation')
         self.markers = {tuple(p) for p in report['markers']}
         self.shadowed = {tuple(p) for p in report['zeroProbabilityRockCandidates']}
         self.lock, self.art_lock = Lock(), Lock()
@@ -149,6 +152,7 @@ class LiveSession:
         other.latest_scene = revision, other.plan, self.latest_scene[2], dict(self.latest_scene[3], _layoutPrepared=other.prepared)
         other.grid, other.statuses = bytearray(self.grid), bytearray(self.statuses)
         other.store = fork_store(self.store)
+        other.navigation = self.navigation.fork()
         other.scene = self.scene.fork(res)
         other.markers, other.shadowed = set(self.markers), set(self.shadowed)
         other.layout_version = other.art_version = revision
@@ -271,6 +275,9 @@ class LiveSession:
                 self.latest_scene = revision, plan, cells, theater
                 self.ready.notify_all()
             dirty = theater['_layoutDirty']
+            navigation_started = perf_counter()
+            navigation = self.navigation.update((cells[p] for p in dirty), self.meta, theater['effectiveRules'])
+            navigation_ms = (perf_counter()-navigation_started)*1000
             for x, y in dirty:
                 index = y*512+x
                 cell = cells[x,y]
@@ -318,16 +325,25 @@ class LiveSession:
                 [['markers'], sorted(self.markers)],
                 [['zeroProbabilityRockCandidates'], sorted(self.shadowed)],
             ])
+            if navigation != self.sent_navigation:
+                sets.append([['regionNavigation'], navigation])
+            if self.meta.get('approximate'):
+                sets.extend([
+                    [['metadata','riskPredictionVersion'], 1],
+                    [['metadata','riskUnknownCellCount'], len(self.prepared.get('riskUnknown', ()))],
+                ])
             if payload.get('planEcho', True):
                 sets.append([['metadata','simulationPlan'], plan])
             self.plan, self.layout_version, self.sent_probability = plan, revision, computed
+            self.sent_navigation = navigation
             return dict(probabilityPatch=1, live=True, reweighted=not kernel['coefficientsReused'], baseRevision=payload['baseRevision'],
                         probabilityRevision=f'{self.token}-{revision}', revision=revision,
                         maximumNumerator=str(maximum_numerator),
                         sourceSha256=self.meta['sourceSha256'], version=self.meta['version'],
                         cellCount=len(cells), cells=changes, sets=sets, removed=[],
-                        timing=dict(layoutMs=layout_ms, solveMs=solve_ms, dependencyMs=dependency_ms, aggregateMs=aggregate_ms,
+                        timing=dict(layoutMs=layout_ms, solveMs=solve_ms, dependencyMs=dependency_ms, aggregateMs=aggregate_ms, navigationMs=navigation_ms,
                                     aggregateMode=kernel['aggregateMode'], evaluatedDistributions=kernel['evaluatedDistributions'],
+                                    kernelCacheHit=kernel.get('kernelCacheHit',False),
                                     examinedOrigins=stats['examinedOrigins'], coefficientsReused=kernel['coefficientsReused'], totalMs=(perf_counter()-started)*1000,
                                     searched=stats['searchedOrigins'], destinations=len(touched)))
 
@@ -388,6 +404,9 @@ class LiveSession:
         self.art_version = painted
         self.layout_version = probability
         self.latest_scene = probability, self.plan, *self.latest_scene[2:]
+        # The resumed browser may hold an older auxiliary bitmap even when its
+        # probability checkpoint is current. Publish the authoritative one next.
+        self.sent_navigation = None
 
     def paint(self, payload):
         if type(payload.get('planEcho', True)) is not bool:
@@ -412,7 +431,7 @@ class LiveSession:
                         or any(type(n) is not int or abs(n) > 65536 for n in focus))):
                 raise ValueError('Invalid live artwork batch')
             known_ground = payload.get('knownGrounds', [])
-            if (not isinstance(known_ground, list) or len(known_ground) > 64 or
+            if (not isinstance(known_ground, list) or len(known_ground) > 512 or
                     any(not isinstance(k, str) or len(k) > 96 for k in known_ground)):
                 raise ValueError('Invalid artwork ground checkpoint')
             update_started = perf_counter()

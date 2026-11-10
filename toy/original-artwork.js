@@ -45,7 +45,15 @@
    const image=canvas(chunkSize,chunkSize),ctx=image.getContext('2d');ctx.translate(-x*chunkSize,-y*chunkSize);paint(ctx,buckets.get(key)||[]);cache.set(key,image);
    while(cache.size>(mobile()?24:48)){const key=cache.keys().next().value,old=cache.get(key);cache.delete(key);old.width=old.height=1;}return image;
   }
-  return {width,height,original:true,draw(ctx,...args){
+  return {width,height,original:true,...(scene.export?{async renderExport(ctx,view,area){
+   const left=Math.max(0,(area.x-view.x)/view.scale),top=Math.max(0,(area.y-view.y)/view.scale),right=Math.min(width,(area.x+area.w-view.x)/view.scale),bottom=Math.min(height,(area.y+area.h-view.y)/view.scale);
+   // Small exports retain the native-chunk resampling / warmed overview path.
+   // Large exports previously replayed the whole mixed scene synchronously.
+   if(view.scale<=Math.min(1,(mobile()?1280:2048)/Math.max(width,height))||(Math.ceil(right/chunkSize)-Math.floor(left/chunkSize))*(Math.ceil(bottom/chunkSize)-Math.floor(top/chunkSize))<=64)return false;
+   ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();ctx.beginPath();ctx.rect(view.x,view.y,width*view.scale,height*view.scale);ctx.clip();
+   const transform={...view,scaleX:(view.width??width*view.scale)/width,scaleY:(view.height??height*view.scale)/height};
+   try{return await scene.export(layer,ctx,transform,area);}finally{ctx.restore();}
+  }}:{}),draw(ctx,...args){
    let sx=0,sy=0,sw=width,sh=height,dx,dy,dw,dh;
    if(args.length===8)[sx,sy,sw,sh,dx,dy,dw,dh]=args;else [dx,dy,dw=width,dh=height]=args;
    if(!(sw>0&&sh>0&&dw>0&&dh>0))return;
@@ -61,7 +69,10 @@
    if(count>64||ctx.cratePreviewTile&&scene.paint){const ids=new Set();for(let y=Math.floor(top/chunkSize);y<Math.ceil(bottom/chunkSize);y++)for(let x=Math.floor(left/chunkSize);x<Math.ceil(right/chunkSize);x++)for(const i of buckets.get(`${x},${y}`)||[])ids.add(i);paint(ctx,[...ids].sort((a,b)=>a-b));}
    else for(let y=Math.floor(top/chunkSize);y<Math.ceil(bottom/chunkSize);y++)for(let x=Math.floor(left/chunkSize);x<Math.ceil(right/chunkSize);x++)ctx.drawImage(chunk(x,y),x*chunkSize,y*chunkSize);
    ctx.restore();
-  },stats:()=>({chunks:cache.size,overviewPixels:overview?overview.width*overview.height:0,commands:sequence.length})};
+  },prepareThumbnail(crop,size){
+   if(!scene.thumbnail||size[0]/crop[2]<=Math.min(1,(mobile()?1280:2048)/Math.max(width,height)))return null;
+   return scene.thumbnail(layer,crop,size);
+  },setOverview:image=>{overview=image;},stats:()=>({chunks:cache.size,overviewPixels:overview?overview.width*overview.height:0,commands:sequence.length})};
  }
  async function create(report,base,readJSON,{signal}={}){
   const config=report.rendering.original,url=new URL(base+config.index,document.baseURI).href,shared=await bundle(url,readJSON);signal?.throwIfAborted();
@@ -70,7 +81,7 @@
   scene.im=im;scene.objectImage=objectImage;
   return {im,objectImage};
  }
- function get(report){const scene=scenes.get(report);if(!scene)throw Error('Original map artwork is not ready');return scene;}
+ function get(report,{optional=false}={}){const scene=scenes.get(report);if(!scene&&!optional)throw Error('Original map artwork is not ready');return scene;}
  function sprite(scene,ref){
   if(!ref)return null;const a=scene.data.assets[ref[0]],c=canvas(a[3],a[4]);c.getContext('2d').drawImage(scene.images[a[0]],a[1],a[2],a[3],a[4],0,0,a[3],a[4]);return c;
  }

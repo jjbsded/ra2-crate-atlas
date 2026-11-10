@@ -20,4 +20,13 @@ for(const a of [{x:24,y:3,w:1552,h:878},{x:8,y:8,w:374,h:700}]){
 }
 const ground=createCanvas(40,30),objects=createCanvas(40,30),out=createCanvas(40,30);ground.getContext('2d').fillStyle='#204060';ground.getContext('2d').fillRect(0,0,40,30);objects.getContext('2d').drawImage(ground,0,0);objects.getContext('2d').fillStyle='#e08020';objects.getContext('2d').fillRect(10,5,20,20);
 A.scene(out.getContext('2d'),{x:0,y:0,scale:1,image:ground,objectImage:objects},{width:40,height:30},{objects:true,objectOpacity:.5});assert.deepEqual([...out.getContext('2d').getImageData(1,1,1,1).data],[32,64,96,255]);assert.deepEqual([...out.getContext('2d').getImageData(15,10,1,1).data],[128,96,64,255]);
-console.log('PASS valid origin coordinates, terrain holes, immutable exports, elastic bounds, return cancellation and ground-preserving object transparency');
+const portrait={x:0,y:0,w:360,h:600},validBounds={x:-1200,y:0,w:2400,h:1200},terrainBounds={x:-600,y:300,w:1200,h:600};
+const overview={x:180,y:120,scale:.3};assert(N.minimum(validBounds,portrait)>.3);assert.equal(N.minimum(validBounds,portrait,terrainBounds),.3);
+assert.deepEqual(N.target(overview,validBounds,portrait,terrainBounds),overview,'Portrait navigation must admit the complete terrain overview');
+const initial={...overview},overviewNav=N.create({getView:()=>initial,getBounds:()=>validBounds,getFitBounds:()=>terrainBounds,getArea:()=>portrait,onChange(){},request(){throw Error('A fitted terrain overview must not start a spring return');}});
+overviewNav.clamp();assert.deepEqual(initial,overview);overviewNav.settle();assert.equal(overviewNav.active,false);assert(Math.abs(overviewNav.zoom(.3)-.3)<1e-12);
+const raised={x:-600,y:-200,w:1200,h:600},wide={x:0,y:0,w:800,h:300},raisedView={x:400,y:100,scale:.5};
+assert.notDeepEqual(N.target(raisedView,validBounds,wide),raisedView);
+assert.deepEqual(N.target(raisedView,validBounds,wide,raised),raisedView,'A fitted raised terrain edge is not shifted back into the coordinate rectangle');
+assert.deepEqual(N.input(raisedView,validBounds,wide,raised),raisedView,'Elastic input admits the same terrain overview');
+console.log('PASS valid origin coordinates, terrain holes, immutable exports, elastic bounds, full-terrain portrait overview, return cancellation and ground-preserving object transparency');

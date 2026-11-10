@@ -40,6 +40,10 @@ def patch(current, base, base_revision):
             sets.append([path, value])
     for key in ('metadata', 'probability', 'markers', 'zeroProbabilityRockCandidates', 'potentialMarkers', 'clearance'):
         difference(current[key], base.get(key), [key])
+    if 'regionNavigation' in current:
+        difference(current['regionNavigation'], base.get('regionNavigation'), ['regionNavigation'])
+    elif 'regionNavigation' in base:
+        removed.append(['regionNavigation'])
     return dict(probabilityPatch=1, baseRevision=base_revision,
                 probabilityRevision=current['probabilityRevision'],
                 sourceSha256=current['metadata']['sourceSha256'], version=current['metadata']['version'],

@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),M=require('./simulation-model.js'),P=require('./toy-live/parser.js');
+const source=JSON.parse(fs.readFileSync('output/simulation-20261104/source.json','utf8')),stock=JSON.parse(fs.readFileSync('output/simulation-20261104/stock.json','utf8')),m=M.create(source),initial=JSON.stringify(source),cases=[];
+const choice=m.choice('CAOILD');assert(choice?.rubble&&choice.category==='RUBBLE');assert.equal(choice.footprint.length,4);
+const point=source.cells.find(c=>m.placement('CAOILD',c.x,c.y).allowed);assert(point);const{x,y}=point,keys=choice.footprint.map(([dx,dy])=>`${x+dx},${y+dy}`);
+function record(name,model=m){const data=M.materialize(model.source,model.plan);cases.push({name,source:model.source,plan:model.plan,map:data.map,cells:data.cells.map(c=>[`${c.x},${c.y}`,c.overlay,c.overlayData])});}
+assert(m.place('CAOILD',x,y));const placed=m.plan;assert.equal(placed.placements[0].category,'RUBBLE');
+for(const k of keys){assert.equal(m.current().cells.get(k).overlayName,'RUBBLE_OVERLAY');assert(!m.current().occupants.get(k)?.length);const[cx,cy]=k.split(',').map(Number);assert.equal(m.sample(cx,cy),'CAOILD');}
+assert(M.create(source).import(placed));assert.deepEqual(M.create(source).normalized(placed),placed);assert(!m.paint(keys,'normal'),'Ordinary destruction preserves rubble');assert.deepEqual(m.plan,placed);record('placed');
+const parsed=P.parse(new Uint8Array(),stock,source.version,true,'rubble.map',()=>{},{source,plan:placed});for(const k of keys){const[cx,cy]=k.split(',').map(Number),c=parsed.lookup.get(P.key(cx,cy));assert.equal(c.overlayName,'RUBBLE_OVERLAY');assert(!c.occupiedGround,'Rubble is not a living building');}
+assert(parsed.visualObjects.some(o=>o.type==='CAOILD'&&JSON.parse(o.key)[3]===0),'Toy renders health-zero original rubble art');
+for(const mode of ['chrono','magnet','restore']){assert(m.paint([keys[3]],mode),mode+' removes the whole rubble footprint');assert.equal(m.plan.placements.length,0);for(const k of keys)assert.equal(m.current().cells.get(k).overlay,m.baseline.get(k).overlay);record(mode);assert(m.undo());assert.deepEqual(m.plan,placed);assert(m.redo());assert.equal(m.plan.placements.length,0);assert(m.undo());}
+assert.equal(m.sampleObject({isRubble:true}).priority,0);assert.equal(m.sampleObject({initialRubble:true}).type,'CAOILD');assert.equal(m.sampleObject({category:'RUBBLE'}).type,'CAOILD');
+const sample=m.current(),cell=sample.cells.get(keys[0]),ore=m.choices.find(c=>c.ore),types=Object.entries(source.rules.OVERLAYTYPES).sort((a,b)=>Number(a[0])-Number(b[0])).map(([,v])=>v.toUpperCase());cell.overlay=types.indexOf(ore.type);assert.equal(m.sample(x,y,{state:sample,hitObject:{isRubble:true}}),ore.type,'Ore wins over rubble');
+assert.equal(m.sampleObject({type:ore.type,category:'OVERLAY'}).priority,1);assert.equal(m.sampleObject({type:'MTNK',category:'UNITS'}).priority,5);
+for(const change of [c=>c.rawLand=2,c=>c.rawLand=6,c=>c.rawLand=3,c=>c.slope=1,c=>c.level++,c=>{c.overlay=74;c.bridge={kind:'low'};},c=>c.overlay=types.indexOf('GAWALL')]){const s=structuredClone(source);change(s.cells.find(c=>c.x===x+1&&c.y===y+1));const model=M.create(s);assert(!model.placement('CAOILD',x,y,{ignoreLand:true}).allowed,'Rubble requires flat, unobstructed land even with Ignore building land/water');}
+const protectedSource=structuredClone(source);protectedSource.rules.CAOILD.IMMUNE='yes';const protectedModel=M.create(protectedSource);assert(protectedModel.place('CAOILD',x,y));assert(protectedModel.paint(keys,'chrono'),'Placed rubble remains erasable under embedded immune rules');
+assert.equal(JSON.stringify(source),initial,'Original source is immutable');
+if(process.argv[2]){fs.mkdirSync(path.dirname(process.argv[2]),{recursive:true});fs.writeFileSync(process.argv[2],JSON.stringify(cases));}
+console.log('PASS oil rubble 2x2 flat-land validation, original artwork state, no building occupancy, three removal modes, atomic history, import and picker priority');

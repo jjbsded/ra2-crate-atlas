@@ -9,22 +9,17 @@
  const unitGroups=['tank','scorpion','hover'];
  const groups=['land','sea','all',...unitGroups],fields=['total','average'];
  const unitGroup=g=>unitGroups.includes(g);
- function thumbnailLayout(bounds,rendering,width,height,overview){
-  let crop={x:0,y:0,w:rendering.width,h:rendering.height};
-  if(!overview){
-   const scale=Math.min(width/bounds.w,height/bounds.h),w=Math.min(rendering.width,width/scale),h=Math.min(rendering.height,height/scale);
-   crop={x:Math.max(0,Math.min(rendering.width-w,bounds.x+(bounds.w-w)/2)),y:Math.max(0,Math.min(rendering.height-h,bounds.y+(bounds.h-h)/2)),w,h};
-  }
-  const scaleX=width/crop.w,scaleY=height/crop.h;
-  return {crop,view:{x:-crop.x*scaleX,y:-crop.y*scaleY,scale:scaleX,scaleX,scaleY}};
- }
- function create({getState,getDisplay,schedule,schedulePreview,pick,area,onMode,loadNavigation,showOverlay,onRegionsChanged,getBuffs,revealMap,onPending,onError,onInteraction}){
+ function create({editHistory,getState,getDisplay,schedule,schedulePreview,pick,area,onMode,onAside,loadNavigation,prepareNavigation,showOverlay,onRegionsChanged,getBuffs,revealMap,onPending,onError,onInteraction}){
   let doc=R.defaults(),lookup=new Map(),eligible=new Map(),stats=new Map(),storageKey='',active=false,summaryVisible=false,toolsVisible=false,stroke=null,hover=null,history=[],future=[],saveTimer=null,storageBlocked=false,nameEditing=false,colorEditing=false,opacityEditing=false;
   const overlayVisible=()=>showOverlay?.()??active;
-  let selectionIndex=null,geometryCache=new WeakMap(),statisticsCache=new WeakMap(),labelCache=new WeakMap(),thumbnailCache=new WeakMap(),rasterCache=new Map(),rasterPixels=0;
+  let selectionIndex=null,geometryCache=new WeakMap(),statisticsCache=new WeakMap(),labelCache=new WeakMap(),rasterCache=new Map(),rasterPixels=0;
   const titleMotion=new Map(),titleInterval=250,titleFade=200;
   const titleViewport=root.CrateRegionLabelLayout.createMotion();let titleWake=null,titleWakeAt=0,titleLayoutAt=-Infinity;
-  const titleTuning={settings:root.CrateRegionLabelLayout.defaults};
+  const titleTuning=root.CrateRegionTitleControls.create({host:document.body,onChange:()=>{
+   for(const motion of titleMotion.values())motion.viewKey='';titleLayoutAt=-Infinity;schedule();
+  }});
+  let pendingColor=null,colorTimer=null;
+  function commitColor(){clearTimeout(colorTimer);colorTimer=null;if(!pendingColor)return;const {region,color}=pendingColor;pendingColor=null;if(!doc.regions.includes(region)||region.color===color)return;region.color=color;refresh();schedule();saveSoon();onRegionsChanged?.();}
   function resetTitleTracking(clear=true){if(clear)titleMotion.clear();titleViewport.reset();titleLayoutAt=-Infinity;clearTimeout(titleWake);titleWake=null;titleWakeAt=0;}
   function wakeTitles(now,delay){const due=now+Math.max(1,delay);if(titleWake!==null&&Math.abs(due-titleWakeAt)<1)return;clearTimeout(titleWake);titleWakeAt=due;titleWake=setTimeout(()=>{titleWake=null;schedule();},Math.max(1,delay));}
   const titleSprites=new Map();let titleSpritePixels=0;
@@ -34,16 +29,34 @@
   // small world-space tiles need authoritative membership drawing meanwhile.
   const liveOverlayTiles=new Map();let overlayRevision=0;
   let editJournal=new WeakMap();
-  const labelVisibility=new WeakMap(),surfaceBoxes=new WeakMap();
+  const labelVisibility=new WeakMap(),surfaceBoxes=new WeakMap(),visibleTitleBoxes=new WeakMap();
   const emptyRegion={id:R.EMPTY,color:'#526673',cells:new Set()},isEmpty=()=>doc.active===R.EMPTY;
   const current=()=>isEmpty()?emptyRegion:doc.regions.find(r=>r.id===doc.active),state=getState;
-  let automatic=null,autoEpoch=0,autoTimer=null;
+  let automatic=null,autoPreparing=null,autoEpoch=0,autoTimer=null;
+  function autoButtons(running=false){for(const id of ['regionAutoRun','regionAutoQuick'])$(id).textContent=_t(running?'取消自动划分':'启动划分');}
   const navigationCache=new WeakMap();
+  let filling=null;
+  function cancelFill(){if(!filling)return;filling.abort();filling=null;if($('regionActionStatus').textContent===_t('正在填充…'))$('regionActionStatus').textContent='';}
+  async function navigationFor(s,signal){
+   const data=s.data;let navigation=navigationCache.get(data)||data.regionNavigation;
+   if(navigation?.version!==root.CrateRegionAuto.navigationVersion)navigation=null;
+   if(!navigation){
+    if(loadNavigation)navigation=await loadNavigation(s,signal);
+    else if(root.CrateWebConfig?.static)throw Error(_t('此网页版缺少自动划分通行数据，请更新网页包。'));
+    else navigation=await root.CrateLocalAPI.json('/api/maps/region-navigation?'+new URLSearchParams({result:s.prepared?.url||s.baseUrl+'result.json'}),{signal});
+    signal.throwIfAborted();navigationCache.set(data,navigation);
+   }
+   return navigation;
+  }
   let memberDoc=null,memberStamp='',members=new Map(),notifiedMemberDoc=null,notifiedMemberStamp='';
   const rows=new Map(),numberRows=new Map(),inspection=new Map();
   let tableControls=null;
-  const thumbnailButtons=new Map(),thumbnailApplied=new Map();
-  let thumbnailTransparency=doc.transparency,thumbnailJob=null,pendingThumbnails=false,rowsStamp='',hoverTimer=null;
+  let pendingThumbnails=false,rowsStamp='',hoverTimer=null;
+  const thumbnails=root.CrateRegionThumbnails.create({
+   getState:state,getDocument:()=>doc,getGeometry:geometry,paintRegion,
+   getSettings:()=>({size:tableControls?.overview,objects:$('objects').checked,players:$('players').checked,playerStyles:playerMarks,playerStylesKey:playerMarksKey}),
+   isVisible:()=>summaryVisible,isDrawing:()=>!!stroke,onDeferred:()=>{pendingThumbnails=true;}
+  });
   const previewChanged=()=>schedulePreview?schedulePreview():schedule();
   let numbers=new Map(),ranks=new Map(),sideMode='details';
   const asynchronous=typeof root.requestAnimationFrame==='function'&&!!root.CrateRegionRefreshQueue;
@@ -68,7 +81,7 @@
    if(!asynchronous&&(!cached||cached.revision!==R.revision(reg))){cached={revision:R.revision(reg),value:R.statistics(reg,lookup,getDisplay())};statisticsCache.set(reg,cached);}
    return cached?.value||emptyStatistics;
   }
-  function flushRefresh(){refreshQueue?.flush(refreshTarget());}
+  function flushRefresh(){commitColor();refreshQueue?.flush(refreshTarget());}
   function* prepareRefresh(target){
    const result=[];
    for(const entry of target.regions){
@@ -81,25 +94,11 @@
     const geometry=sameRevision?previous:sameCells?{...previous,revision:entry.revision,rebuiltTiles:0,keys:entry.region.cells}:local?yield* patchGeometry(entry.region,previous,entry.changes.keys,target.lookup,entry.revision):yield* buildGeometry(entry.region,previous,target.lookup,entry.revision);
     geometry.terrainRevision=target.terrainRevision;
     const sameProbability=entry.statistics?.display===target.display&&entry.statistics.data===target.data;
-    const value=sameCells&&sameProbability?entry.statistics.value:local&&sameProbability&&entry.statistics.revision===previous.revision?yield* patchStatistics(entry.region,previous,entry.changes.keys,entry.statistics.value,target.lookup,target.display):yield* buildStatistics(entry.region,target.lookup,target.display);
+    const value=sameCells&&sameProbability?entry.statistics.value:local&&sameProbability&&entry.statistics.revision===previous.revision?yield* R.patchStatisticsSteps(entry.region,previous.keys,entry.changes.keys,entry.statistics.value,target.lookup,target.display):yield* R.statisticsSteps(entry.region,target.lookup,target.display);
     const statistics={revision:entry.revision,display:target.display,data:target.data,value};
-    result.push({source:entry.source,geometry,statistics,rebuiltTiles:geometry.rebuiltTiles,local});yield;
+    result.push({source:entry.source,geometry,statistics,rebuiltTiles:sameRevision?0:geometry.rebuiltTiles,local});yield;
    }
    return result;
-  }
-  function* buildStatistics(reg,sourceLookup,display){
-   const land={count:0,n:0n},sea={count:0,n:0n};let steps=0;
-   for(const k of reg.cells){const c=sourceLookup.get(k);if(c){const g=c.land===2?sea:land;g.count++;g.n+=display.get(c).numerator;}if(++steps%128===0)yield;}
-   const all={count:land.count+sea.count,n:land.n+sea.n},ratio=(n,d)=>d?Number(n*1000000000000n/d)/1e12:0;
-   for(const g of [land,sea,all]){g.total=ratio(g.n,display.baselineNumerator);g.average=g.count?ratio(g.n,display.baselineNumerator*BigInt(g.count)):null;}
-   return {land,sea,all};
-  }
-  function* patchStatistics(reg,previous,changes,value,sourceLookup,display){
-   const land={count:value.land.count,n:value.land.n},sea={count:value.sea.count,n:value.sea.n};let steps=0;
-   for(const key of changes.keys()){const before=previous.keys.has(key),after=reg.cells.has(key),c=sourceLookup.get(key);if(c&&before!==after){const g=c.land===2?sea:land,sign=after?1:-1;g.count+=sign;g.n+=BigInt(sign)*display.get(c).numerator;}if(++steps%128===0)yield;}
-   const all={count:land.count+sea.count,n:land.n+sea.n},ratio=(n,d)=>d?Number(n*1000000000000n/d)/1e12:0;
-   for(const g of [land,sea,all]){g.total=ratio(g.n,display.baselineNumerator);g.average=g.count?ratio(g.n,display.baselineNumerator*BigInt(g.count)):null;}
-   return {land,sea,all};
   }
   function adoptDocument(next){
    refreshQueue?.reset();
@@ -108,7 +107,7 @@
    doc=next;
   }
   function membership(){
-   const stamp=doc.regions.map(r=>r.id+':'+r.color+':'+R.revision(r)).join('|');
+   const stamp=doc.regions.map(r=>r.id+':'+R.revision(r)).join('|');
    if(memberDoc===doc&&memberStamp===stamp)return members;
    const next=new Map();
    for(const r of doc.regions)for(const key of r.cells){
@@ -185,17 +184,38 @@
    }));
   if(scroll)scroll.scrollTop=top;
   }
+  const asideTabs=[['regionDetailsTab','details'],['regionRankingTab','ranking'],['blockedCellsTab','blocked'],['seaLandCellsTab','connections']];
+  const asidePositions=new Map();let shownAside=null,asideRestore=0;
+  function saveAsidePosition(){
+   if(!shownAside)return;
+   const aside=$('mapAside'),nodes=[aside,...(aside.querySelectorAll?.('#cellAside,#regionEditor,.placement-region-details section,.region-ranking-scroll,#coordinateLists')||[])];
+   asidePositions.set(shownAside,nodes.filter(node=>node.getClientRects?.().length).map(node=>({node,top:node.scrollTop,left:node.scrollLeft})));
+  }
+  function restoreAsidePosition(mode){
+   const positions=asidePositions.get(mode)||[{node:$('mapAside'),top:0,left:0}],ticket=++asideRestore;
+   const restore=()=>{if(ticket!==asideRestore||shownAside!==mode)return;for(const {node,top,left}of positions){node.scrollTop=top;node.scrollLeft=left;}};
+   restore();root.requestAnimationFrame?.(()=>root.requestAnimationFrame(restore));
+  }
+  for(const event of ['wheel','pointerdown','touchstart'])$('mapAside').addEventListener?.(event,()=>{asideRestore++;},{passive:true});
   function updateAside(){
-   const ranking=toolsVisible&&sideMode==='ranking';
-   $('regionAsideTabs').hidden=!toolsVisible;
-   $('mapAside').classList.toggle('region-aside-open',toolsVisible);
-   $('regionDetailsTab').setAttribute('aria-pressed',String(!ranking));
-   $('regionRankingTab').setAttribute('aria-pressed',String(ranking));
+   const mode=!toolsVisible&&sideMode==='ranking'?'details':sideMode,ranking=mode==='ranking',coordinates=mode==='blocked'||mode==='connections',details=mode==='details';
+   const changed=shownAside!==mode;if(changed)saveAsidePosition();
+   $('regionAsideTabs').hidden=false;
+   $('regionAsideTabs').classList.toggle('cell-tabs-only',!toolsVisible);
+   $('mapAside').classList.toggle('region-aside-open',toolsVisible&&!coordinates);
+   $('mapAside').classList.toggle('coordinate-lists-open',coordinates);
+   $('regionRankingTab').hidden=!toolsVisible;
+   for(const [id,value]of asideTabs){const button=$(id),selected=mode===value;button.setAttribute('aria-pressed',String(selected));button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;}
    $('regionRanking').hidden=!ranking;
-   $('placementRegionDetails').hidden=!toolsVisible||active||ranking;
-   $('regionEditor').hidden=!active||ranking;
-   $('cellAside').hidden=toolsVisible;
+   $('placementRegionDetails').hidden=!toolsVisible||active||!details;
+   $('regionEditor').hidden=!active||!details;
+   $('cellAside').hidden=toolsVisible||!details;
+   $('coordinateLists').hidden=!coordinates;
+   $('riskLists').hidden=mode!=='blocked';
+   $('seaLandLists').hidden=mode!=='connections';
+   onAside?.(mode);
    if(ranking)renderRanking($('regionSort').value||'all.total');
+   shownAside=mode;if(changed)restoreAsidePosition(mode);
   }
   function renderPlacement(pointer,last){
    if($('placementRegionDetails').hidden)return;
@@ -234,33 +254,33 @@
      const label=document.createElement('label'),select=document.createElement('select');select.id='regionTeam'+p.number;
      label.append(document.createTextNode(_t`玩家${p.number}`));select.setAttribute('aria-label',_t`玩家${p.number}的队伍`);
      for(const [value,text]of [['A','A'],['B','B'],['C','C'],['D','D'],['neutral',_t('中立')],['empty',_t('空')]]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
-     select.onchange=()=>{checkpoint();doc.autoOptions=root.CrateRegionAuto.options({...doc.autoOptions,teams:{...doc.autoOptions.teams,[p.number]:select.value}});presentationChanged();$('regionAutoStatus').textContent=_t('队伍设置已保存，重新自动划分后生效。');};
+     select.onchange=()=>{checkpoint(_t('玩家队伍设置'));doc.autoOptions=root.CrateRegionAuto.options({...doc.autoOptions,teams:{...doc.autoOptions.teams,[p.number]:select.value}});presentationChanged();$('regionAutoStatus').textContent=_t('队伍设置已保存，重新自动划分后生效。');};
      label.append(select);$('regionAutoTeams').append(label);teamControls.set(p.number,select);
     }
    }
    for(const[number,select]of teamControls)select.value=doc.autoOptions.teams[number]||'neutral';
   }
   function cancelAuto(quiet=false){
-   ++autoEpoch;clearTimeout(autoTimer);autoTimer=null;automatic?.abort();automatic=null;
-   $('regionAutoFields').disabled=false;$('regionAutoRun').textContent=_t('重新自动划分');
+   ++autoEpoch;clearTimeout(autoTimer);autoTimer=null;automatic?.abort();automatic=null;autoPreparing=null;
+   $('regionAutoFields').disabled=false;autoButtons();
    $('regionAutoProgress').hidden=true;
    if(!quiet)$('regionAutoStatus').textContent=_t('自动划分已取消。');
   }
   const tool=()=>$('regionTool').value;
   let lastTool=tool()||'brush-ellipse',shiftHeld=false,ctrlHeld=false;
-  const picking=()=>stroke?stroke.tool==='picker':tool()==='picker'||ctrlHeld;
+  const picking=()=>stroke?stroke.tool==='picker':tool()==='picker'||ctrlHeld&&!state().ctrlResizing;
   const removing=()=>isEmpty()||Boolean(stroke?.baseRemove??($('regionOperation').value==='remove'))!==shiftHeld;
   function cursorInfo(){
    if(!active||!overlayVisible()||picking())return null;
    const empty=isEmpty(),r=current(),t=stroke?.tool||tool();
    return {label:empty?_t('操作:'):_t('操作:')+' '+(removing()?_t('移出'):_t('加入'))+' '+R.displayName(r),
     region:{id:r.id,name:empty?_t('消除区域'):R.displayName(r),color:r.color,empty},
-    hint:t==='fill'?_t('单击填充连通区域'):t.startsWith('box')?_t('按住左键拖动框选'):''};
+    shape:t.startsWith('box')?t:null,hint:t==='fill'?_t('单击填充连通区域'):t.startsWith('box')?_t('按住左键拖动框选'):''};
   }
   function syncCursor(){document.getElementById('map').classList.toggle('region-fill-cursor',!!active&&overlayVisible()&&!picking()&&tool()==='fill'&&!!hover);}
   function interactionHint(){
    $('regionEyedropper').setAttribute('aria-pressed',String(tool()==='picker'));
-   $('regionModifierStatus').textContent=!active?'':picking()?_t('滴管：点击对象或区域'):isEmpty()?_t('空：清除命中格的所有区域归属，Shift 不反转'):shiftHeld?_t`Shift · 临时${removing()?_t('取消选择'):_t('选择')}`:tool()==='fill'?_t('填充：点击同区域、同海陆的四边连通部分'):'';
+   $('regionModifierStatus').textContent=!active?'':picking()?_t('滴管：点击对象或区域'):isEmpty()?_t('空：清除命中格的所有区域归属，Shift 不反转'):shiftHeld?_t`Shift · 临时${removing()?_t('取消选择'):_t('选择')}`:tool()==='fill'?_t('填充：点击连通部分，陆地不跨海岸线；已有区域可跨海陆'):'';
    $('regionModifierStatus').title=$('regionModifierStatus').textContent;
    syncCursor();
   }
@@ -308,17 +328,27 @@
    return choices;
   }
   function persist(){
+   commitColor();
    clearTimeout(saveTimer);saveTimer=null;if(!storageKey||storageBlocked)return;
    if(stroke){saveTimer=setTimeout(persist,300);return;}
    try{localStorage.setItem(storageKey,R.encode(doc));status(_t('已保存'));}
    catch{status(_t('自动保存失败：浏览器存储不可用或已满。请导出划分备份。'),true);}
   }
   function saveSoon(){if(storageBlocked)return;status(_t('正在自动保存…'));clearTimeout(saveTimer);saveTimer=setTimeout(persist,300);}
-  function remember(raw){history.push(raw);if(history.length>20)history.shift();future=[];}
-  function checkpoint(){if(automatic)cancelAuto();doc.autoHandled=true;remember(R.encode(doc));}
+  function syncHistory(){const h=editHistory?.status;$('regionUndo').disabled=h?!h.canUndo:!history.length;$('regionRedo').disabled=h?!h.canRedo:!future.length;if(h){$('regionUndo').title=h.undoLabel?_t('撤销')+' · '+h.undoLabel:_t('没有可以撤销的修改');$('regionRedo').title=h.redoLabel?_t('重做')+' · '+h.redoLabel:_t('没有可以重做的修改');}}
+  function remember(raw,label=_t('修改区域')){history.push(raw);if(history.length>20)history.shift();future=[];editHistory?.record('regions',label);}
+  function checkpoint(label){commitColor();if(automatic)cancelAuto();doc.autoHandled=true;remember(R.encode(doc),label);}
+  function restoreHistory(raw){
+   const next=R.decode(raw,eligible);
+   // View preferences and the current paint target are not region edits.
+   next.showTotals=doc.showTotals;next.transparency=doc.transparency;
+   if(doc.active===R.EMPTY||next.regions.some(r=>r.id===doc.active))next.active=doc.active;
+   return next;
+  }
+  const regionEditLabel=remove=>isEmpty()?_t('消除区域'):_t(remove?'移出区域':'加入区域')+' · '+R.displayName(current());
   function dirty(save=true,local=false){if(!local){editJournal=new WeakMap();liveOverlayTiles.clear();overlayRevision++;}refresh();schedule();if(save)saveSoon();}
   function presentationChanged(){
-   $('regionUndo').disabled=!history.length;$('regionRedo').disabled=!future.length;
+   syncHistory();
    schedule();saveSoon();
   }
   function setMode(value,showTools=value){
@@ -335,33 +365,44 @@
    onMode(active);if(summaryVisible&&!wasVisible)refresh();updateAside();schedule();
   }
   function load({preserve=false,allowAuto=true}={}){
+   cancelFill();
    refreshQueue?.reset();
-   terrainRevision++;
    const s=state();
    summaryVisible=!!s.data&&!s.data.metadata.previewOnly;$('regionSummary').hidden=!summaryVisible;
    const nextKey=s.data.metadata.sourceSha256?'crate-atlas.regions.v1.'+s.data.metadata.sourceSha256:'';
    const keep=preserve&&storageKey&&storageKey===nextKey;
+   const keepGeometry=keep&&lookup.size===s.cells.length&&s.cells.every(c=>{
+    const old=lookup.get(R.key(c));return old&&old.px===c.px&&old.py===c.py&&old.level===c.level&&
+     (old.visibleSurface===c.visibleSurface||JSON.stringify(old.visibleSurface)===JSON.stringify(c.visibleSurface))&&
+     eligible.has(R.key(c))===R.canSelect(c,s.data.rendering);
+   });
+   if(!keepGeometry)terrainRevision++;
+   // Synchronous consumers may refresh a display in place. Explicit reloads
+   // must recalculate totals even when reusable terrain geometry is unchanged.
+   if(!asynchronous){statisticsCache=new WeakMap();labelCache=new WeakMap();}
    lookup=new Map(s.cells.map(c=>[R.key(c),c]));eligible=new Map(s.cells.filter(c=>R.canSelect(c,s.data.rendering)).map(c=>[R.key(c),c]));
    selectionIndex=R.createSelectionIndex(s.cells,c=>eligible.has(R.key(c)));s.spatialIndex=selectionIndex.screen;
-   geometryCache=new WeakMap();statisticsCache=new WeakMap();labelCache=new WeakMap();thumbnailCache=new WeakMap();rasterCache.clear();rasterPixels=0;mapOverlayCache?.clear();mapOverlayDoc=null;titleSprites.clear();titleSpritePixels=0;
-   editJournal=new WeakMap();liveOverlayTiles.clear();overlayRevision++;
-   resetTitleTracking(!keep);
+   if(!keepGeometry){
+    geometryCache=new WeakMap();statisticsCache=new WeakMap();labelCache=new WeakMap();thumbnails.invalidate();rasterCache.clear();rasterPixels=0;mapOverlayCache?.clear();mapOverlayDoc=null;titleSprites.clear();titleSpritePixels=0;
+    editJournal=new WeakMap();liveOverlayTiles.clear();overlayRevision++;
+    resetTitleTracking(!keep);
+   }
    clearTimeout(mapOpacityTimer);mapOpacityTimer=null;
-   if(!keep){doc=R.defaults();history=[];future=[];titleMotion.clear();storageBlocked=false;$('regionAutoStatus').textContent='';}
-   cancelThumbnailUpdate();stats.clear();hover=null;shiftHeld=ctrlHeld=false;interactionHint();nameEditing=colorEditing=opacityEditing=false;
-   rowsStamp='';pendingThumbnails=false;clearTimeout(hoverTimer);hoverTimer=null;
+   if(!keep){doc=R.defaults();history=[];future=[];editHistory?.clear('regions');titleMotion.clear();storageBlocked=false;$('regionAutoStatus').textContent='';}
+   thumbnails.cancel();if(!keep)stats.clear();hover=null;shiftHeld=ctrlHeld=false;interactionHint();nameEditing=colorEditing=opacityEditing=false;
+   if(!keep)rowsStamp='';pendingThumbnails=false;clearTimeout(hoverTimer);hoverTimer=null;
    storageKey=nextKey;
    if(keep){/* Recompute statistics/artwork while keeping selection and undo. */}
    else if(storageKey){
     try{const raw=localStorage.getItem(storageKey);if(raw){doc=R.decode(raw,eligible);const old=JSON.parse(raw),removed=old.regions.reduce((n,r)=>n+r.cells.filter(k=>!eligible.has(k)).length,0);status(_t('已恢复此地图的区域划分'));$('regionActionStatus').textContent=removed?_t`已排除 ${removed} 处可选边界外的格子归属。`:'';if(old.defaultRegionCount!==12||old.selectionBoundsVersion!==1||removed)saveSoon();}else status(_t('自动保存'));}
     catch{storageBlocked=true;status(_t('已有区域记录无法读取，暂不覆盖。可导出当前划分备份。'),true);}
    }else{storageBlocked=true;status(_t('结果缺少地图标识，无法自动保存；请重新分析。'),true);}
-   resetThumbnailOpacity();
+   thumbnails.reset();
    $('regionToggle').disabled=!!s.data.metadata.previewOnly;
    $('regionToggle').title=s.data.metadata.previewOnly?_t('外观预览没有概率，无法统计'):_t('划分地区并比较概率');
    if(s.data.metadata.previewOnly)setMode(false);else{refresh();updateAside();}schedule();
    if(doc.regions.some(r=>r.cells.size)){if(!doc.autoHandled){doc.autoHandled=true;saveSoon();}}
-   else if(allowAuto&&!doc.autoHandled&&!storageBlocked&&!s.data.metadata.previewOnly&&root.CrateRegionAuto){
+   else if(allowAuto&&!automatic&&!doc.autoHandled&&!storageBlocked&&!s.data.metadata.previewOnly&&root.CrateRegionAuto){
     autoTimer=setTimeout(()=>{autoTimer=null;runAuto(false);},0);
    }
   }
@@ -369,7 +410,7 @@
    if(!asynchronous)return refreshNow();
    if(!state().data||state().data.metadata.previewOnly)return;
    pickerSelection();
-   $('regionUndo').disabled=!history.length;$('regionRedo').disabled=!future.length;
+   syncHistory();
    refreshQueue.request(refreshTarget());
   }
   function refreshNow(){
@@ -378,11 +419,11 @@
    playerMarks=R.playerStyles(doc,starts);playerMarksKey=JSON.stringify(playerMarks);if(!automatic)teamFields(starts);
    const r=current();pickerSelection();regionChoices=pickerOptions();toolbarChoices=pickerOptions(true);
    $('regionEmptyHint').hidden=!isEmpty();
-   if(document.activeElement!==$('regionName'))$('regionName').value=R.displayName(r);$('regionColor').value=r.color;$('regionOverlap').checked=doc.overlap;
+   if(document.activeElement!==$('regionName'))$('regionName').value=R.displayName(r);if(!pendingColor)$('regionColor').value=r.color;$('regionOverlap').checked=doc.overlap;
    $('regionName').disabled=$('regionColor').disabled=isEmpty();interactionHint();
    const titleToggle=$('regionShowTotals');titleToggle.setAttribute('aria-pressed',String(doc.showTotals));titleToggle.textContent=_t('区域标题:')+(doc.showTotals?_t('开'):_t('关'));
-   if(!automatic){$('regionAutoSea').value=doc.autoOptions.maxSea;$('regionAutoExclusive').checked=doc.autoOptions.exclusive;$('regionAutoStraight').value=doc.autoOptions.maxStraight;$('regionAutoPath').value=doc.autoOptions.maxPath;}
-   $('regionUndo').disabled=!history.length;$('regionRedo').disabled=!future.length;$('regionClear').disabled=isEmpty()||!r.cells.size;$('regionDelete').disabled=isEmpty()||doc.regions.length<=1;$('regionAdd').disabled=doc.regions.length>=64;
+   if(!automatic){for(const[id,key]of [['regionAutoSea','maxSea'],['regionAutoStraight','maxStraight'],['regionAutoPath','maxPath']])if(document.activeElement!==$(id))$(id).value=doc.autoOptions[key];$('regionAutoExclusive').checked=doc.autoOptions.exclusive;$('regionAutoCorners').checked=doc.autoOptions.claimCorners;}
+   syncHistory();$('regionClear').disabled=isEmpty()||!r.cells.size;$('regionDelete').disabled=isEmpty()||doc.regions.length<=1;$('regionAdd').disabled=doc.regions.length>=64;
    $('regionTransparency').value=doc.transparency;$('regionTransparencyValue').textContent=doc.transparency+'%';
    $('regionFocus').disabled=!r.cells.size;$('regionEditor').style.setProperty('--region-color',r.color);
    membership();
@@ -394,12 +435,12 @@
    const nextRowsStamp=doc.regions.map(r=>[r.id,r.color,R.displayName(r),r.id===doc.active].join(':')).join('|');
    if(rowsStamp===nextRowsStamp){
     updateBuffs();updateMetrics();
-    for(const reg of doc.regions)for(const button of thumbnailButtons.get(reg.id)||[])button.disabled=!reg.cells.size;
-    if(stroke)pendingThumbnails=true;else updateThumbnailOpacity(true);
+    for(const reg of doc.regions)for(const button of thumbnails.buttonsFor(reg.id)||[])button.disabled=!reg.cells.size;
+    if(stroke)pendingThumbnails=true;else thumbnails.request(true);
     return;
    }
    rowsStamp=nextRowsStamp;
-   rows.clear();numberRows.clear();thumbnailButtons.clear();
+   rows.clear();numberRows.clear();thumbnails.clearButtons();
    for(const reg of doc.regions){
     const tr=document.createElement('tr');tr.classList.toggle('active',reg.id===doc.active);
     tr.setAttribute('data-region-id',reg.id);
@@ -413,9 +454,9 @@
     preview.setAttribute('data-column','preview');
     for(const overview of [false,true]){
      const b=document.createElement('button');b.title=overview?_t('在全图中定位此区域'):_t('查看区域包围范围');b.setAttribute('aria-label',`${overview?_t('全图定位'):_t('查看地形')}：${R.displayName(reg)}`);b.disabled=!reg.cells.size;
-     const cv=thumbnail(reg,overview);b.append(cv);b.onclick=()=>{activate(reg.id);focus();revealMap?.();};preview.append(b);buttons.push(b);
+     const cv=thumbnails.render(reg,overview);b.append(cv);b.onclick=()=>{activate(reg.id);focus();revealMap?.();};preview.append(b);buttons.push(b);
     }
-    tr.append(preview);thumbnailButtons.set(reg.id,buttons);
+    tr.append(preview);thumbnails.setButtons(reg.id,buttons);
     for(const group of groups)for(const field of fields){
      const td=document.createElement('td');td.setAttribute('data-metric',group+'.'+field);
      td.setAttribute('data-column',group+'.'+field);
@@ -475,10 +516,9 @@
    if(summaryVisible){stats=new Map(doc.regions.map(r=>[r.id,statisticsFor(r)]));updateBuffs();updateMetrics();}
    schedule();return true;
   }
-  function activate(id){cancel();doc.active=id;nameEditing=colorEditing=false;hover=null;refresh();saveSoon();schedule();}
+  function activate(id){commitColor();cancel();doc.active=id;nameEditing=colorEditing=false;hover=null;refresh();saveSoon();schedule();}
   function sampleRegion(cell){
-   if(!cell||!cell.virtual&&!eligible.has(R.key(cell)))return null;
-   const members=doc.regions.filter(r=>r.cells.has(R.key(cell))),target=members.find(r=>r.id===doc.active)||members[members.length-1];
+   const members=cell&&eligible.has(R.key(cell))?doc.regions.filter(r=>r.cells.has(R.key(cell))):[],target=members.find(r=>r.id===doc.active)||members[members.length-1];
    return target?{id:target.id,name:R.displayName(target),color:target.color,empty:false}:{id:R.EMPTY,name:_t('消除区域'),color:emptyRegion.color,empty:true};
   }
   function selectSample(cell){
@@ -534,10 +574,16 @@
    return {revision,fill,edge,tiles:[...tiles.values()],tileMap:tiles,rebuiltTiles,center,points,keys:new Set(reg.cells),reachX,reachY,bounds};
   }
   function* patchGeometry(reg,previous,changes,sourceLookup,revision){
-   const tiles=new Map(previous.tileMap),dirty=new Set(),tileKey=c=>Math.floor(c.px/480)+','+Math.floor(c.py/240);let steps=0,reachX=previous.reachX,reachY=previous.reachY;
-   for(const key of changes.keys())for(const k of [key,key-1024,key+1024,key-1,key+1]){const c=sourceLookup.get(k);if(c)dirty.add(tileKey(c));}
+   const tiles=new Map(previous.tileMap),dirty=new Set(),changesByTile=new Map(),tileKey=c=>Math.floor(c.px/480)+','+Math.floor(c.py/240);let steps=0,reachX=previous.reachX,reachY=previous.reachY;
+   // Partition once. A large fill used to scan every changed cell again for
+   // every dirty tile, even when that tile contained only a handful of them.
+   for(const key of changes.keys()){
+    const c=sourceLookup.get(key);if(c){const id=tileKey(c);if(!changesByTile.has(id))changesByTile.set(id,[]);changesByTile.get(id).push(key);}
+    for(const k of [key,key-1024,key+1024,key-1,key+1]){const c=sourceLookup.get(k);if(c)dirty.add(tileKey(c));}
+    if(++steps%128===0)yield;
+   }
    for(const id of dirty){const old=tiles.get(id),keys=new Set(old?.keys);
-    for(const key of changes.keys()){const c=sourceLookup.get(key);if(c&&tileKey(c)===id){if(reg.cells.has(key))keys.add(key);else keys.delete(key);}}
+    for(const key of changesByTile.get(id)||[]){if(reg.cells.has(key))keys.add(key);else keys.delete(key);}
     if(!keys.size){tiles.delete(id);continue;}
     const tile={keys,edgeKeys:new Set(),points:[],fill:new Path2D(),edge:new Path2D(),sumX:0,sumY:0,wholeL:Infinity,wholeR:-Infinity,wholeT:Infinity,wholeB:-Infinity,l:Infinity,r:-Infinity,t:Infinity,b:-Infinity};
     for(const key of keys){const c=sourceLookup.get(key);if(!c)continue;tile.points.push(c);tile.sumX+=c.px;tile.sumY+=c.py;path(tile.fill,c,{x:0,y:0,scale:1});if([1024,-1024,1,-1].some(d=>!reg.cells.has(key+d))){tile.edgeKeys.add(key);path(tile.edge,c,{x:0,y:0,scale:1});}
@@ -594,83 +640,39 @@
    if(alpha>0){ctx.save();ctx.globalAlpha=alpha;ctx.drawImage(cached.fill,x,y);ctx.restore();}
    paintGeometry(ctx,g,view,reg.color,0,reg.id===doc.active);
   }
-  function cancelThumbnailUpdate(){
-   if(!thumbnailJob)return;
-   if(root.cancelIdleCallback)root.cancelIdleCallback(thumbnailJob.id);else clearTimeout(thumbnailJob.id);
-   thumbnailJob=null;
-  }
-  function resetThumbnailOpacity(){
-   cancelThumbnailUpdate();thumbnailApplied.clear();thumbnailTransparency=doc.transparency;
-  }
-  function updateThumbnailOpacity(force=false){
-   cancelThumbnailUpdate();
-   if(!summaryVisible){resetThumbnailOpacity();return;}
-   if(!force&&thumbnailTransparency===doc.transparency&&!thumbnailApplied.size)return;
-   const expected=doc,opacity=doc.transparency,regions=doc.regions.slice();
-   const job=thumbnailJob={id:null};
-   let index=0;
-   const request=()=>{job.id=root.requestIdleCallback?root.requestIdleCallback(step,{timeout:100}):setTimeout(step,16);};
-   function step(deadline){
-    if(thumbnailJob!==job)return;
-    if(stroke){thumbnailJob=null;pendingThumbnails=true;return;}
-    if(doc!==expected||doc.transparency!==opacity){thumbnailJob=null;return;}
-    const start=performance.now();
-    do{
-     const region=regions[index++],buttons=thumbnailButtons.get(region.id);
-     buttons?.forEach((button,i)=>button.replaceChildren(thumbnail(region,!!i,opacity)));
-     if(buttons)thumbnailApplied.set(region.id,opacity);
-    }while(index<regions.length&&performance.now()-start<5&&(!deadline||deadline.timeRemaining()>2));
-    if(index<regions.length)request();
-    else{thumbnailTransparency=opacity;thumbnailApplied.clear();thumbnailJob=null;}
-   }
-   request();
-  }
-  function thumbnail(reg,overview,transparency=thumbnailApplied.get(reg.id)??thumbnailTransparency){
-   const s=state(),source=$('objects').checked&&s.objectImage?s.objectImage:s.image;
-   const size=tableControls?.overview||{width:1,height:1},width=216*size.width,height=121.5*size.height,density=Math.max(1,Math.min(3,root.devicePixelRatio||1));
-   const focusPlayers=R.playersForRegion(doc,reg,root.CratePlayerStarts?.positions(s)||[]);
-   const key=[geometry(reg).revision,reg.color,reg.id===doc.active,transparency,$('players').checked,playerMarksKey,density,focusPlayers.join(',')].join('|');
-   let cached=thumbnailCache.get(reg);if(!cached||cached.key!==key||cached.source!==source){cached={key,source,images:[]};thumbnailCache.set(reg,cached);}
-   const index=Number(overview),sizeKey=size.width+','+size.height;if(cached.images[index]&&cached.images[index].regionSizeKey===sizeKey)return cached.images[index];
-   const cv=document.createElement('canvas');cv.width=Math.ceil(width*density);cv.height=Math.ceil(height*density);cv.setAttribute('aria-hidden','true');cv.regionSizeKey=sizeKey;cached.images[index]=cv;
-   const ctx=cv.getContext('2d'),b=geometry(reg).bounds;
-   ctx.scale(cv.width/width,cv.height/height);ctx.fillStyle='#0a151e';ctx.fillRect(0,0,width,height);
-   if(!b){ctx.fillStyle='#78909f';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(overview?_t('全图位置'):_t('尚未划分'),width/2,height/2+4);return cv;}
-   const {crop,view}=thumbnailLayout(b,s.data.rendering,width,height,overview);
-   // Reports use original map pixels; web artwork may be independently resized.
-   // Convert the source rectangle only. Overlays and starts stay in map space.
-   const sourceX=(source.naturalWidth||source.width)/s.data.rendering.width,sourceY=(source.naturalHeight||source.height)/s.data.rendering.height;
-   (root.CrateMapArtwork?.draw||((ctx,...args)=>ctx.drawImage(...args)))(ctx,source,crop.x*sourceX,crop.y*sourceY,crop.w*sourceX,crop.h*sourceY,0,0,width,height);
-   ctx.save();const stretch=view.scaleY/view.scaleX;ctx.scale(1,stretch);paintRegion(ctx,reg,{...view,y:view.y/stretch},1-transparency/100);ctx.restore();
-   if(overview){
-    const w=Math.max(6,b.w*view.scaleX),h=Math.max(6,b.h*view.scaleY),x=view.x+(b.x+b.w/2)*view.scaleX-w/2,y=view.y+(b.y+b.h/2)*view.scaleY-h/2;
-    ctx.strokeStyle='#07131d';ctx.lineWidth=3;ctx.strokeRect(x,y,w,h);ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(x,y,w,h);
-   }
-   if($('players').checked){const includePlayers=overview?null:(root.CratePlayerStarts?.positions(s)||[]).filter(p=>reg.cells.has(R.key(p))).map(p=>p.number);
-    root.CratePlayerStarts?.draw(ctx,s,view,{radius:(overview?5.5:7)*Math.min(size.width,size.height),clip:{x:0,y:0,w:width,h:height},regionStyles:playerMarks,focusPlayers,includePlayers,fit:true});
-   }
-   return cv;
-  }
   function mapPoint(p){
    const s=state(),x=(p.x-s.x)/s.scale,y=(p.y-s.y)/s.scale,t=stroke?.tool||tool(),c=(t.includes('game')||t==='box-screen')?pick(p):null,[ox,oy]=s.data.rendering.origin;
    // Picking accounts for cliffs. Keep a discrete anchor for game-coordinate tools.
    const game=c?{x:c.x,y:c.y}:{x:Math.round(((x-ox)/30+(y-oy)/15)/2),y:Math.round(((y-oy)/15-(x-ox)/30)/2)};
-   return {x,y,game,level:c?.level||0};
+   return {x,y,game,level:c?.level||0,cell:c};
+  }
+  function boxPreview(t,a,b){
+   const cells=selectionIndex.selectedCells(t,a,b);
+   // Screen boxes keep their center-in-box rule. Only an empty result uses
+   // the actual end pick, so the preview and release commit are identical.
+   return cells.length||t!=='box-screen'?cells:b.cell&&eligible.has(R.key(b.cell))?[b.cell]:[];
   }
   const inside=p=>p.x>=area.x&&p.x<=area.x+area.w&&p.y>=area.y&&p.y<=area.y+area.h;
   function applyKeys(keys,remove){
    const starts=root.CratePlayerStarts?.positions(state())||[],beforePlayers=new Map(doc.regions.map(r=>[r.id,R.playersForRegion(doc,r,starts)]));let lastCell=null,activeCell=null,fallback=null;
-   const tiles=new Map(),changed=R.apply(doc,keys,remove,(reg,k)=>{
+   const tiles=new Map(),changedKeys=new Set(),changed=R.apply(doc,keys,remove,(reg,k)=>{
     const cell=lookup.get(k),players=beforePlayers.get(reg.id);if(cell){lastCell=cell;if(reg.id===doc.active)activeCell=cell;if(players?.length)fallback={cell,players};}
     let journal=editJournal.get(reg);if(!journal){journal={since:R.revision(reg),keys:new Map()};editJournal.set(reg,journal);}journal.keys.set(k,R.revision(reg)+1);
-    for(const key of [k,k-1024,k+1024,k-1,k+1]){const c=lookup.get(key);if(!c)continue;const b=cellSurfaceBox(c);
-     for(let y=Math.floor(b.t/120);y<=Math.floor(b.b/120);y++)for(let x=Math.floor(b.l/240);x<=Math.floor(b.r/240);x++){const id=x+','+y,rect={x:x*240-3,y:y*120-3,w:246,h:126};tiles.set(id,rect);liveOverlayTiles.set(id,rect);}
-    }
+    changedKeys.add(k);
    });
+   // Exclusive moves change two regions, and neighboring cells share borders.
+   // Invalidate each surface/tile once instead of allocating it repeatedly.
+   const surfaces=new Set();for(const k of changedKeys)for(const key of [k,k-1024,k+1024,k-1,k+1])surfaces.add(key);
+   for(const key of surfaces){const c=lookup.get(key);if(!c)continue;const b=cellSurfaceBox(c);
+    for(let y=Math.floor(b.t/120);y<=Math.floor(b.b/120);y++)for(let x=Math.floor(b.l/240);x<=Math.floor(b.r/240);x++){
+     const id=x+','+y;if(tiles.has(id))continue;const rect={x:x*240-3,y:y*120-3,w:246,h:126};tiles.set(id,rect);liveOverlayTiles.set(id,rect);
+    }
+   }
    if(changed){mapOverlayCache?.invalidate([...tiles.values()]);const players=R.playersForRegion(doc,current(),starts);onInteraction?.(activeCell||lastCell,players.length?players:beforePlayers.get(doc.active)?.length?beforePlayers.get(doc.active):fallback?.players);}return changed;
   }
   function down(p,e={}){
    if(!active||!overlayVisible()||automatic||!inside(p))return false;
+   cancelFill();
    modifiers(e);
    const q=mapPoint(p);
    if(picking()||tool()==='fill'){
@@ -678,7 +680,7 @@
     hover=q;interactionHint();schedule();return true;
    }
    doc.autoHandled=true;stroke={a:q,b:q,before:R.encode(doc),tool:tool(),width:width(),height:height(),baseRemove:$('regionOperation').value==='remove',remove:removing(),changed:false};
-   if(stroke.tool.startsWith('brush'))brush(q);else stroke.preview=selectionIndex.selectedCells(stroke.tool,q,q);
+   if(stroke.tool.startsWith('brush'))brush(q);else stroke.preview=boxPreview(stroke.tool,q,q);
    hover=q;previewChanged();schedule();return true;
   }
   function brush(q){
@@ -695,7 +697,7 @@
    if(stroke){
     if(['picker','fill'].includes(stroke.tool)){stroke.b=q;stroke.point=p;if(Math.hypot((e.clientX??p.x)-stroke.client.x,(e.clientY??p.y)-stroke.client.y)>4)stroke.moved=true;}
     else if(stroke.tool.startsWith('brush')){if(stroke.gap)stroke.b=q;brush(q);}
-    else{stroke.b=q;stroke.preview=selectionIndex.selectedCells(stroke.tool,stroke.a,q);}
+    else{stroke.b=q;stroke.preview=boxPreview(stroke.tool,stroke.a,q);}
     stroke.gap=false;
    }
    previewChanged();
@@ -711,45 +713,58 @@
    const k=R.key(cell);
    return {cell,selectable:eligible.has(k),regions:doc.regions.filter(r=>r.cells.has(k))};
   }
+  const fillStamp=()=>[doc.active,doc.overlap,...doc.regions.flatMap(r=>[r.id,R.revision(r)])].join('|');
+  async function fill(d){
+   const seed=pick(d.point);if(!seed||!eligible.has(R.key(seed))){$('regionActionStatus').textContent=_t('此处不在可选区域内。');return;}
+   cancelFill();const controller=new AbortController(),s=state(),data=s.data,target=doc,stamp=fillStamp();filling=controller;
+   const valid=()=>!controller.signal.aborted&&doc===target&&state().data===data&&fillStamp()===stamp;
+   $('regionActionStatus').textContent=_t('正在填充…');
+   try{
+    const navigation=await navigationFor(s,controller.signal);if(!valid())return;
+    // Navigation flags follow report order. The viewer's cells are sorted for
+    // painting and must never be paired by index with this positional bitmap.
+    const steps=R.fillSteps(doc,seed,eligible,{cells:data.cells,navigation,revision:data});let next,tick=performance.now();
+    do{next=steps.next();if(!next.done&&performance.now()-tick>5){await new Promise(resolve=>setTimeout(resolve,0));if(!valid())return;tick=performance.now();}}while(!next.done);
+    if(!valid())return;const keys=next.value;
+    if(keys.length){
+     doc.autoHandled=true;const before=R.encode(doc),changed=applyKeys(keys,d.remove);
+     if(changed){remember(before,regionEditLabel(d.remove));dirty(true,true);$('regionActionStatus').textContent=isEmpty()?_t`已清除连通部分的所有区域归属（${keys.length} 格）；可撤销。`:d.remove?_t`已从当前区域移除连通部分（${keys.length} 格）；可撤销。`:_t`已将连通部分并入当前区域（${keys.length} 格）；可撤销。`;}
+     else $('regionActionStatus').textContent=_t('该连通部分的归属无需更改。');
+    }else $('regionActionStatus').textContent=_t('此处无法填充。');
+   }catch(error){if(valid()){$('regionActionStatus').textContent=_t('填充失败：')+error.message;onError?.(error);}}
+   finally{if(filling===controller){filling=null;if($('regionActionStatus').textContent===_t('正在填充…'))$('regionActionStatus').textContent='';}schedule();}
+  }
   function up(){
    if(!stroke)return;const d=stroke;
    if(d.tool==='fill'){
     stroke=null;
-    if(!d.moved){
-     const keys=R.fillKeys(doc,pick(d.point),eligible);
-     if(keys.length){
-      doc.autoHandled=true;const before=R.encode(doc),changed=applyKeys(keys,d.remove);
-      if(changed){remember(before);dirty(true,true);$('regionActionStatus').textContent=isEmpty()?_t`已清除连通部分的所有区域归属（${keys.length} 格）；可撤销。`:d.remove?_t`已从当前区域移除连通部分（${keys.length} 格）；可撤销。`:_t`已将连通部分并入当前区域（${keys.length} 格）；可撤销。`;}
-      else $('regionActionStatus').textContent=_t('该连通部分的归属无需更改。');
-     }else $('regionActionStatus').textContent=_t('此处不在可选区域内。');
-    }
+    if(!d.moved)void fill(d);
     interactionHint();schedule();return;
    }
    if(d.tool==='picker'){
     stroke=null;
     if(!d.moved){
-     const cell=pick(d.point),members=cell?doc.regions.filter(r=>r.cells.has(R.key(cell))):[];
-     // Match visual stacking: the active region is on top, otherwise the latest region.
-     const target=members.find(r=>r.id===doc.active)||members[members.length-1];
-     if(target||cell&&eligible.has(R.key(cell))){activate(target?.id||R.EMPTY);$('regionTool').value=lastTool;controls();if(target){const label=_t`区域 ${target.id.slice(1)}`,name=R.displayName(target);$('regionActionStatus').textContent=_t`已取色：${name===label?label:label+' · '+name}；已恢复上次工具。`;}else $('regionActionStatus').textContent=_t('已取色：空；已恢复上次工具。');}
-     else $('regionActionStatus').textContent=cell?_t('此处不在可选区域内。'):_t('此处没有地图格子，当前区域未变。');
+     selectSample(pick(d.point));
     }
     interactionHint();schedule();return;
    }
-   if(d.tool.startsWith('box')){const keys=d.preview.map(R.key);if(!keys.length&&Math.hypot(d.a.x-d.b.x,d.a.y-d.b.y)<4){const c=state().lookup.get(`${d.a.game.x},${d.a.game.y}`);if(c&&eligible.has(R.key(c)))keys.push(R.key(c));}d.changed=applyKeys(keys,d.remove);}
-   stroke=null;interactionHint();previewChanged();if(pendingThumbnails){pendingThumbnails=false;updateThumbnailOpacity(true);}
-   if(d.changed){remember(d.before);dirty(true,true);}else schedule();
+   if(d.tool.startsWith('box'))d.changed=applyKeys(d.preview.map(R.key),d.remove);
+   stroke=null;interactionHint();previewChanged();if(pendingThumbnails){pendingThumbnails=false;thumbnails.request(true);}
+   if(d.changed){remember(d.before,regionEditLabel(d.remove));dirty(true,true);}else schedule();
   }
   function cancel(){
-   if(stroke){if(stroke.before)adoptDocument(R.decode(stroke.before,eligible));stroke=null;refresh();interactionHint();schedule();saveSoon();}
+   cancelFill();
+   if(stroke){if(stroke.before)adoptDocument(restoreHistory(stroke.before));stroke=null;refresh();interactionHint();schedule();saveSoon();}
   }
   function preview(ctx,view){
-   syncCursor();const d=stroke;if(!active||!overlayVisible()||!hover)return;
+   syncCursor();const d=stroke;if(!active||!overlayVisible()||!hover||state().ctrlPickerPreviewHidden)return;
    if(!picking()&&(d?.tool||tool())==='fill'){
     const x=view.x+hover.x*view.scale,y=view.y+hover.y*view.scale;
     ctx.save();ctx.beginPath();ctx.moveTo(x,y-9);ctx.lineTo(x+10,y);ctx.lineTo(x,y+9);ctx.lineTo(x-10,y);ctx.closePath();ctx.strokeStyle='#10232d';ctx.lineWidth=4;ctx.stroke();ctx.strokeStyle=removing()?'#ffb3a9':current().color;ctx.lineWidth=1.6;ctx.stroke();ctx.restore();return;
    }
-   if(picking())return; // The shared simulation eyedropper supplies the cursor and sample preview.
+   // A temporary Ctrl picker keeps a resizable brush until the first press;
+   // the shared simulation picker still supplies the pointer and sample UI.
+   if(picking()&&!(ctrlHeld&&!state().ctrlResizing&&tool().startsWith('brush')))return;
    const t=d?.tool||tool(),q=d?.b||hover,a=d?.a||q,w=d?.width||width(),h=d?.height||height(),remove=d?.remove??removing();
    const color=remove?'#ffb3a9':current().color;let perimeter=0;
    ctx.save();ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1.6;ctx.beginPath();
@@ -769,8 +784,8 @@
    // At most 64 dashes around the outline, with a dark border on each dash.
    const period=Math.max(14,perimeter/64);ctx.setLineDash([period*.6,period*.4]);ctx.lineJoin=ctx.lineCap='round';ctx.strokeStyle='#03080d';ctx.lineWidth=4.6;ctx.stroke();ctx.strokeStyle=color;ctx.lineWidth=1.6;ctx.stroke();ctx.restore();
    if(d?.tool.startsWith('box')){
-    ctx.save();ctx.beginPath();
-    for(const c of d.preview)path(ctx,c,view);ctx.fillStyle=remove?'#ffb3a9':current().color;ctx.globalAlpha=.25;ctx.fill('evenodd');ctx.restore();
+    if(d.previewShapeCells!==d.preview){d.previewShapeCells=d.preview;d.previewShape=cellPaths(d.preview,{x:0,y:0,scale:1}).fill;}
+    ctx.save();ctx.translate(view.x,view.y);ctx.scale(view.scale,view.scale);ctx.fillStyle=remove?'#ffb3a9':current().color;ctx.globalAlpha=.25;ctx.fill(d.previewShape,'evenodd');ctx.restore();
    }
   }
   function clipCamera(ctx,view,camera){
@@ -785,6 +800,7 @@
     const name=R.displayName(r),g=geometry(r),total=statisticsFor(r);let cached=labelCache.get(r);if(cached?.geometry===g&&cached.statistics===total&&cached.color===r.color&&cached.name===name)return cached.value;
     const p=D.ratio(total.all.n,BigInt(statisticsCache.get(r)?.data?.probability?.exact?.denominator||denominator));
     const value={id:r.id,center:g.center,bounds:g.bounds,boxes:cached?.geometry===g?cached.value.boxes:g.points.map(cellSurfaceBox),tiles:g.tileMap,reachX:g.reachX,reachY:g.reachY,color:r.color,strokes:R.labelStrokes(),name:name+':',probability:(s.data.metadata.approximate?'≈':'')+D.percent(p)};
+    if(value.center&&!titleContains(value,{x:0,y:0,scale:1},value.center.x,value.center.y))value.center=labelAnchor(value,{x:0,y:0,scale:1},{l:g.bounds.x,r:g.bounds.x+g.bounds.w,t:g.bounds.y,b:g.bounds.y+g.bounds.h},g.points,value.center.x,value.center.y);
     labelCache.set(r,{geometry:g,statistics:total,color:r.color,name,value});return value;
    });
   }
@@ -811,12 +827,13 @@
    for(const ring of rings)for(const [dx,dy]of ring){box.l=Math.min(box.l,c.px+dx);box.r=Math.max(box.r,c.px+dx);box.t=Math.min(box.t,c.py+dy);box.b=Math.max(box.b,c.py+dy);}
    surfaceBoxes.set(c,box);return box;
   }
-  function visibleLabelCells(label,view,clip){
+  function visibleLabelCells(label,view,clip,source=null){
    const world={l:(clip.l-view.x)/view.scale,r:(clip.r-view.x)/view.scale,t:(clip.t-view.y)/view.scale,b:(clip.b-view.y)/view.scale};
    const key=[world.l,world.r,world.t,world.b].join('|'),cached=labelVisibility.get(label);
-   if(cached?.key===key)return cached.cells;
+   if(cached?.has(key))return cached.get(key);
    const cells=[];
-   for(const box of label.boxes){
+   for(const entry of source||label.boxes){
+    const box=source?cellSurfaceBox(entry):entry;
     const c=box.cell;
     if(box.l>=world.r||box.r<=world.l||box.t>=world.b||box.b<=world.t)continue;
     if(box.l>=world.l&&box.r<=world.r&&box.t>=world.t&&box.b<=world.b){cells.push(c);continue;}
@@ -833,7 +850,8 @@
      return Math.abs(area)>1e-7;
     }))cells.push(c);
    }
-   labelVisibility.set(label,{key,cells});return cells;
+   const entries=cached||new Map();entries.set(key,cells);while(entries.size>2)entries.delete(entries.keys().next().value);
+   labelVisibility.set(label,entries);return cells;
   }
   function labelAnchor(label,view,clip,cells,targetX,targetY){
    let anchor=null,best=Infinity;
@@ -869,6 +887,24 @@
    }
    return anchor;
   }
+  function visibleTitleBounds(cells,view,clip){
+   let bounds=visibleTitleBoxes.get(cells);
+   if(!bounds){
+    bounds={l:Infinity,r:-Infinity,t:Infinity,b:-Infinity};
+    const world={l:(clip.l-view.x)/view.scale,r:(clip.r-view.x)/view.scale,t:(clip.t-view.y)/view.scale,b:(clip.b-view.y)/view.scale};
+    const include=(x,y)=>{bounds.l=Math.min(bounds.l,x);bounds.r=Math.max(bounds.r,x);bounds.t=Math.min(bounds.t,y);bounds.b=Math.max(bounds.b,y);};
+    for(const c of cells){const b=cellSurfaceBox(c);
+     if(b.l>=world.l&&b.r<=world.r&&b.t>=world.t&&b.b<=world.b){include(b.l,b.t);include(b.r,b.b);continue;}
+     for(const ring of b.rings){
+      const points=clippedPolygon(ring.map(([x,y])=>[c.px+x,c.py+y]),world);
+      let area=0;for(let i=0,j=points.length-1;i<points.length;j=i++)area+=points[j][0]*points[i][1]-points[i][0]*points[j][1];
+      if(Math.abs(area)>1e-7)for(const [x,y]of points)include(x,y);
+     }
+    }
+    visibleTitleBoxes.set(cells,bounds);
+   }
+   return {l:Math.max(clip.l,view.x+bounds.l*view.scale),r:Math.min(clip.r,view.x+bounds.r*view.scale),t:Math.max(clip.t,view.y+bounds.t*view.scale),b:Math.min(clip.b,view.y+bounds.b*view.scale)};
+  }
   function titleContains(label,view,x,y){
    const wx=(x-view.x)/view.scale,wy=(y-view.y)/view.scale;
    for(let tx=Math.floor((wx-label.reachX)/480);tx<=Math.floor((wx+label.reachX)/480);tx++)for(let ty=Math.floor((wy-label.reachY)/240);ty<=Math.floor((wy+label.reachY)/240);ty++){
@@ -889,7 +925,8 @@
    }
    return false;
   }
-  function paintLabels(ctx,view,labels,viewport,camera,motions=null){
+  function paintLabels(ctx,view,labels,viewport,camera,motions=null,dynamic=$('dynamicRegionTitles')?.checked!==false){
+   if(!dynamic){motions?.clear();motions=null;}
    const clip={l:viewport.x,r:viewport.x+viewport.w,t:viewport.y,b:viewport.y+viewport.h};
    // The camera limits eligible anchor points. Text can use the entire viewport.
    const mapClip={...clip};
@@ -901,7 +938,7 @@
    const zoom=Math.log2(view.scale);
    const now=root.performance?.now()??Date.now(),seen=new Set();let animating=false;
    const stability=motions?titleViewport.observe(view,viewport,now):{settled:true,remaining:0};
-   const viewKey=[view.x,view.y,view.scale,viewport.x,viewport.y,viewport.w,viewport.h,...(camera||[])].join('|');
+   const viewKey=[view.x,view.y,view.scale,viewport.x,viewport.y,viewport.w,viewport.h,...(camera||[]),...Object.values(titleTuning.settings)].join('|');
    ctx.save();ctx.beginPath();ctx.rect(clip.l,clip.t,clip.r-clip.l,clip.b-clip.t);ctx.clip();
    ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.lineJoin='round';
    const opacity=Math.max(.44,1-.22*Math.max(0,zoom));
@@ -920,43 +957,75 @@
      return {parts,gap,halfWidth:(parts[0].metrics.width+gap+parts[1].metrics.width)/2,
       height:Math.max(...parts.map(({metrics:m})=>m.actualBoundingBoxAscent+m.actualBoundingBoxDescent))/2+pad,pad,size};
     };
-    const size=2*Math.min(34,14+Math.sqrt(cells.length)*.72);
-    let fit=measure(size);
-    const ratio=Math.min(1,(clip.r-clip.l)/(2*(fit.halfWidth+fit.pad)),(clip.b-clip.t)/(2*fit.height));
-    if(ratio<1)fit=measure(size*ratio*.95);
+    const fitFor=(samples,range)=>{
+     const size=2*Math.min(34,14+Math.sqrt(samples.length)*.72);
+     let fit=measure(size);
+     const bounds={l:Math.max(l,range.l),r:Math.min(r,range.r),t:Math.max(t,range.t),b:Math.min(bottom,range.b)};
+     const ratio=root.CrateRegionLabelLayout.fitRatio(fit,range,bounds);
+     if(ratio<1)fit=measure(size*ratio*.95);return fit;
+    };
+    // The center rectangle selects a new anchor only. Normal final font size
+    // always uses all visible cells and the real viewport's visible geometry.
+    let fit=fitFor(cells,mapClip);
+    if(fit.size<3||r-l<8||bottom-t<8)continue;
     let motion=motions?.get(label.id);
     if(motion?.visible){
      cameraChanged=root.CrateRegionLabelLayout.transport(motion,view)||cameraChanged;
-     if(motion.hidden){motion.hidden=false;motion.appearedAt=now;}
     }
-    prepared.push({label,fit,measure,cells,motion,changed:!motion||motion.viewKey!==viewKey||motion.label!==label});seen.add(label.id);
+    const baseFit=fit;let shrinkHeld=false;
+    if(motion?.visible&&!motion.hidden&&!root.CrateRegionLabelLayout.fullyVisible(motion.x,motion.y,fit.halfWidth+fit.pad,fit.height,clip)&&Math.hypot(motion.targetX-motion.x,motion.targetY-motion.y)<=.2&&motion.x>=mapClip.l&&motion.x<=mapClip.r&&motion.y>=mapClip.t&&motion.y<=mapClip.b&&titleContains(label,view,motion.x,motion.y)){
+     const retained=root.CrateRegionLabelLayout.retainedFit(motion.x,motion.y,fit,clip,measure,titleTuning.settings);
+     if(retained&&retained!==fit){fit=retained;shrinkHeld=true;}
+    }
+    prepared.push({label,fit,measure,cells,motion,changed:!motion||motion.hidden||motion.viewKey!==viewKey||motion.label!==label,baseFit,shrinkHeld});seen.add(label.id);
    }
    const dirty=prepared.some(p=>p.changed);
-   const relocating=prepared.some(({motion})=>motion?.visible&&Math.hypot(motion.targetX-motion.x,motion.targetY-motion.y)>.2);
+   const relocating=prepared.some(({motion})=>motion?.visible&&!motion.hidden&&Math.hypot(motion.targetX-motion.x,motion.targetY-motion.y)>.2);
    const layoutReady=!motions||stability.settled&&!cameraChanged&&!relocating&&now-titleLayoutAt>=titleInterval;
-   if(dirty&&layoutReady){
+   if(!dynamic){
+    for(const item of prepared)item.anchor={x:view.x+item.label.center.x*view.scale,y:view.y+item.label.center.y*view.scale};
+   }else if(dirty&&layoutReady){
     const candidates=[];
     for(const item of prepared){
-     const {label,fit,cells,motion}=item,margin=fit.halfWidth+fit.pad;
+     const {label,cells,motion}=item;let {fit}=item,margin=fit.halfWidth+fit.pad;
      let x=view.x+label.center.x*view.scale,y=view.y+label.center.y*view.scale;
-     const safe={l:Math.max(mapClip.l,clip.l+margin),r:Math.min(mapClip.r,clip.r-margin),t:Math.max(mapClip.t,clip.t+fit.height),b:Math.min(mapClip.b,clip.b-fit.height)};
+     const layout=root.CrateRegionLabelLayout,base=item.baseFit;
+     const returnCenter=titleContains(label,view,x,y)&&layout.returnAllowed(x,y,base.halfWidth+base.pad,base.height,clip,cells.length/label.boxes.length,titleTuning.settings);
+     const visibleBounds=titleTuning.settings.insetEnabled||titleTuning.settings.edgeOnlyEnabled?visibleTitleBounds(cells,view,mapClip):null;
+     const atEdge=titleTuning.settings.edgeOnlyEnabled&&layout.edgeOnly(visibleBounds,clip,titleTuning.settings);
+     const inset=titleTuning.settings.insetEnabled?layout.insetClip(visibleBounds,titleTuning.settings):mapClip;
+     const innerClip={l:Math.max(mapClip.l,inset.l),r:Math.min(mapClip.r,inset.r),t:Math.max(mapClip.t,inset.t),b:Math.min(mapClip.b,inset.b)};
+     const locked=!!((item.shrinkHeld||titleTuning.settings.lazy&&!returnCenter)&&motion?.visible&&!motion.hidden&&layout.fullyVisible(motion.x,motion.y,margin,fit.height,clip)&&titleContains(label,view,motion.x,motion.y));
+     if(locked){x=motion.x;y=motion.y;}
+     // Returning to the original center needs spare room, unless most of the
+     // region is visible. A bounded shrink can avoid an edge-driven move.
+     let range=locked||returnCenter||atEdge?mapClip:innerClip;
+     const safeFor=range=>({l:Math.max(range.l,clip.l+margin),r:Math.min(range.r,clip.r-margin),t:Math.max(range.t,clip.t+fit.height),b:Math.min(range.b,clip.b-fit.height)});
+     let safe=safeFor(range);
      let allowed=safe;
-     if(x<safe.l||x>safe.r||y<safe.t||y>safe.b){
-      let anchor=labelAnchor(label,view,safe,cells,x,y);
+     if(x<safe.l||x>safe.r||y<safe.t||y>safe.b||!titleContains(label,view,x,y)){
+      let anchor=safe.l<=safe.r&&safe.t<=safe.b?labelAnchor(label,view,safe,cells,x,y):null;
+      // A region may only graze the center rectangle. Use its normal visible
+      // anchor without changing the final font size.
+      if(!anchor&&range!==mapClip){
+       range=mapClip;allowed=safe=safeFor(range);
+       anchor=safe.l<=safe.r&&safe.t<=safe.b?labelAnchor(label,view,safe,cells,x,y):null;
+      }
       if(!anchor){allowed=mapClip;anchor=labelAnchor(label,view,mapClip,cells,x,y);}
       if(!anchor){if(motions)motions.set(label.id,item.motion={visible:false,viewKey,label,targetAt:now});continue;}
       ({x,y}=anchor);
      }
      item.anchor={x,y};
-     candidates.push({id:label.id,x:motion?.visible?motion.targetX:x,y:motion?.visible?motion.targetY:y,preferredX:x,preferredY:y,
+     candidates.push({id:label.id,locked,x:locked?x:motion?.visible?motion.targetX:x,y:locked?y:motion?.visible?motion.targetY:y,preferredX:x,preferredY:y,
       halfWidth:margin,halfHeight:fit.height,priority:label.boxes.length,
       contains:(x,y)=>x>=allowed.l-1e-6&&x<=allowed.r+1e-6&&y>=allowed.t-1e-6&&y<=allowed.b+1e-6&&titleContains(label,view,x,y)});
     }
     const solved=root.CrateRegionLabelLayout.avoid(candidates).positions;
-    for(const item of prepared){const p=solved.get(item.label.id);if(!p)continue;item.anchor={x:p.x,y:p.y};
+    for(const item of prepared){const p=solved.get(item.label.id);if(!p)continue;if(!titleContains(item.label,view,p.x,p.y)){if(item.motion)item.motion.visible=false;continue;}item.anchor={x:p.x,y:p.y};
      if(motions){
-      let motion=item.motion;if(!motion?.visible)motion={x:p.x,y:p.y,frameAt:now,appearedAt:now,viewX:view.x,viewY:view.y,scale:view.scale};
-      Object.assign(motion,{visible:true,targetX:p.x,targetY:p.y,targetAt:now,viewKey,label:item.label});motions.set(item.label.id,motion);item.motion=motion;
+      let motion=item.motion;if(!motion?.visible||motion.hidden)motion={x:p.x,y:p.y,targetX:p.x,targetY:p.y,frameAt:now,appearedAt:now,viewX:view.x,viewY:view.y,scale:view.scale};
+      else if(Math.hypot(motion.targetX-p.x,motion.targetY-p.y)>.2){motion.frameAt=now;motion.vx=motion.vy=0;motion.sizeTravel=motion.destinationFit=null;motion.entryHalfWidth=motion.entryHalfHeight=undefined;}
+      Object.assign(motion,{visible:true,hidden:false,fade:null,targetX:p.x,targetY:p.y,targetAt:now,viewKey,label:item.label});motions.set(item.label.id,motion);item.motion=motion;
      }
     }
     if(motions){titleLayoutAt=now;clearTimeout(titleWake);titleWake=null;}
@@ -965,17 +1034,29 @@
     // New labels wait for their final constrained/collision-resolved anchor;
     // never display an intermediate center that would introduce another leg.
    }
-   for(const {label,fit,measure,motion,anchor}of prepared){
-    if(motions&&!motion?.visible||!motions&&!anchor)continue;
-    let x=motion?.x??anchor.x,y=motion?.y??anchor.y;
+   for(const {label,fit:targetFit,baseFit,measure,motion,anchor}of prepared){
+    if(motions&&(!motion?.visible||motion.hidden)||!motions&&!anchor)continue;
+    let fit=targetFit;
+    let frames=[{x:anchor?.x,y:anchor?.y,alpha:1}];
     if(motion){
-     let moving=false;
-     moving=root.CrateRegionLabelLayout.advance(motion,clip,fit.halfWidth+fit.pad,fit.height,now,titleTuning.settings);
-     x=motion.x;y=motion.y;
-     const fade=Math.min(1,(now-motion.appearedAt)/titleFade);
-     ctx.globalAlpha=opacity*fade;seen.add(label.id);
-     animating=animating||moving||fade<1;
-    }else ctx.globalAlpha=opacity;
+     const layout=root.CrateRegionLabelLayout,planned=!!motion.sizeTravel||Math.hypot(motion.x-motion.targetX,motion.y-motion.targetY)>.2;
+     let goal;
+     if(planned){
+      const cached=motion.destinationFit;
+      if(!cached||cached.viewKey!==viewKey||cached.label!==label||cached.x!==motion.targetX||cached.y!==motion.targetY)motion.destinationFit={viewKey,label,x:motion.targetX,y:motion.targetY,fit:layout.edgeFit(motion.targetX,motion.targetY,baseFit,clip,measure,titleTuning.settings)};
+      goal=motion.destinationFit.fit;layout.prepareTravelSize(motion,goal.size);
+     }else goal=layout.edgeFit(motion.x,motion.y,baseFit,clip,measure,titleTuning.settings);
+     const moving=layout.advance(motion,clip,motion.halfWidth??fit.halfWidth+fit.pad,motion.halfHeight??fit.height,now,titleTuning.settings),alpha=Math.min(1,Math.max(0,(now-motion.appearedAt)/titleFade));
+     const resizing=planned?layout.advanceTravelSize(motion,now,moving):layout.advanceSize(motion,goal.size,now,titleTuning.settings);
+     if(planned&&!moving)motion.sizeTravel=motion.destinationFit=null;
+     if(resizing){
+      const factor=motion.displaySize/goal.size,pad=3+motion.displaySize*.11;
+      const parts=goal.parts.map(p=>{const size=p.size*factor;return {...p,size,font:`700 ${size}px "Microsoft YaHei",sans-serif`,metrics:{width:p.metrics.width*factor,actualBoundingBoxAscent:p.metrics.actualBoundingBoxAscent*factor,actualBoundingBoxDescent:p.metrics.actualBoundingBoxDescent*factor}};});
+      fit={...goal,parts,gap:goal.gap*factor,halfWidth:goal.halfWidth*factor,height:(goal.height-goal.pad)*factor+pad,pad,size:motion.displaySize};
+     }else fit=goal;
+     motion.halfWidth=fit.halfWidth+fit.pad;motion.halfHeight=fit.height;
+     frames=alpha>0&&(moving||titleContains(label,view,motion.x,motion.y))?[{x:motion.x,y:motion.y,alpha}]:[];seen.add(label.id);animating=animating||moving||resizing||alpha<1;
+    }
     function paintTitle(target,fit,x,y){
      let left=x-fit.halfWidth;
      for(const part of fit.parts){
@@ -986,7 +1067,7 @@
      }
     }
     let sprite=null;
-    if(motions&&(view.navigating||animating)&&ctx.getTransform&&ctx.drawImage){
+    if((view.navigating||animating)&&ctx.getTransform&&ctx.drawImage){
      const transform=ctx.getTransform(),ratio=Math.hypot(transform.a,transform.b)||1;
      sprite=titleSprites.get(label);
      if(sprite?.ratio!==ratio){
@@ -1001,7 +1082,7 @@
       }else sprite=null;
      }else{titleSprites.delete(label);titleSprites.set(label,sprite);}
     }
-    if(sprite){
+    for(const{x,y,alpha}of frames){ctx.globalAlpha=opacity*alpha;if(sprite){
      // The 68 px master retains visible-cell sizing and the existing fade and
      // anchor animation without repeatedly stroking glyph paths while panning.
      const factor=fit.size/68,w=sprite.image.width/sprite.ratio*factor,h=sprite.image.height/sprite.ratio*factor;
@@ -1009,9 +1090,10 @@
     }else{
      paintTitle(ctx,fit,x,y);
     }
+    }
    }
    ctx.restore();
-   if(motions){const known=new Set(labels.map(label=>label.id));for(const[id,motion]of motions)if(!seen.has(id)){if(!known.has(id)){motions.delete(id);continue;}if(motion.visible){root.CrateRegionLabelLayout.transport(motion,view);motion.x=motion.targetX;motion.y=motion.targetY;motion.vx=motion.vy=0;motion.hidden=true;}}if(animating)schedule();}
+   if(motions){const known=new Set(labels.map(label=>label.id));for(const[id,motion]of motions)if(!seen.has(id)){if(!known.has(id)){motions.delete(id);continue;}if(motion.visible){root.CrateRegionLabelLayout.transport(motion,view);motion.x=motion.targetX;motion.y=motion.targetY;motion.vx=motion.vy=0;motion.hidden=true;motion.fade=null;}}if(animating)schedule();}
   }
   function labels(ctx,view,viewport=area){paintLabels(ctx,view,labelData(),viewport,state().data.rendering.cameraRect,view===state()?titleMotion:null);}
   function snapshotLayer(){
@@ -1019,13 +1101,13 @@
    // Geometry paths are replaced on revision, never edited in place. Retaining
    // them freezes an export without copying every cell or rasterizing early.
    if(!overlayVisible())return ()=>{};
-   const camera=state().data.rendering.cameraRect?.slice(),totals=labelData().map(l=>({...l})),layers=orderedRegions().filter(r=>r.cells.size).map(r=>({geometry:geometry(r),color:r.color,alpha:(1-doc.transparency/100)*(r.id===doc.active?1:.75),selected:r.id===doc.active}));
+   const dynamic=$('dynamicRegionTitles')?.checked!==false,camera=state().data.rendering.cameraRect?.slice(),totals=labelData().map(l=>({...l})),layers=orderedRegions().filter(r=>r.cells.size).map(r=>({geometry:geometry(r),color:r.color,alpha:(1-doc.transparency/100)*(r.id===doc.active?1:.75),selected:r.id===doc.active}));
    const layer=(ctx,view)=>{
     ctx.save();clipCamera(ctx,view,camera);
     for(const layer of layers)paintGeometry(ctx,layer.geometry,view,layer.color,layer.alpha,layer.selected);
     ctx.restore();
    };
-   layer.labels=(ctx,view,viewport=area)=>paintLabels(ctx,view,totals,viewport,camera);return layer;
+   layer.labels=(ctx,view,viewport=area)=>paintLabels(ctx,view,totals,viewport,camera,null,dynamic);return layer;
   }
   function render(ctx,view,visible){
    if(overlayVisible()){
@@ -1061,10 +1143,21 @@
   function paintMembership(ctx,view,clip,regions){
    const l=(clip.x-view.x)/view.scale,t=(clip.y-view.y)/view.scale,r=l+clip.w/view.scale,b=t+clip.h/view.scale;
    const cells=selectionIndex.screen.query(l-120,t-300,r+120,b+300).filter(c=>{const box=cellSurfaceBox(c);return box.l<r+2/view.scale&&box.r>l-2/view.scale&&box.t<b+2/view.scale&&box.b>t-2/view.scale;});
-   for(const reg of regions){const fill=new Path2D(),edge=new Path2D();for(const c of cells){const k=R.key(c);if(!reg.cells.has(k))continue;path(fill,c,view);if([1024,-1024,1,-1].some(d=>!reg.cells.has(k+d)))path(edge,c,view);}
+   for(const reg of regions){const {fill,edge}=cellPaths(cells,view,reg.cells,true);
     ctx.fillStyle=reg.color;ctx.globalAlpha=(1-mapTransparency/100)*(reg.id===doc.active?1:.75);ctx.fill(fill,'evenodd');ctx.globalAlpha=1;
     if(view.scale>=.12){ctx.strokeStyle=reg.color;ctx.lineWidth=reg.id===doc.active?1.4:.8;ctx.stroke(edge);}
    }
+  }
+  function cellPaths(cells,view,members=null,outline=false){
+   const fill=new Path2D(),edge=new Path2D();let part=new Path2D(),border=new Path2D(),count=0;
+   // Chromium repeatedly copies a path's growing command buffer when appending
+   // vertices. Small subpaths keep large fills and box previews linear, while
+   // one final fill/stroke preserves opacity and joins across all cells.
+   for(const c of cells){const k=R.key(c);if(members&&!members.has(k))continue;
+    path(part,c,view);if(outline&&[1024,-1024,1,-1].some(d=>!members.has(k+d)))path(border,c,view);
+    if(++count%64===0){fill.addPath(part);edge.addPath(border);part=new Path2D();border=new Path2D();}
+   }
+   if(count%64){fill.addPath(part);edge.addPath(border);}return {fill,edge};
   }
   function minimap(ctx,im){
    if(!overlayVisible())return;const view={x:-(im.worldX||0)*im.scale,y:-(im.worldY||0)*im.scale,scale:im.scale},clip={x:0,y:0,w:Math.ceil(im.w),h:Math.ceil(im.h)};
@@ -1072,24 +1165,21 @@
   }
   async function runAuto(manual=true){
    if(automatic){cancelAuto();return;}
+   commitColor();
    if(!manual&&(doc.autoHandled||doc.regions.some(r=>r.cells.size)))return;
-   if(!state().data||state().data.metadata.previewOnly||!root.CrateRegionAuto)return;
-   cancel();const s=state(),data=s.data,ticket=++autoEpoch,controller=new AbortController();automatic=controller;
-   $('regionAutoFields').disabled=true;$('regionAutoRun').textContent=_t('取消自动划分');
+   if(state().busy||!state().data||state().data.metadata.previewOnly||!root.CrateRegionAuto)return;
+   cancel();const s=state(),ticket=++autoEpoch,controller=new AbortController();automatic=autoPreparing=controller;
+   $('regionAutoFields').disabled=true;autoButtons(true);
    const reportProgress=p=>{if(ticket===autoEpoch){const text=_t`正在自动划分… ${Math.round(p)}%`;$('regionAutoStatus').textContent=text;$('regionAutoProgress').textContent=text;$('regionAutoProgress').hidden=false;}};reportProgress(0);
    try{
-    let navigation=data.regionNavigation||navigationCache.get(data);
-    if(navigation?.version!==root.CrateRegionAuto.navigationVersion)navigation=null;
-    if(!navigation){
-     if(loadNavigation)navigation=await loadNavigation(s,controller.signal);
-     else if(root.CrateWebConfig?.static)throw Error(_t('此网页版缺少自动划分通行数据，请更新网页包。'));
-     else navigation=await root.CrateLocalAPI.json('/api/maps/region-navigation?'+new URLSearchParams({result:s.prepared?.url||s.baseUrl+'result.json'}),{signal:controller.signal});
-     navigationCache.set(data,navigation);
-    }
+    await prepareNavigation?.(controller.signal);controller.signal.throwIfAborted();
+    if(autoPreparing===controller)autoPreparing=null;
+    const data=s.data;
+    const navigation=await navigationFor(s,controller.signal);
     controller.signal.throwIfAborted();
     const result=await root.CrateRegionAuto.partition({cells:data.cells,navigation,starts:root.CratePlayerStarts.positions(s),eligible:new Set(eligible.keys()),settings:doc.autoOptions,display:getDisplay()},{signal:controller.signal,onProgress:reportProgress});
     if(ticket!==autoEpoch||state().data!==data)return;
-    automatic=null;doc.autoHandled=true;checkpoint();
+    automatic=null;doc.autoHandled=true;checkpoint(_t('自动划分区域'));
     doc.appliedTeams=root.CrateRegionAuto.teams(result.settings.teams);
     for(const r of doc.regions){r.cells.clear();if(r.generatedName){delete r.generatedName;if(!r.customName)r.name=_t`区域 ${r.id.slice(1)}`;}R.touch(r);}
     // Keep two unused, editable slots beyond the automatic assignments.
@@ -1102,13 +1192,15 @@
     dirty();persist();
     $('regionAutoStatus').textContent=_t`自动划分完成：${result.regions.length} 个区域`+(result.unreachablePlayers.length?_t`未找到可通行起点的玩家：${result.unreachablePlayers.join('、')}`:'');
    }catch(error){if(!controller.signal.aborted&&ticket===autoEpoch)$('regionAutoStatus').textContent=_t('自动划分失败：')+(/^REGION_NAVIGATION_/.test(error.message)?_t('自动划分通行数据不完整，请重新分析或更新网页包。'):error.message);}
-   finally{if(ticket===autoEpoch){automatic=null;$('regionAutoFields').disabled=false;$('regionAutoRun').textContent=_t('重新自动划分');$('regionAutoProgress').hidden=true;schedule();}}
+   finally{if(autoPreparing===controller)autoPreparing=null;if(ticket===autoEpoch){automatic=null;$('regionAutoFields').disabled=false;autoButtons();$('regionAutoProgress').hidden=true;schedule();}}
   }
   $('regionAutoRun').onclick=()=>runAuto();
-  for(const id of ['regionAutoSea','regionAutoExclusive','regionAutoStraight','regionAutoPath'])$(id).onchange=()=>{
-   checkpoint();doc.autoOptions=root.CrateRegionAuto.options({...doc.autoOptions,maxSea:Number($('regionAutoSea').value),exclusive:$('regionAutoExclusive').checked,maxStraight:Number($('regionAutoStraight').value),maxPath:Number($('regionAutoPath').value)});presentationChanged();
+  $('regionAutoQuick').onclick=e=>{e.preventDefault();e.stopPropagation();runAuto();};
+  for(const id of ['regionAutoSea','regionAutoExclusive','regionAutoCorners','regionAutoStraight','regionAutoPath'])$(id).onchange=()=>{
+   checkpoint(_t('自动划分设置'));doc.autoOptions=root.CrateRegionAuto.options({...doc.autoOptions,maxSea:Number($('regionAutoSea').value),exclusive:$('regionAutoExclusive').checked,claimCorners:$('regionAutoCorners').checked,maxStraight:Number($('regionAutoStraight').value),maxPath:Number($('regionAutoPath').value)});presentationChanged();
   };
   $('regionShowTotals').onclick=()=>{doc.showTotals=!doc.showTotals;resetTitleTracking();const button=$('regionShowTotals');button.setAttribute('aria-pressed',String(doc.showTotals));button.textContent=_t('区域标题:')+(doc.showTotals?_t('开'):_t('关'));presentationChanged();};
+  $('dynamicRegionTitles')?.addEventListener('change',()=>{resetTitleTracking();schedule();});
   function overlayChanged(){if(!overlayVisible()&&stroke)up();previewChanged();resetTitleTracking();if(!overlayVisible())mapOverlayCache?.cancelRefinement?.();else refresh();}
   $('regionColorOverlay').addEventListener('click',overlayChanged);
   for(const quick of [false,true]){
@@ -1127,34 +1219,37 @@
   document.addEventListener('pointerdown',e=>{if(!$('regionPicker').contains(e.target)&&!$('regionToolbarPicker').contains(e.target))closePicker();});
   $('regionName').oninput=()=>{
    if(isEmpty())return;
-   if(!nameEditing){checkpoint();nameEditing=true;}
+   if(!nameEditing){checkpoint(_t('修改区域名称')+' · '+R.displayName(current()));nameEditing=true;}
    current().name=$('regionName').value.trim().slice(0,48)||_t('未命名区域');current().customName=true;dirty();
   };
   $('regionName').onblur=()=>{nameEditing=false;$('regionName').value=R.displayName(current());};
-  $('regionColor').oninput=()=>{if(isEmpty())return;if(!colorEditing){checkpoint();colorEditing=true;}current().color=$('regionColor').value;dirty();};
-  $('regionColor').onchange=$('regionColor').onblur=()=>{colorEditing=false;};
+  $('regionColor').oninput=()=>{if(isEmpty())return;if(!colorEditing){checkpoint(_t('修改区域颜色')+' · '+R.displayName(current()));colorEditing=true;}pendingColor={region:current(),color:$('regionColor').value};$('regionActiveSwatch').style.backgroundColor=pendingColor.color;$('regionEditor').style.setProperty('--region-color',pendingColor.color);clearTimeout(colorTimer);colorTimer=setTimeout(commitColor,150);};
+  $('regionColor').onchange=$('regionColor').onblur=()=>{commitColor();colorEditing=false;};
   $('regionOverlap').onchange=()=>{
-   checkpoint();doc.overlap=$('regionOverlap').checked;const removed=doc.overlap?0:R.exclusive(doc);dirty();
+   checkpoint(_t('区域重叠设置'));doc.overlap=$('regionOverlap').checked;const removed=doc.overlap?0:R.exclusive(doc);dirty();
    $('regionActionStatus').textContent=removed?_t`已移除 ${removed} 处重复归属，优先保留当前区域；可撤销。`:doc.overlap?_t('允许同一格归属多个区域。'):_t('同一格只属于一个区域。');
   };
-  function addRegion(){if(doc.regions.length>=64)return;checkpoint();const n=doc.next++;doc.regions.push({id:`r${n}`,name:_t`区域 ${n}`,color:R.nextColor(doc.regions),cells:new Set()});doc.active=`r${n}`;dirty();}
+  function addRegion(){if(doc.regions.length>=64)return;checkpoint(_t('新增区域'));const n=doc.next++;doc.regions.push({id:`r${n}`,name:_t`区域 ${n}`,color:R.nextColor(doc.regions),cells:new Set()});doc.active=`r${n}`;dirty();}
   $('regionAdd').onclick=addRegion;
-  $('regionClear').onclick=()=>{if(isEmpty())return;checkpoint();current().cells.clear();R.touch(current());dirty();$('regionActionStatus').textContent=_t('已清空当前区域；可撤销。');};
-  $('regionDelete').onclick=()=>{if(isEmpty()||doc.regions.length<=1)return;checkpoint();doc.regions=doc.regions.filter(r=>r.id!==doc.active);doc.active=doc.regions[0].id;dirty();$('regionActionStatus').textContent=_t('已删除区域；可撤销。');};
+  $('regionClear').onclick=()=>{if(isEmpty())return;checkpoint(_t('清空区域')+' · '+R.displayName(current()));current().cells.clear();R.touch(current());dirty();$('regionActionStatus').textContent=_t('已清空当前区域；可撤销。');};
+  $('regionDelete').onclick=()=>{if(isEmpty()||doc.regions.length<=1)return;checkpoint(_t('删除区域')+' · '+R.displayName(current()));doc.regions=doc.regions.filter(r=>r.id!==doc.active);doc.active=doc.regions[0].id;dirty();$('regionActionStatus').textContent=_t('已删除区域；可撤销。');};
   function travel(redo){
-   if(automatic)cancelAuto();cancel();const stack=redo?future:history,raw=stack.pop();if(!raw)return;
+   commitColor();
+   if(automatic)cancelAuto();cancel();const stack=redo?future:history,raw=stack.pop();if(!raw)return false;
    const inverse=redo?history:future;
    if(typeof raw==='string'){
-    inverse.push(R.encode(doc));adoptDocument(R.decode(raw,eligible));resetThumbnailOpacity();dirty();
+    inverse.push(R.encode(doc));adoptDocument(restoreHistory(raw));thumbnails.reset();dirty();
    }else{
-    inverse.push({transparency:doc.transparency});doc.transparency=raw.transparency;syncTransparency();saveSoon();schedule();updateThumbnailOpacity();
+    inverse.push({transparency:doc.transparency});doc.transparency=raw.transparency;syncTransparency();saveSoon();schedule();thumbnails.request();
    }
    commitMapTransparency();nameEditing=colorEditing=opacityEditing=false;$('regionActionStatus').textContent=redo?_t('已重做上一步。'):_t('已撤销上一步。');
+   return true;
   }
-  $('regionUndo').onclick=()=>travel(false);$('regionRedo').onclick=()=>travel(true);
+  if(editHistory){editHistory.register('regions',{limit:20,prepare:up,ready:()=>!!state().data&&!state().busy&&!automatic,clearRedo:()=>{future=[];},undo:()=>travel(false),redo:()=>travel(true)});editHistory.subscribe(syncHistory);}
+  $('regionUndo').onclick=()=>editHistory?editHistory.undo():travel(false);$('regionRedo').onclick=()=>editHistory?editHistory.redo():travel(true);
   function syncTransparency(){
    $('regionTransparency').value=doc.transparency;$('regionTransparencyValue').textContent=doc.transparency+'%';
-   $('regionUndo').disabled=!history.length;$('regionRedo').disabled=!future.length;
+   syncHistory();
   }
   function commitMapTransparency(){
    clearTimeout(mapOpacityTimer);mapOpacityTimer=null;mapTransparency=doc.transparency;schedule();
@@ -1164,35 +1259,37 @@
    if(!opacityEditing){
     if(automatic)cancelAuto();
     clearTimeout(saveTimer);saveTimer=null;doc.autoHandled=true;
-    remember({transparency:doc.transparency});opacityEditing=true;
+    remember({transparency:doc.transparency},_t('区域图层透明度'));opacityEditing=true;
    }
-   cancelThumbnailUpdate();doc.transparency=value;syncTransparency();
+   thumbnails.cancel();doc.transparency=value;syncTransparency();
    // The range thumb/value updates immediately. Recompose only the newest
    // opacity after a short pause, or on release; superseded states never queue.
    clearTimeout(mapOpacityTimer);mapOpacityTimer=setTimeout(commitMapTransparency,120);
   };
-  $('regionTransparency').onchange=$('regionTransparency').onblur=()=>{if(opacityEditing){opacityEditing=false;commitMapTransparency();saveSoon();updateThumbnailOpacity();}};
+  $('regionTransparency').onchange=$('regionTransparency').onblur=()=>{if(opacityEditing){opacityEditing=false;commitMapTransparency();saveSoon();thumbnails.request();}};
   $('regionFocus').onclick=focus;
-  tableControls=root.CrateRegionTableControls?.create({table:$('regionTable'),body:$('regionRows'),host:document.querySelector('.region-summary-header'),sort:$('regionSort'),ascending:$('regionAscending'),onSort:sortRows,onOverviewChanged:()=>{if(state().data)updateThumbnailOpacity(true);}});
+  tableControls=root.CrateRegionTableControls?.create({table:$('regionTable'),body:$('regionRows'),host:document.querySelector('.region-summary-header'),sort:$('regionSort'),ascending:$('regionAscending'),onSort:sortRows,onOverviewChanged:()=>{if(state().data)thumbnails.request(true);}});
   function sortSelectionChanged(){$('regionAscending').checked=['order','name'].includes($('regionSort').value);sortRows();}
   $('regionSort').onchange=sortSelectionChanged;$('regionAscending').onchange=()=>sortRows();
   $('regionRankSort').onchange=()=>{$('regionSort').value=$('regionRankSort').value;sortSelectionChanged();};
-  for(const [id,mode] of [['regionDetailsTab','details'],['regionRankingTab','ranking']]){
+  for(const [id,mode] of asideTabs){
    $(id).onclick=()=>{sideMode=mode;updateAside();schedule();};
+   $(id).onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;const buttons=asideTabs.map(([key])=>$(key)).filter(b=>!b.hidden),at=buttons.indexOf(e.currentTarget),next=e.key==='Home'?0:e.key==='End'?buttons.length-1:(at+(e.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;e.preventDefault();e.stopPropagation();buttons[next].click();buttons[next].focus();};
   }
   function controls(preserveHover=false){if(tool()!=='picker')lastTool=tool();const brush=tool().startsWith('brush'),round=['brush-circle','brush-ellipse'].includes(tool());$('regionSizes').hidden=!brush;$('regionHeightLabel').hidden=round;$('regionWidthText').textContent=tool()==='brush-circle'?_t('直径'):tool()==='brush-ellipse'?_t('横向直径'):_t('宽度');if(!preserveHover)hover=null;interactionHint();schedule();}
-  function shortcut(key){const next={q:'brush-ellipse',w:'box-screen',e:'fill'}[key];if(!active||!next)return false;up();$('regionTool').value=next;controls(true);return true;}
+  function shortcut(key){const next={q:'brush-ellipse',w:'box-screen',e:'box-game',r:'fill'}[key];if(!active||!next)return false;up();$('regionTool').value=next;controls(true);return true;}
   function adjustSize(delta){if(!active||!tool().startsWith('brush'))return false;
    $('regionWidth').value=Math.max(1,Math.min(60,width()+delta));
    if(!['brush-circle','brush-ellipse'].includes(tool()))$('regionHeight').value=Math.max(1,Math.min(60,height()+delta));
    if(stroke?.tool.startsWith('brush')){stroke.width=width();stroke.height=height();stroke.gap=true;}
-   previewChanged();schedule();return true;
+   interactionHint();previewChanged();schedule();return true;
   }
   $('regionTool').onchange=()=>{cancel();controls();};
   $('regionEyedropper').onclick=()=>{cancel();$('regionTool').value=tool()==='picker'?lastTool:'picker';controls();};
   $('regionOperation').onchange=()=>{interactionHint();schedule();};
   for(const id of ['regionWidth','regionHeight'])$(id).onchange=()=>{$(id).value=id==='regionWidth'?width():height();schedule();};
   $('regionBackup').onclick=()=>{
+   commitColor();
    const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify({mapSha256:state().data.metadata.sourceSha256,selection:JSON.parse(R.encode(doc))})],{type:'application/json'}));
    a.href=url;a.download=state().data.metadata.filename+_t('-区域划分.json');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
@@ -1201,31 +1298,31 @@
    try{
     if(file.size>128*1024*1024)throw Error(_t('备份文件过大（上限 128 MB）'));
     const data=JSON.parse(await file.text());if(data.mapSha256!==state().data.metadata.sourceSha256)throw Error(_t('备份属于另一张地图'));
-    const restored=R.decode(JSON.stringify(data.selection),eligible);restored.autoHandled=true;checkpoint();adoptDocument(restored);resetThumbnailOpacity();storageBlocked=false;dirty();$('regionActionStatus').textContent=_t('已恢复备份（自动排除可选边界外的格子）；可撤销。');
+    const restored=R.decode(JSON.stringify(data.selection),eligible);restored.autoHandled=true;checkpoint(_t('恢复区域备份'));adoptDocument(restored);thumbnails.reset();storageBlocked=false;dirty();$('regionActionStatus').textContent=_t('已恢复备份（自动排除可选边界外的格子）；可撤销。');
    }catch(e){$('regionActionStatus').textContent=_t('恢复失败：')+e.message;}
    $('regionRestore').value='';
   };
   $('objects').addEventListener('change',()=>{if(summaryVisible)refresh();});
   $('players').addEventListener('change',()=>{if(summaryVisible)refresh();});
-  window.addEventListener('pagehide',()=>{cancel();if(saveTimer||opacityEditing)persist();});
+  window.addEventListener('pagehide',()=>{cancel();if(saveTimer||opacityEditing||pendingColor)persist();});
   window.addEventListener('blur',()=>{cancel();hover=null;modifiers({shiftKey:false,ctrlKey:false});schedule();});
   document.addEventListener('visibilitychange',()=>{if(document.hidden){cancel();hover=null;modifiers({shiftKey:false,ctrlKey:false});schedule();}});
   // Do not silently overwrite an update made in another tab.
   window.addEventListener('storage',e=>{
    if(e.key!==storageKey||!e.newValue)return;
    if(automatic)cancelAuto(true);
-   if(stroke||saveTimer||opacityEditing){storageBlocked=true;clearTimeout(saveTimer);saveTimer=null;status(_t('另一页面修改了此地图划分。已暂停保存，请导出备份后刷新。'),true);return;}
-   try{adoptDocument(R.decode(e.newValue,eligible));resetThumbnailOpacity();history=[];future=[];nameEditing=colorEditing=opacityEditing=false;dirty(false);status(_t('已同步另一页面的区域划分'));}catch{status(_t('另一页面的区域记录无法读取'),true);}
+   if(stroke||saveTimer||opacityEditing||pendingColor){storageBlocked=true;clearTimeout(saveTimer);saveTimer=null;status(_t('另一页面修改了此地图划分。已暂停保存，请导出备份后刷新。'),true);return;}
+   try{adoptDocument(R.decode(e.newValue,eligible));thumbnails.reset();history=[];future=[];editHistory?.clear('regions');nameEditing=colorEditing=opacityEditing=false;dirty(false);status(_t('已同步另一页面的区域划分'));}catch{status(_t('另一页面的区域记录无法读取'),true);}
   });
   document.addEventListener('keydown',e=>{
    if(active&&(e.key==='Shift'||e.key==='Control')&&!document.querySelector('dialog[open]')&&(hover||stroke||!e.target?.closest('input,textarea,select,[contenteditable]')))modifiers(e);
    if(!active||e.target?.closest('input,textarea,select,[contenteditable]')||document.querySelector('dialog[open]'))return;
    if(e.key==='Escape'){if(stroke){e.preventDefault();cancel();}else if(tool()==='picker'){e.preventDefault();$('regionTool').value=lastTool;controls();}}
-   if(e.ctrlKey||e.metaKey){const k=e.key.toLowerCase();if(k==='z'||k==='y'){e.preventDefault();$(k==='y'||e.shiftKey?'regionRedo':'regionUndo').click();}}
+   if(!editHistory&&(e.ctrlKey||e.metaKey)){const k=e.key.toLowerCase();if(k==='z'||k==='y'){e.preventDefault();$(k==='y'||e.shiftKey?'regionRedo':'regionUndo').click();}}
   });
   document.addEventListener('keyup',e=>{if(e.key==='Shift'||e.key==='Control')modifiers(e);});
   controls();
-  return {load,beforeLoad:()=>{cancelAuto(true);cancel();refreshQueue?.reset();if(saveTimer||opacityEditing)persist();},render,preview,labels,snapshotLayer,minimap,overlayChanged,playerStyles:()=>overlayVisible()?playerMarks:null,hoverInfo,down,move,up,cancel,sampleRegion,selectSample,finishPicking,get picking(){return active&&tool()==='picker';},autoPartition:runAuto,membership,updateBuffs,renderPlacement,flush:flushRefresh,get refreshStatus(){return {...refreshQueue?.status,...refreshWork,localRefreshes,lastLocalCells,pending:!!refreshQueue?.status.pending};},
+  return {*warmup(target){if(mapOverlayCache?.warmup)yield* mapOverlayCache.warmup(target);},load,beforeLoad:({preserveAuto=false}={})=>{commitColor();thumbnails.cancel();if(!preserveAuto||!autoPreparing)cancelAuto(true);cancel();refreshQueue?.reset();if(saveTimer||opacityEditing)persist();},render,preview,labels,snapshotLayer,minimap,overlayChanged,playerStyles:()=>overlayVisible()?playerMarks:null,hoverInfo,down,move,up,cancel,sampleRegion,selectSample,finishPicking,get picking(){return active&&tool()==='picker';},autoPartition:runAuto,membership,updateBuffs,renderPlacement,flush:flushRefresh,get refreshStatus(){return {...refreshQueue?.status,...refreshWork,localRefreshes,lastLocalCells,thumbnails:thumbnails.status,pending:!!refreshQueue?.status.pending};},
    updateCells(cells){
     let geometryChanged=false;
     for(const c of cells){
@@ -1233,12 +1330,12 @@
      if(!previous||previous.px!==c.px||previous.py!==c.py||previous.level!==c.level||
         previous.visibleSurface!==c.visibleSurface&&JSON.stringify(previous.visibleSurface)!==JSON.stringify(c.visibleSurface))geometryChanged=true;
     }
-    if(geometryChanged){terrainRevision++;if(!asynchronous){geometryCache=new WeakMap();thumbnailCache=new WeakMap();rasterCache.clear();rasterPixels=0;mapOverlayCache?.clear();}}
+    if(geometryChanged){terrainRevision++;if(!asynchronous){geometryCache=new WeakMap();thumbnails.invalidate();rasterCache.clear();rasterPixels=0;mapOverlayCache?.clear();}}
     if(!asynchronous){statisticsCache=new WeakMap();labelCache=new WeakMap();titleSprites.clear();titleSpritePixels=0;}
    },
    probabilityChanged(change){if(summaryVisible||overlayVisible()){if(!updateProbability(change))refresh();}},
    playerAt:(cell,numbers)=>numbers?.length?R.nearestPlayer(cell,numbers,root.CratePlayerStarts?.positions(state())||[]):R.playerAt(doc,cell,root.CratePlayerStarts?.positions(state())||[]),
-   shortcut,adjustSize,cursorInfo,get autoBusy(){return !!automatic;},leave:()=>{if(hover){hover=null;syncCursor();previewChanged();schedule();}},get active(){return active;},get dragging(){return !!stroke;},setMode};
+   shortcut,adjustSize,get canAdjustSize(){return active&&tool().startsWith('brush');},cursorInfo,get autoBusy(){return !!automatic;},leave:()=>{if(hover){hover=null;syncCursor();previewChanged();schedule();}},get active(){return active;},get dragging(){return !!stroke;},setMode};
  }
- root.CrateRegionStatisticsUI={create,thumbnailLayout};
+ root.CrateRegionStatisticsUI={create,thumbnailLayout:root.CrateRegionThumbnails.layout};
 })(typeof globalThis!=='undefined'?globalThis:this);

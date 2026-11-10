@@ -19,10 +19,10 @@ ROOT = Path(__file__).resolve().parent
 _artwork_lock = None
 _artwork_cache = None
 FRONTEND = '''finite-retry.js app.js asset-data.js i18n-en.js i18n.js model.js timing.js scene.js
-probability-index.js probability.js probability-display.js occupancy-overlay.js
-minimap.js transfer-origins.js player-starts.js map-artwork.js map-raster-background.js raster-refinement.js raster-preview-cache.js map-renderer.js map-image-export.js
-selection-keyboard.js map-coordinates.js map-display-controls.js map-navigation.js official-map-names.js official-maps-ui.js region-statistics.js region-auto.js region-overlay-cache.js region-label-layout.js region-title-controls.js region-refresh-queue.js region-table-controls.js region-statistics-ui.js buff-reference.js unit-buff.js buff-expectation.js buff-expectation-ui.js buff-expectation-worker.js
-map-results.js map-details.js map-exports.js mineral-layouts.js simulation-assets.js simulation-visual.js simulation-bridges.js simulation-model.js simulation-ui.js simulation.css local-api.js realmap-ui.js
+edit-history.js display-modes.js probability-index.js probability.js probability-display.js occupancy-overlay.js
+minimap.js transfer-origins.js player-starts.js map-artwork.js map-raster-background.js interaction-priority.js raster-refinement.js raster-preview-cache.js transfer-columns.js transfer-overlay.js map-renderer.js map-image-export.js
+selection-keyboard.js numeric-input.js map-coordinates.js map-display-controls.js map-navigation.js official-map-names.js official-maps-ui.js region-statistics.js region-auto.js region-overlay-cache.js region-label-layout.js region-title-controls.js region-refresh-queue.js region-table-controls.js region-thumbnails.js region-statistics-ui.js buff-reference.js unit-buff.js buff-source.js buff-weight-kernel.js buff-expectation.js buff-kernel-pool.js buff-kernel-worker.js buff-field-cache.js map-label-cache.js buff-expectation-ui.js buff-expectation-worker.js
+map-results.js risk-pagination.js selection-probability.js sea-land-connections.js map-details.js map-exports.js mineral-layouts.js simulation-assets.js simulation-visual.js simulation-bridges.js simulation-model.js simulation-session.js simulation-publication.js simulation-placement.js simulation-ui.js simulation.css local-api.js map-import-version.js realmap-ui.js
 realmap-ui.css page-navigation.css official-maps.css region-statistics.css terrain3d.js terrain3d.css'''.split()
 
 
@@ -301,8 +301,9 @@ def page(source, demo=False):
     text = text.replace('</head>', '<link rel="stylesheet" href="toy.css?v='+hashlib.sha256((ROOT/'toy/toy.css').read_bytes()).hexdigest()[:12]+'"></head>')
     text = text.replace('<body>', '<body class="toy">')
     text = re.sub(r'href="/research[^\"]*"', 'href="about.html"', text)
-    # Toy keeps local documentation, without the full edition's website links.
-    text = re.sub(r'\s*·\s*<a\b[^>]*id="githubRepository"[^>]*>.*?</a>', '', text)
+    # Toy names the repository beside local documentation, without an external link.
+    text = re.sub(r'<a\b[^>]*id="githubRepository"[^>]*>.*?</a>',
+                  '<span id="githubRepository">GitHub: jjbsded/ra2-crate-atlas</span>', text)
     text = re.sub(r'<a\b[^>]*href="cliff-demo\.html"[^>]*>.*?</a>', '', text)
     if not demo:
         text = text.replace('href="index.html"', 'href="demo.html"')
@@ -354,11 +355,11 @@ def frontend(output):
             text=text.replace('低清简化版（非完整版）','原版贴图轻量版（非完整版）')
         (output/name).write_text(text, 'utf-8')
     (output/'docs').mkdir(exist_ok=True)
-    for name in ['random-crate-generation.md', 'random-crate-generation.en.md', 'simulation-mode.md', 'incremental-probability.md', 'probability-model.md']:
+    for name in ['random-crate-generation.md', 'random-crate-generation.en.md', 'simulation-mode.md', 'incremental-probability.md', 'probability-model.md', 'buff-expectation-performance.md']:
         shutil.copy2(ROOT/'docs'/name, output/'docs'/name)
 
 
-def finalize(output, manifest, archive=None):
+def finalize(output, manifest, archive=None, *, make_archive=True):
     manifest['internalBuild'] = manifest.get('edition') != 'toy'
     if any(output.rglob('*.tmp')):
         raise ValueError('Incomplete artwork remains in the build directory')
@@ -378,8 +379,8 @@ def finalize(output, manifest, archive=None):
     manifest['files'] = {str(p.relative_to(output)).replace('\\', '/'):hashlib.sha256(p.read_bytes()).hexdigest()
                          for p in sorted(output.rglob('*')) if p.is_file() and p.name != 'build-manifest.json'}
     dump(output/'build-manifest.json', manifest)
-    if manifest['internalBuild']:
-        print(json.dumps(dict(output=str(output), internalBuild=True, reports=len(manifest['maps'])), ensure_ascii=False), flush=True)
+    if manifest['internalBuild'] or not make_archive:
+        print(json.dumps(dict(output=str(output), internalBuild=manifest['internalBuild'], reports=len(manifest['maps']), archiveCreated=False), ensure_ascii=False), flush=True)
         return
     archive = Path(archive) if archive is not None else Path(str(output)+'.zip')
     if archive.resolve().is_relative_to(output.resolve()):
@@ -429,9 +430,10 @@ def build(output, cache, ids=None, max_image=640, modes=None, jobs=1, art_cache=
                 artwork={'style': art_style, 'maxEdge': max_image if art_style=='raster' else None, 'quality': quality if art_style=='raster' else None, 'compact': True})
     dump(output/'catalog.json', data)
     frontend(output)
+    from region_navigation import VERSION as navigation_version
     manifest = dict(schemaVersion=1, builtAt=datetime.now(timezone.utc).isoformat(),
                     modelSourceSha256=fingerprint, maps=summary, maxImageEdge=max_image,
-                    imageQuality=quality, artworkStyle=art_style, transportCodec=3, probabilityModel='finite-retry-v2', regionNavigationVersion=3, zipBudgetBytes=budget)
+                    imageQuality=quality, artworkStyle=art_style, transportCodec=3, probabilityModel='finite-retry-v2', regionNavigationVersion=navigation_version, zipBudgetBytes=budget)
     finalize(output, manifest)
 
 

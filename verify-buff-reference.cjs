@@ -15,4 +15,10 @@ drawn.length=0;buffs.paint(ctx,view,area,undefined,{baselineValues:true,palette:
 const textStyle={...P.paletteSettings(),labelBase:'#204060',labelMix:.5,labelStrokeRatio:.3,warmStart:'#4488cc'};
 drawn.length=0;buffs.paint(ctx,{...view,scale:4},area,undefined,{baselineValues:true,palette:'warm',maximum:4,paletteColors:textStyle});assert.equal(drawn[0].color,'#326496');assert(Math.abs(ctx.lineWidth-10.8)<1e-10,'Unit text outline grows with its 36px font');
 drawn.length=0;buffs.paint(ctx,view,area,undefined,{baselineValues:true,palette:'warm',colorText:false,paletteColors:textStyle});assert.equal(drawn[0].color,'#204060');
+drawn.length=0;buffs.paint(ctx,view,area,undefined,{baselineValues:true,palette:'cool',colorText:false,fixedColor:'#39ff5f'});assert.equal(drawn[0].text,'1×');assert.equal(drawn[0].color,'#39ff5f','Crate-mode unit annotations use fixed bright green and can explicitly include 1x');
+drawn.length=0;buffs.paint(ctx,{...view,scale:.8},area,undefined,{baselineValues:true,fixedColor:'#39ff5f'});assert.equal(drawn.length,0,'Companion labels share the 26px cell-radius cutoff');
+const fills=[],heatContext={...ctx,moveTo(){},lineTo(){},closePath(){},fill(){fills.push({color:this.fillStyle,alpha:this.globalAlpha});}},sample=[{unit:{x:4,y:4},cell:state.lookup.get('4,4'),value:2.5}];
+drawn.length=0;const counts=buffs.paint(heatContext,view,area,sample,{heatmap:true,values:true,opacity:35,palette:'cool',maximum:4,filter:'all'});assert.equal(counts.colored,1);assert.equal(counts.labels,1);assert.equal(fills[0].color,P.color(2.5,'cool',4));assert.equal(fills[0].alpha,D.alpha(.65*P.opacityCurve(4)(2.5),false));assert.equal(drawn[0].color,P.labelColor(2.5,'cool',4));
+drawn.length=fills.length=0;buffs.paint(heatContext,view,area,[{...sample[0],value:1}],{heatmap:true,values:true,baselineValues:false,baselineLayer:false});assert.equal(drawn.length,0);assert.equal(fills.length,0);
+drawn.length=0;buffs.paint(ctx,view,area,sample,{values:false});assert.equal(drawn.length,0);
 console.log('PASS shared 1x references, palette/base/mixed unit labels, variable outlines and common text-color toggle');

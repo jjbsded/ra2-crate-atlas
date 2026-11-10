@@ -11,6 +11,8 @@ body.terrain3d-open{overflow:hidden}
 .terrain3d-controls label{font-size:13px}.terrain3d-controls button,.terrain3d-controls select{padding:7px 10px}
 #terrain3dCrate[aria-pressed=true]{border-color:#eeae72;background:#503c2b;color:#ffe0ae}
 #terrain3dProbability[aria-pressed=true]{border-color:#e1bd67;background:#51452a;color:#ffe5a0}
+#terrain3dProbability{width:16em;white-space:nowrap}
+html[lang=en] #terrain3dProbability{width:18em}
 #terrain3dStage{position:relative;flex:1;min-height:210px;overflow:hidden;background:radial-gradient(ellipse at 50% 65%,#233c47 0%,#142530 55%,#101c27 100%)}
 #terrain3dCanvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}#terrain3dCanvas.dragging{cursor:grabbing}#terrain3dCanvas:focus-visible{outline:2px solid #8bd9c6;outline-offset:-3px}
 #terrain3dStage.is-loading canvas{opacity:.25}

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent
 APPLICATION_MODULES = (
     'server.py', 'server_lifecycle.py', 'map_jobs.py', 'map_results.py', 'region_navigation.py', 'simulation_art.py',
     'realmap_format.py', 'realmap_resources.py', 'realmap_parser.py', 'realmap_sprites.py',
-    'realmap.py', 'realmap_bridges.py', 'realmap_simulation.py', 'realmap_exact.py', 'incremental_probability.py', 'probability_delta.py', 'realmap_render.py', 'realmap_refresh.py',
+    'realmap.py', 'realmap_bridges.py', 'realmap_simulation.py', 'realmap_exact.py', 'probability_kernel_cache.py', 'probability_kernel_worker.py', 'incremental_probability.py', 'probability_delta.py', 'realmap_render.py', 'realmap_refresh.py',
     'realmap_3d.py', 'terrain_depth.py', 'realmap_objects.py', 'realmap_voxel.py',
     'realmap_voxel_lighting.py', 'realmap_voxel_normals.py', 'realmap_voxel_light_tables.py', 'realmap_palette_lighting.py',
     'realmap_voxel_shadow.py', 'realmap_terrain_variants.py',
@@ -28,11 +28,11 @@ APPLICATION_MODULES = (
     'official_precomputed.py', 'official_render_cache.py', 'toy_codec.py',
     'map_storage.py', 'map_images.py', 'simulation_visual.py', 'simulation_live.py',
 )
-EXTRA_FILES = ('voxel-worker.cs', 'realmap-search.c', 'requirements.txt', 'export.cjs')
+EXTRA_FILES = ('exact-kernel-worker.cjs', 'voxel-worker.cs', 'realmap-search.c', 'requirements.txt', 'export.cjs')
 DATA_FILES = (
     'assets/urban-trees/sprites.zip', 'assets/urban-trees/provenance.json',
     'docs/rendering-porting-guide.md',
-    'docs/simulation-mode.md', 'docs/incremental-probability.md',
+    'docs/simulation-mode.md', 'docs/incremental-probability.md', 'docs/buff-expectation-performance.md', 'docs/bulk-edit-performance.md',
     'docs/probability-model.md',
     'docs/deployed-art.md',
     'docs/voxel-lighting.md',
@@ -204,6 +204,9 @@ def build(target, node, ffmpeg, node_license, version='unreleased', archive_form
         raise ValueError('输出目录已存在；请为每次构建选择新名称')
     archives, seven_zip = archive_files(target, archive_format, seven_zip)
     validate_sources()
+    # Node's require() treats a relative filesystem path as a package name.
+    # Resolve runtime inputs before probing dependencies or changing cwd.
+    node, ffmpeg, node_license = (Path(path).resolve() for path in (node, ffmpeg, node_license))
     deps, runtime_versions = validate_runtimes(node, ffmpeg, node_license)
     from original_resources import resolve
     resolve('yr')  # Refuse to create a package without validated stock assets.

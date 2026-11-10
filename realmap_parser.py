@@ -165,7 +165,9 @@ def map_rules(m, res, warnings):
             cfg = dict(m[kind])
             image = cfg.get('IMAGE', kind).upper()
             if image not in res.art:
-                raise ValueError(f'新增 {kind} 的 Image={image} 缺少原版 art 定义，可能依赖外部模组资产')
+                if section == 'BUILDINGTYPES':
+                    raise ValueError(f'新增 {kind} 的 Image={image} 缺少原版 art 定义，可能依赖外部模组资产')
+                warnings.append(f'新增 {kind} 的 Image={image} 缺少原版 art 定义；保留已知单位的单格占用，外观使用缺失素材提示。')
             rules[kind] = cfg
             if not any(a['type'] == kind for a in additions):
                 additions.append(dict(type=kind, list=section, image=image))
@@ -248,6 +250,7 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
             raise ValueError('当前不支持被改为非普通 Overlay 的箱子类型')
     progress('解压 IsoMapPack5、OverlayPack 与 OverlayDataPack', 22)
     raw = decode_pack(m, 'IsoMapPack5', folder)
+    unreadable_packs = set()
     def optional_pack(name):
         try:
             value = decode_pack(m, name, folder, False)
@@ -258,6 +261,7 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
             if not visual_only:
                 raise
             issue(str(error)+'；该覆盖物图层无法读取，未显示。')
+            unreadable_packs.add(name)
             return None
     overlay = optional_pack('OverlayPack')
     overlay_data = optional_pack('OverlayDataPack')
@@ -333,6 +337,8 @@ def parse_map(data, folder, version, progress=lambda *args: None, mix_paths=None
                 occupied=False, occupiedGround=False, occupiedDeck=False, higher=[], usable=False)
             if terrain_error:
                 cells[x, y]['terrainError'] = terrain_error
+            if 'OverlayPack' in unreadable_packs:
+                cells[x, y]['overlayUnknown'] = True
             if visual_only:
                 cells[x, y].update(knownOccupiedGround=False, knownOccupiedDeck=False, unknownObjects=[])
             if cfg and yes(cfg.get('TIBERIUM', 'no')):
@@ -407,7 +413,8 @@ def rebuild_layout(prepared, res, simulation, progress, *, incremental=False):
         if not visual_only and art.get('FOUNDATION', '1x1').lower() != '1x1':
             raise ValueError('尚未验证非 1×1 Terrain 基础：'+kind)
         bits = (ini_integer if visual_only else int)(cfg.get('SNOWOCCUPATIONBITS' if theater['name'] == 'SNOW' else 'TEMPERATEOCCUPATIONBITS', '7'))
-        if visual_only and (not cfg or not art):
+        unknown_terrain = not cfg or art.get('FOUNDATION', '1x1').lower() != '1x1'
+        if visual_only and unknown_terrain:
             issue('地形物缺少规则或 art 定义：'+kind, p)
             cells[p]['occupancyUnknown'] = True
         if p not in dirty:
@@ -417,7 +424,7 @@ def rebuild_layout(prepared, res, simulation, progress, *, incremental=False):
         c['occupied'] |= bool(bits & 7)
         c['occupiedGround'] |= bool(bits & 7)
         if visual_only:
-            if not cfg or not art:
+            if unknown_terrain:
                 c['unknownObjects'].append(kind)
             else:
                 c['knownOccupiedGround'] |= bool(bits & 7)
@@ -465,10 +472,10 @@ def rebuild_layout(prepared, res, simulation, progress, *, incremental=False):
             if not visual_only and section == 'STRUCTURES' and not art:
                 raise ValueError('建筑缺少有效的原版 art 基础定义：'+kind)
             foundation = art.get('FOUNDATION', '1x1') if section == 'STRUCTURES' else '1x1'
-            unknown_object = not cfg or not art or (version == 'ra2' and section == 'AIRCRAFT')
+            unknown_object = not cfg or section == 'STRUCTURES' and not art or (version == 'ra2' and section == 'AIRCRAFT')
             if visual_only and (not cfg or not art):
                 issue(f'{kind} 缺少规则或 Image={cfg.get("IMAGE", kind)} 的 art 定义；保留对象位置，占用未验证。', p)
-                cells[p]['occupancyUnknown'] = True
+                if unknown_object: cells[p]['occupancyUnknown'] = True
             match = re.fullmatch(r'(\d+)x(\d+)', foundation, re.I)
             if visual_only and not match:
                 unknown_object = True

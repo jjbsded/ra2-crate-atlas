@@ -26,7 +26,7 @@ class ModuleChecks(unittest.TestCase):
             ('simulation-visual.js', 'map-artwork.js'),
             ('simulation-ui.js', 'region-statistics.js'),
             ('simulation-ui.js', 'resource-ui.js'),
-            ('simulation-ui.js', 'transfer-origins.js'),
+            ('simulation-publication.js', 'transfer-origins.js'),
             ('buff-expectation-ui.js', 'realmap-ui.js'),
         }
         for name, symbols in references.items():

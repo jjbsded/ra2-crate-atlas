@@ -6,13 +6,16 @@
  const occupancy=typeof module!=='undefined'?require('./occupancy-overlay.js'):root.CrateOccupancyOverlay;
  const CrateProbability=typeof module!=='undefined'?require('./probability.js'):root.CrateProbability;
  const transfers=typeof module!=='undefined'?require('./transfer-origins.js'):root.CrateTransferOrigins;
- const probabilityDisplay=typeof module!=='undefined'?require('./probability-display.js'):root.CrateProbabilityDisplay;
  const players=typeof module!=='undefined'?require('./player-starts.js'):root.CratePlayerStarts;
  const artwork=typeof module!=='undefined'?require('./map-artwork.js'):root.CrateMapArtwork;
+ const transferColumns=typeof module!=='undefined'?require('./transfer-columns.js'):root.CrateTransferColumns;
+ const transferOverlay=typeof module!=='undefined'?require('./transfer-overlay.js'):root.CrateTransferOverlay;
+ const selectionProbability=typeof module!=='undefined'?require('./selection-probability.js'):root.CrateSelectionProbability;
+ const fallbackTransfers=new WeakMap();
  const refinement=root.CrateRasterRefinement||(typeof module!=='undefined'?require('./raster-refinement.js'):null);
  const flat=[[[0,-15],[30,0],[0,15],[-30,0]]];
  const mapEdges=new WeakMap(),colorTables=new WeakMap();
- const probabilityLabels=new WeakMap();
+ const probabilityLabels=new WeakMap(),coordinateLabels=new WeakMap(),labelWidths=new Map();
  const armFraction=1/6;
  function surface(c,whole=false){return (whole?c.surface:c.visibleSurface)??flat;}
  const voidHeightCache=new WeakMap();
@@ -103,14 +106,15 @@
   outlineCache.set(c,out);return out;
  }
  function render(ctx,state,area,display,options){
-  const r=state.data.rendering,fixed=n=>Number(n).toFixed(1);
+  const r=state.data.rendering,fixed=n=>Number(n).toFixed(1),showScene=!options.scene||options.scene==='all';
   const opacityAt=CrateProbability.opacityCurve(display.maxMultiplier,options.paletteColors);
   const paletteKey=options.palette+':'+display.maxMultiplier+':'+JSON.stringify(options.paletteColors);
   let colors=colorTables.get(display);
   if(!colors||colors.key!==paletteKey){colors={key:paletteKey,values:new Map(),labels:new Map()};colorTables.set(display,colors);}
   function paletteColor(value){if(!colors.values.has(value))colors.values.set(value,CrateProbability.color(value,options.palette,display.maxMultiplier,options.paletteColors));return colors.values.get(value);}
   function labelColor(value){const key=value+':'+(options.colorText!==false);if(!colors.labels.has(key))colors.labels.set(key,CrateProbability.labelColor(value,options.palette,display.maxMultiplier,options.colorText!==false,options.paletteColors));return colors.labels.get(key);}
-  const labelBoxes=[];
+  const labelBoxes=[];let labelCommands=0,selectionBadge=null,selectedArmBounds=null;
+  const outgoing=selectionProbability.active(state,options),destinations=selectionProbability.targets(state,options);
   const multiplier=c=>display.get(c).multiplier;
   const thresholdPass=c=>display.meetsThreshold(c,options.threshold||0);
   const inFilter=c=>options.filter==='all'||(options.filter==='water'?c.land===2:c.land!==2);
@@ -118,14 +122,23 @@
   function text(value,x,y,color='#dce9f1',size=16,align='left'){ctx.font=`${size}px "Microsoft YaHei",sans-serif`;ctx.textAlign=align;ctx.fillStyle=color;ctx.fillText(value,x,y);}
  function cellPath(c,whole=false){ctx.beginPath();for(const ring of surface(c,whole)){ring.forEach(([dx,dy],i)=>ctx[i?'lineTo':'moveTo'](state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale));ctx.closePath();}}
  function linesPath(c,lines){ctx.beginPath();for(const line of lines)line.forEach(([dx,dy],i)=>ctx[i?'lineTo':'moveTo'](state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale));}
- function labelText(value,x,y,size){ctx.strokeText(value,x,y);ctx.fillText(value,x,y);if(state.selected){const w=ctx.measureText(value).width;labelBoxes.push({x:x-w/2-4,y:y-size-4,w:w+8,h:size+8});}}
+ function labelText(value,x,y,size,font){
+  labelCommands++;
+  if(options.clipLabelInk){const half=String(value).length*size/2+size;if(x+half<area.x||x-half>area.x+area.w||y+size<area.y||y-2*size>area.y+area.h)return;}
+  if(!options.measureCellLabels){ctx.strokeText(value,x,y);ctx.fillText(value,x,y);}
+  if(state.selected&&options.collectLabelBoxes!==false){const f=font||ctx.font,key=f+'|'+value;let w=labelWidths.get(key);if(w===undefined){const old=ctx.font;ctx.font=f;w=ctx.measureText(value).width;ctx.font=old;if(labelWidths.size>=8192)labelWidths.delete(labelWidths.keys().next().value);labelWidths.set(key,w);}labelBoxes.push({x:x-w/2-4,y:y-size-4,w:w+8,h:size+8});}
+ }
  const probabilitySize=CrateProbability.labelSize(state.scale,options.labelSize||12,options.paletteColors);
- function labelStyle(){ctx.textAlign='center';ctx.font=`${options.labelWeight||400} ${probabilitySize}px "Microsoft YaHei",sans-serif`;ctx.lineJoin='round';ctx.lineWidth=CrateProbability.labelStrokeWidth(probabilitySize,options.paletteColors);ctx.strokeStyle='rgba(12,25,34,.8)';ctx.fillStyle='#fff';}
+ const numberFont=`${options.labelWeight||400} ${probabilitySize}px "Microsoft YaHei",sans-serif`,coordinateFont=`${options.labelWeight||400} ${options.labelSize||12}px "Microsoft YaHei",sans-serif`,numberStroke=CrateProbability.labelStrokeWidth(probabilitySize,options.paletteColors);
+ let activeFont='',activeStroke=0;
+ function textStyle(font,width){if(activeFont!==font){ctx.font=font;activeFont=font;}if(activeStroke!==width){ctx.lineWidth=width;activeStroke=width;}}
+ function labelStyle(){ctx.textAlign='center';ctx.font=numberFont;activeFont=numberFont;ctx.lineJoin='round';ctx.lineWidth=numberStroke;activeStroke=numberStroke;ctx.strokeStyle='rgba(12,25,34,.8)';ctx.fillStyle='#fff';}
  function cellLabels(c){const x=state.x+c.px*state.scale,y=state.y+c.py*state.scale;
-   const coords=options.coords&&rx>=26,values=options.values&&rx>=26&&display.showLabel(c,options.baselineValues)&&inFilter(c)&&thresholdPass(c);
+   const custom=destinations?.has(transfers.key(c))||c===state.selected&&outgoing?.retryHere;
+   const coords=options.coords&&rx>=26,values=!custom&&options.values&&rx>=26&&display.showLabel(c,options.baselineValues||c===state.selected,options.zeroValues)&&inFilter(c)&&thresholdPass(c);
    if((coords||values)&&surface(c).length){
-    if(coords){ctx.lineWidth=3;ctx.font=`${options.labelWeight||400} ${options.labelSize||12}px "Microsoft YaHei",sans-serif`;ctx.fillStyle='#fff';labelText(`${c.x},${c.y}`,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+(values?-probabilitySize*.65:(options.labelSize||12)/3),options.labelSize||12);}
-    if(values){labels++;const value=display.get(c);let label=probabilityLabels.get(value);if(label===undefined){label=fixed(value.multiplier)+'×';probabilityLabels.set(value,label);}ctx.font=`${options.labelWeight||400} ${probabilitySize}px "Microsoft YaHei",sans-serif`;ctx.lineWidth=CrateProbability.labelStrokeWidth(probabilitySize,options.paletteColors);ctx.fillStyle=labelColor(value.multiplier);labelText(label,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+probabilitySize/3,probabilitySize);}
+    if(coords){if(!options.measureCellLabels){textStyle(coordinateFont,3);ctx.fillStyle='#fff';}let label=coordinateLabels.get(c);if(label===undefined){label=`${c.x},${c.y}`;coordinateLabels.set(c,label);}labelText(label,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+(destinations?.has(transfers.key(c))?-probabilitySize*1.35:values||custom?-probabilitySize*.65:(options.labelSize||12)/3),options.labelSize||12,coordinateFont);}
+    if(values){labels++;const value=display.get(c);let label=probabilityLabels.get(value);if(label===undefined){label=fixed(value.multiplier)+'×';probabilityLabels.set(value,label);}if(!options.measureCellLabels){textStyle(numberFont,numberStroke);ctx.fillStyle=labelColor(value.multiplier);}labelText(label,x+(c.labelOffset?.[0]||0)*state.scale,y+(c.labelOffset?.[1]||0)*state.scale+probabilitySize/3,probabilitySize,numberFont);}
    }
  }
  function cameraClip(){const r=state.data.rendering.cameraRect;if(!r)return;ctx.beginPath();ctx.rect(state.x+r[0]*state.scale,state.y+r[1]*state.scale,r[2]*state.scale,r[3]*state.scale);ctx.clip();}
@@ -152,12 +165,13 @@
   ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);ctx.clip();
   const rx=30*state.scale,ry=15*state.scale,visible=options.visibleCells||visibleCells(state,area),minimum=options.threshold||0;
   let colored=options.foregroundOnly?(options.colored||0):0,labels=0;
+  if(options.cellLabelsOnly){labelStyle();for(const c of visible)if(c!==state.selected)cellLabels(c);ctx.restore();return {colored:0,labels,labelBoxes,commands:labelCommands};}
   // Pixel-derived surface polygons already exclude foreground cliffs. Clip
   // only the camera boundary: the usable/top-band transition is whole-cell.
   const camera=r.cameraRect;
   if(!options.foregroundOnly){
-  if(!options.overlayOnly){options.coordinateSpace?.paint(ctx,state,area);artwork.scene(ctx,state,r,options);}
-  if(camera){
+  if(!options.overlayOnly&&showScene){options.coordinateSpace?.paint(ctx,state,area);artwork.scene(ctx,state,r,options);}
+  if(showScene){if(camera){
    ctx.save();ctx.beginPath();ctx.rect(area.x,area.y,area.w,area.h);
    ctx.rect(state.x+camera[0]*state.scale,state.y+camera[1]*state.scale,camera[2]*state.scale,camera[3]*state.scale);ctx.clip('evenodd');
    options.coordinateSpace?.clipTerrain(ctx,state);
@@ -165,11 +179,11 @@
    ctx.save();cameraClip();
    for(const c of visible)if(!c.usable){cellPath(c);ctx.fillStyle=c.visibleBand?'rgba(238,161,47,.25)':'rgba(165,137,80,.22)';ctx.fill('evenodd');}
    ctx.restore();
-  }else for(const c of visible)if(!c.usable){cellPath(c);ctx.fillStyle='rgba(5,16,25,.27)';ctx.fill('evenodd');}
+  }else for(const c of visible)if(!c.usable){cellPath(c);ctx.fillStyle='rgba(5,16,25,.27)';ctx.fill('evenodd');}}
   ctx.save();cameraClip();
-  for(const c of visible)if(options.heatmap&&(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&inFilter(c)&&thresholdPass(c)){
+  for(const c of visible)if(options.heatmap&&(options.baselineLayer!==false||!display.get(c).isBaseline)&&(c.terms.length||options.zeroLayer)&&inFilter(c)&&thresholdPass(c)){
    const value=multiplier(c);
-   cellPath(c);ctx.globalAlpha=display.cellAlpha(c,{opacity:(1-options.opacity/100)*opacityAt(value),baselineFactor:options.paletteColors?.baselineFactor});ctx.fillStyle=paletteColor(value);ctx.fill('evenodd');ctx.globalAlpha=1;if(surface(c).length)colored++;
+   cellPath(c);ctx.globalAlpha=display.cellAlpha(c,{opacity:(1-options.opacity/100)*opacityAt(value),baselineFactor:options.paletteColors?.baselineFactor,opaque:options.opaqueLayers,includeZero:options.zeroLayer});ctx.fillStyle=paletteColor(value);ctx.fill('evenodd');ctx.globalAlpha=1;if(surface(c).length)colored++;
   }
   if(options.blocked)for(const c of visible)if(occupancy.mapCell(c)){
    const rings=surface(c).map(ring=>ring.map(([dx,dy])=>[state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale]));
@@ -195,47 +209,35 @@
   ctx.restore();
   }
   if(options.baseOnly){ctx.restore();return {colored,labels};}
+  if(state.selected&&options.heatmap&&options.baselineLayer===false&&display.get(state.selected)?.isBaseline&&inFilter(state.selected)&&thresholdPass(state.selected)){
+   const c=state.selected;cellPath(c);ctx.globalAlpha=display.cellAlpha(c,{opacity:(1-options.opacity/100)*opacityAt(1),baselineFactor:options.paletteColors?.baselineFactor,opaque:options.opaqueLayers});ctx.fillStyle=paletteColor(1);ctx.fill('evenodd');ctx.globalAlpha=1;if(surface(c).length)colored++;
+  }
+  options.sceneLayer?.(ctx,state,area);
   if(options.buffFieldLayer){const counts=options.buffFieldLayer(ctx,state,area);colored+=counts?.colored||0;labels+=counts?.labels||0;}
   options.regionLayer?.(ctx,state,visible);
+  options.seaLandLayer?.(ctx,state,area);
+  // Selection arms stay above filled layers and below every label family.
+  if(state.selected&&onScreen(state.selected)){const c=state.selected,x=state.x+c.px*state.scale,y=state.y+c.py*state.scale,arms=selectionArms(c,state.scale),points=arms.flat();if(points.length){const left=Math.min(...points.map(p=>p[0])),top=Math.min(...points.map(p=>p[1]));selectedArmBounds={x:x+left-5,y:y+top-5,w:Math.max(...points.map(p=>p[0]))-left+10,h:Math.max(...points.map(p=>p[1]))-top+10};}ctx.save();ctx.beginPath();for(const [a,b]of arms){ctx.moveTo(x+a[0],y+a[1]);ctx.lineTo(x+b[0],y+b[1]);}ctx.lineCap='round';ctx.strokeStyle='#102b3a';ctx.lineWidth=5;ctx.stroke();ctx.strokeStyle='#46e86f';ctx.lineWidth=3.5;ctx.stroke();ctx.restore();}
+  // Static risk glyphs remain cached. Redraw only glyphs touched by the arms,
+  // keeping their ink above selection without resubmitting every risk label.
+  if(selectedArmBounds&&options.markers&&rx>=18)for(const c of visible)if(c.marked&&surface(c).length){const x=state.x+c.px*state.scale,y=state.y+c.py*state.scale,box={x:x-9,y:y-ry-23,w:18,h:23},a=selectedArmBounds;labelBoxes.push(box);if(box.x<a.x+a.w&&box.x+box.w>a.x&&box.y<a.y+a.h&&box.y+box.h>a.y)text('!',x,y-ry-5,'#a31e68',18,'center');}
   if(options.players)players.draw(ctx,state,state,{radius:13,offset:23,clip:area,regionStyles:options.playerRegionStyles});
   labelStyle();
-  for(const c of visible)if(c!==state.selected)cellLabels(c);
+  if(options.cellLabelLayer){const result=options.cellLabelLayer(ctx,state,area,visible);labels+=result.labels;labelBoxes.push(...result.labelBoxes);}
+  else for(const c of visible)if(c!==state.selected)cellLabels(c);
   if(options.buffFieldLabels){const counts=options.buffFieldLabels(ctx,state,area);labels+=counts?.labels||0;}
   options.regionLabels?.(ctx,state,area,visible);
   options.unitBuffLayer?.(ctx,state,area);
-  const incoming=state.selected&&state.incoming?.key===transfers.key(state.selected)?state.incoming:null;
-  const sourceKeys=new Set(incoming?.sources.map(transfers.key)||[]);
+  const incoming=options.transfers!==false&&state.selected&&state.incoming?.key===transfers.key(state.selected)?state.incoming:null;
+  if(!incoming)transferColumns.release(ctx);
+  let sourceKeys=new Set();
+  const layer=options.transferLayer||fallbackTransfers.get(ctx.canvas);
   if(incoming){
-   const sources=incoming.sources.map(s=>{
-    const c=sourceCell(s,state);
-    const rings=surface(c);
-    return {s,c,rings:rings.map(ring=>ring.map(([dx,dy])=>[state.x+(c.px+dx)*state.scale,state.y+(c.py+dy)*state.scale]))};
-   }).filter(({c})=>onScreen(c));
-   if(sources.length){
-    // Restore just these cell surfaces from the unchanged artwork. This also
-    // removes boundary tint, labels, risk and occupancy overlays temporarily.
-    // Do not clip to the camera: out-of-map sampled origins must remain visible.
-    ctx.save();ctx.beginPath();
-    for(const {rings}of sources)for(const ring of rings){ring.forEach(([x,y],i)=>ctx[i?'lineTo':'moveTo'](x,y));ctx.closePath();}
-    ctx.clip('evenodd');ctx.fillStyle='#101c25';ctx.fillRect(area.x,area.y,area.w,area.h);
-    const points=sources.flatMap(s=>s.rings.flat()),left=Math.max(area.x,Math.min(...points.map(p=>p[0]))-2),top=Math.max(area.y,Math.min(...points.map(p=>p[1]))-2);
-    const right=Math.min(area.x+area.w,Math.max(...points.map(p=>p[0]))+2),bottom=Math.min(area.y+area.h,Math.max(...points.map(p=>p[1]))+2);
-    if(right>left&&bottom>top)artwork.scene(ctx,state,r,options,{x:left,y:top,w:right-left,h:bottom-top});ctx.restore();
-    for(const {s,c,rings}of sources){const color=transfers.style(s.strength);
-     ctx.save();cellPath(c);ctx.clip('evenodd');
-     occupancy.path(ctx,rings,Math.min(4,3*state.scale));ctx.fillStyle=color.fill;ctx.fill('evenodd');ctx.strokeStyle=color.stroke;ctx.lineWidth=Math.max(1,Math.min(2,state.scale));ctx.stroke();ctx.restore();
-     const hidden=outlineParts(s.cell||c).hidden;
-     if(hidden.length){linesPath(c,hidden);ctx.setLineDash([4,4]);ctx.strokeStyle='rgba(104,233,255,.7)';ctx.lineWidth=1.2;ctx.stroke();ctx.setLineDash([]);}
-    }
-    // Labels follow the visible surface's safe anchor, not the flat-cell center.
-    for(const {s,c}of sources)if(rx>=28){
-     const label=probabilityDisplay.percent(s.transferProbability),size=Math.min(13,Math.max(10,state.scale*5));
-     const x=state.x+(c.px+(c.labelOffset?.[0]||0))*state.scale,y=state.y+(c.py+(c.labelOffset?.[1]||0))*state.scale;
-     ctx.font=`600 ${size}px "Microsoft YaHei",sans-serif`;ctx.textAlign='center';ctx.lineJoin='round';ctx.lineWidth=3.5;ctx.strokeStyle='rgba(7,36,48,.94)';ctx.fillStyle='#e5fcff';
-     labelText(label,x,y+size/3,size);
-    }
-   }
-  }
+   let painter=layer;
+   if(!painter){painter=transferOverlay.create({sourceCell,surface,outlineParts});fallbackTransfers.set(ctx.canvas,painter);}
+   const result=painter.render(ctx,state,area,incoming,{...options,transferLabelSkip:destinations});sourceKeys=result.sourceKeys;labelBoxes.push(...result.labelBoxes);
+  }else layer?.hide();
+  labelBoxes.push(...selectionProbability.render(ctx,state,area,display,options,surface));
   if(state.selected){const c=state.selected,x=state.x+c.px*state.scale,y=state.y+c.py*state.scale;
    if((options.markers&&c.marked)||(options.potentialMarkers&&c.potentialMarked))for(const [xx,yy] of c.higher){const n=state.lookup.get(`${xx},${yy}`);if(!n||sourceKeys.has(transfers.key(n)))continue;cellPath(n);ctx.fillStyle='rgba(156,100,236,.35)';ctx.fill();ctx.strokeStyle='#9162d0';ctx.lineWidth=2;ctx.stroke();}
    const edge=outlineParts(c);ctx.save();ctx.lineJoin='round';ctx.lineCap='round';
@@ -243,33 +245,30 @@
    linesPath(c,edge.visible);ctx.strokeStyle='rgba(16,36,48,.85)';ctx.lineWidth=3.5;ctx.stroke();ctx.strokeStyle='#e5c88d';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
    labelStyle();cellLabels(c);
    if(onScreen(c)){
-    // Extend inward; vertical arms and their minimum follow the terrain aspect ratio.
-    ctx.save();ctx.beginPath();for(const [a,b]of selectionArms(c,state.scale)){ctx.moveTo(x+a[0],y+a[1]);ctx.lineTo(x+b[0],y+b[1]);}
-    ctx.lineCap='round';ctx.strokeStyle='#102b3a';ctx.lineWidth=5;ctx.stroke();ctx.strokeStyle='#46e86f';ctx.lineWidth=3.5;ctx.stroke();ctx.restore();
     const points=surface(c,true).flat(),top=Math.min(...points.map(p=>p[1]),-15)*state.scale+y;
     const label=_t`选中 ${c.x}, ${c.y}`,h=22;ctx.font='600 11px "Microsoft YaHei",sans-serif';const w=ctx.measureText(label).width+20;
-    const positions=[[x-w/2,top-42],[x+Math.max(...points.map(p=>p[0]),30)*state.scale+22,y-h/2],
-     [x-w/2,y+Math.max(...points.map(p=>p[1]),15)*state.scale+22],[x+Math.min(...points.map(p=>p[0]),-30)*state.scale-22-w,y-h/2]];
-    const boxes=positions.map(([bx,by])=>({x:Math.max(area.x+4,Math.min(area.x+area.w-w-4,bx)),y:Math.max(area.y+4,Math.min(area.y+area.h-h-4,by)),w,h}));
-    const collisions=b=>labelBoxes.filter(a=>b.x<a.x+a.w&&b.x+b.w>a.x&&b.y<a.y+a.h&&b.y+b.h>a.y).length;
-    const box=boxes.reduce((best,b)=>collisions(b)<collisions(best)?b:best),bx=box.x,by=box.y;
+    const box=selectionProbability.badgePosition({x,y,top,right:x+Math.max(...points.map(p=>p[0]),30)*state.scale,left:x+Math.min(...points.map(p=>p[0]),-30)*state.scale,bottom:y+Math.max(...points.map(p=>p[1]),15)*state.scale},{w,h},area,labelBoxes,options.selectionBadge,options.selectionPointer?.screenScale||options.screenScale||1),bx=box.x,by=box.y;
+    const opacity=selectionProbability.badgeOpacity(box,options.selectionPointer,options.selectionBadge);selectionBadge={...box,opacity};ctx.save();ctx.globalAlpha*=opacity;
     ctx.beginPath();ctx.roundRect(bx,by,w,h,6);ctx.fillStyle='#172c36';ctx.fill();ctx.strokeStyle='#d9b777';ctx.lineWidth=1;ctx.stroke();
-    text(label,bx+w/2,by+15,'#ffe7ad',11,'center');
+    text(label,bx+w/2,by+15,'#ffe7ad',11,'center');ctx.restore();
    }
   }
   ctx.restore();
-  return {colored,labels};
+  return {colored,labels,selectionBadge};
  }
  function visibleCells(state,area){
   const margin=state.liveEditing?Math.max(80,128*state.scale):80;
   if(state.spatialIndex){
    const cells=state.spatialIndex.query((area.x-margin-state.x)/state.scale,(area.y-margin-state.y)/state.scale,(area.x+area.w+margin-state.x)/state.scale,(area.y+area.h+margin-state.y)/state.scale);
-   return state.liveEditing?cells.map(c=>state.lookup.get(`${c.x},${c.y}`)||c):cells;
+   // The spatial index retains geometry across local edits and while a native
+   // session closes. Attribute records may already have been replaced, even
+   // after liveEditing becomes false during an asynchronous map switch.
+   return state.lookup?cells.map(c=>state.lookup.get(`${c.x},${c.y}`)).filter(Boolean):cells;
   }
   return state.cells.filter(c=>{const x=state.x+c.px*state.scale,y=state.y+c.py*state.scale;return x>=area.x-margin&&x<=area.x+area.w+margin&&y>=area.y-margin&&y<=area.y+area.h+margin;});
  }
  function coloredCells(cells,display,options){
-  return options.heatmap?cells.filter(c=>(options.baselineLayer!==false||!display.get(c).isBaseline)&&c.terms.length&&surface(c).length&&
+  return options.heatmap?cells.filter(c=>(options.baselineLayer!==false||!display.get(c).isBaseline)&&(c.terms.length||options.zeroLayer)&&surface(c).length&&
    (options.filter==='all'||(options.filter==='water'?c.land===2:c.land!==2))&&display.meetsThreshold(c,options.threshold||0)).length:0;
  }
  // Cache artwork, heatmap, occupancy and terrain boundaries. Region edits and
@@ -281,6 +280,9 @@
   const refiner=root.CrateRasterRefinement?.create({makeCanvas,schedule});
   const overviewRefiner=root.CrateRasterRefinement?.create({makeCanvas,schedule});
   const previews=root.CrateRasterPreviewCache?.create({makeCanvas,schedule});
+  const labelRaster=root.CrateMapLabelCache?.create({makeCanvas,schedule});
+  const transferLayer=transferOverlay.create({makeCanvas,schedule,sourceCell,surface,outlineParts});
+  let labelData=null,labelDisplay=null,labelRevision=0,labelKey='',labelDensity=0;
   const result=value=>{value.refined=refined;refined=false;return value;};
   function scroll(buffer,pan){
    if(!pan)return;
@@ -292,7 +294,7 @@
   function paintArt(target,base,box,options){
    target.save();target.beginPath();target.rect(box.x,box.y,box.w,box.h);target.clip();
    target.fillStyle='#101c25';target.fillRect(box.x,box.y,box.w,box.h);
-   options.coordinateSpace?.paint(target,base,box);artwork.scene(target,base,base.data.rendering,options,box);target.restore();
+   if(!options.scene||options.scene==='all')options.coordinateSpace?.paint(target,base,box);artwork.scene(target,base,base.data.rendering,options,box);target.restore();
   }
   function paintBase(target,base,box,display,options){
    target.save();target.beginPath();target.rect(box.x,box.y,box.w,box.h);target.clip();paintArt(target,base,box,options);
@@ -302,7 +304,7 @@
    const {ratio,full,cw,ch,left,top,key,pan}=layout;
    const r=state.data.rendering,base={...state,x:-left,y:-top};
    const bounds={x:0,y:0,w:cw,h:ch};
-   const artOptions=JSON.stringify([options.objects,options.objectOpacity??1]);
+   const artOptions=JSON.stringify([options.objects,options.objectOpacity??1,options.scene]);
    const rebuild=!live||live.geometry!==r||live.key!==key||live.artOptions!==artOptions;
    if(rebuild){
     live={geometry:r,key,artOptions,art:makeCanvas(),overlay:makeCanvas()};
@@ -364,7 +366,32 @@
    ctx.restore();
    return {cacheRebuilt:rebuild,globalOverlay,overlayTiles:tiles.length,artworkTiles:artworkDirty.length,panParts:pan?.parts.length||0};
   }
-  return {get previewStatus(){return previews?.status;},clear(){previews?.clear();refiner?.cancel();overviewRefiner?.cancel();clearTimeout(overviewTimer);overviewTimer=null;overviewSource=null;overviewReadyAt=0;cache=null;view=null;live=null;navigation=null;overview=null;viewport=null;latest=null;refined=false;},render(ctx,state,area,display,options){
+  function* warmup(target){
+   // Existing resident viewport resources only; never decode original images
+   // or allocate/rebuild a full-map raster merely because focus returned.
+   const buffers=live?[live.art,live.overlay]:cache?[cache.imageBuffer]:navigation?.buffers||[];
+   for(const image of [...new Set(buffers)].slice(0,2))if(image?.width){target.drawImage(image,0,0,64,64);yield;}
+   if(labelRaster?.warmup)yield* labelRaster.warmup(target);
+  }
+  return {warmup,get transferStatus(){return transferLayer.status;},get previewStatus(){return previews?.status;},get labelStatus(){return labelRaster?.status;},clear(){transferLayer.clear();labelRaster?.clear();labelData=labelDisplay=null;previews?.clear();refiner?.cancel();overviewRefiner?.cancel();clearTimeout(overviewTimer);overviewTimer=null;overviewSource=null;overviewReadyAt=0;cache=null;view=null;live=null;navigation=null;overview=null;viewport=null;latest=null;refined=false;},render(ctx,state,area,display,options){
+   options={...options,transferLayer};
+   if(labelRaster){
+    if(labelData!==state.data||labelDisplay!==display){labelData=state.data;labelDisplay=display;labelRevision++;}
+    const original=options,data=state.data,revision=labelRevision;
+    options={...options,cellLabelLayer(target,view,part,visible){
+     const subset={...original,cellLabelsOnly:true,cellLabelLayer:null,visibleCells:visible};
+     const tr=target.getTransform(),key=JSON.stringify([revision,view.scale,tr.a,tr.b,view.selected?[view.selected.x,view.selected.y]:null,!!view.outgoing,original.coords,original.values,original.baselineValues,original.zeroValues,original.filter,original.threshold,original.palette,original.paletteColors,original.colorText,original.labelWeight,original.labelSize]);
+     if(labelKey!==key){labelKey=key;labelDensity=0;labelRaster.clear();}
+     const cached=view.navigating&&labelDensity>=512&&labelRaster.status.ready;
+     const metadata=render(target,view,part,display,{...subset,measureCellLabels:cached});labelDensity=metadata.commands;
+     if(labelDensity<512){labelRaster.cancel();return cached?render(target,view,part,display,subset):metadata;}
+     if(view.navigating&&!cached){labelRaster.cancel();return metadata;}
+     labelRaster.render(target,view,part,{key,prepare:!original.labelCacheBusy,paintStatic:false,
+      valid:()=>labelRevision===revision&&labelData===data&&labelDisplay===display&&!state.navigating&&!state.busy&&!state.simulationPending&&!state.simulationWaiting,
+      paint(ctx,local,area){const v={...state,...local},pad=Math.max(96,CrateProbability.labelSize(v.scale,original.labelSize||12,original.paletteColors)*8),query={x:area.x-pad,y:area.y-pad,w:area.w+2*pad,h:area.h+2*pad};render(ctx,v,area,display,{...subset,visibleCells:visibleCells(v,query),collectLabelBoxes:false,clipLabelInk:true});}});
+     return metadata;
+    }};
+   }
    const r=state.data.rendering,extent=options.coordinateSpace?.bounds||{x:0,y:0,w:r.width,h:r.height},pad=40,w=Math.ceil(extent.w*state.scale)+2*pad,h=Math.ceil(extent.h*state.scale)+2*pad;
    const transform=ctx.getTransform(),ratio=Math.hypot(transform.a,transform.b);
    const full=w*h*ratio*ratio<=8000000&&w*ratio<=8192&&h*ratio<=8192;
@@ -372,7 +399,7 @@
    // physical pixels, so existing raster pixels can slide without resampling.
    const budget=8000000/(ratio*ratio),margin=Math.max(0,Math.min(192,(Math.sqrt((area.w-area.h)**2+4*budget)-area.w-area.h)/4));
    const cw=full?w:(Math.ceil((area.w+2*margin)*ratio)+1)/ratio,ch=full?h:(Math.ceil((area.h+2*margin)*ratio)+1)/ratio;
-   const settings=JSON.stringify([options.coordinateSpace?.key,CrateProbability.heatStyle(options.paletteColors),...['filter','palette','opacity','threshold','heatmap','baselineLayer','blocked','objects','objectOpacity','grid','potentialMarkers','markers'].map(k=>options[k])]);
+   const settings=JSON.stringify([options.coordinateSpace?.key,CrateProbability.heatStyle(options.paletteColors),...['scene','opaqueLayers','filter','palette','opacity','threshold','heatmap','baselineLayer','zeroLayer','blocked','objects','objectOpacity','grid','potentialMarkers','markers'].map(k=>options[k])]);
    const key=[ratio,state.scale,full,cw,ch,area.x,area.y,area.w,area.h,settings].join('|');
    latest={state,display,settings,ratio,key};refiner?.check();
    function refine(){
@@ -388,7 +415,7 @@
       else paintBase(contexts[0],base,part,display,options);
      },
      publish(buffers){
-      if(usesLive){live={geometry:r,key,artOptions:JSON.stringify([options.objects,options.objectOpacity??1]),art:buffers[0],overlay:buffers[1],paletteKey:options.palette==='multi'?null:display.maxMultiplier,overlayData:data};cache=null;}
+      if(usesLive){live={geometry:r,key,artOptions:JSON.stringify([options.objects,options.objectOpacity??1,options.scene]),art:buffers[0],overlay:buffers[1],paletteKey:options.palette==='multi'?null:display.maxMultiplier,overlayData:data};cache=null;}
       else{cache={data,image,objects,display,key,imageBuffer:buffers[0],artworkRevision};live=null;}
       viewport={key,left,top};view=null;
       navigation={buffers,settings,ratio,full,data,display,image,objects,artworkRevision,x,y,scale,left:x+left,top:y+top};if(full){overviewRefiner?.cancel();overview=navigation;}refined=true;

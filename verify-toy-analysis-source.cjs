@@ -1,0 +1,17 @@
+'use strict';
+const assert=require('node:assert/strict'),S=require('./toy-live/analysis-source.js');
+const cache=S.create(),a={cells:[1],map:{a:1}},b={cells:[2],map:{b:2}},data={analysisSourceKey:1,version:'yr'};
+assert.equal(cache.input({...data,bytes:new Uint8Array(3).buffer}),null);
+cache.output(data,{source:a});assert.equal(cache.input(data),a);
+const prepared=cache.input({...data,sourceContext:{simulationAssets:{tree:'TREE16'},allowOre:{road:false}}});
+assert.equal(prepared.simulationAssets.tree,'TREE16');assert.equal(prepared.allowOre.road,false);
+assert.equal(cache.input(data),prepared);assert.equal(a.simulationAssets,undefined,'Asset refresh cannot mutate the received baseline');
+const reply={source:b,report:{ready:true}};cache.output({...data,omitSource:true},reply);
+assert.equal(reply.source,undefined);assert.equal(cache.input(data),b);assert.deepEqual(reply.report,{ready:true});
+assert.throws(()=>cache.input({...data,version:'ra2'}),/cache miss/);
+assert.throws(()=>cache.input({...data,analysisSourceKey:2}),/cache miss/);
+assert.equal(cache.input({...data,analysisSourceKey:2,source:a}),a);
+assert.throws(()=>cache.input(data),/cache miss/);
+assert.equal(cache.input({source:b}),b,'Legacy messages remain independent');
+cache.output({}, {source:b});assert.equal(cache.input({...data,analysisSourceKey:2}),a);
+console.log('PASS Toy analysis source: raw imports, repeated revisions, omitted replies, source/version replacement and legacy requests');

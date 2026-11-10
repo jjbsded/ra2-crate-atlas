@@ -21,6 +21,18 @@ def apply(base, delta):
 
 
 class Checks(unittest.TestCase):
+    def test_routing_is_published_with_the_layout(self):
+        base=dict(metadata=dict(sourceSha256='a',version='yr'),probability={},markers=[],potentialMarkers=[],
+                  zeroProbabilityRockCandidates=[],clearance={},cells=[dict(x=1,y=1)],probabilityRevision='a',
+                  regionNavigation=dict(version=4,count=1,flags='CA=='))
+        current={**base,'probabilityRevision':'b','regionNavigation':dict(version=4,count=1,flags='Ag==')}
+        delta=patch(current,base,'a')
+        self.assertEqual(delta['cells'],[])
+        self.assertEqual(apply(base,delta),current)
+        self.assertEqual(base['regionNavigation']['flags'],'CA==')
+        missing={k:v for k,v in current.items() if k!='regionNavigation'}
+        self.assertEqual(apply(current,patch(missing,current,'b')),missing)
+
     def test_local_delta_and_global_coefficients(self):
         value = dict(metadata=dict(sourceSha256='a',version='yr',old='remove'),
             probability=dict(exact=dict(coefficients=['9'*5000],denominator='1'+'0'*5000),count=2),

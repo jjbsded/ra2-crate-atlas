@@ -66,6 +66,9 @@ def resource_status():
 
 
 class LocalServer(ThreadingHTTPServer):
+    # Browser startup and preview workers open connections together. The stdlib
+    # backlog of five can reject script requests before a handler accepts them.
+    request_queue_size = 128
     # Windows SO_REUSEADDR allows two listeners to share the same port; requests
     # can then keep reaching an older process after restarting the application.
     allow_reuse_address = os.name != 'nt'

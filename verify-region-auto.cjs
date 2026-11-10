@@ -1,9 +1,9 @@
 'use strict';
 const assert=require('node:assert/strict'),A=require('./region-auto.js');
 const key=(x,y)=>x*1024+y;
-function grid(w,h){const cells=Array.from({length:w*h},(_,i)=>({x:i%w+1,y:Math.floor(i/w)+1,level:0,slope:0}));return {cells,navigation:{version:3,count:cells.length,flags:new Uint8Array(cells.length).fill(17)},starts:[{number:1,x:1,y:1}]};}
+function grid(w,h){const cells=Array.from({length:w*h},(_,i)=>({x:i%w+1,y:Math.floor(i/w)+1,level:0,slope:0}));return {cells,navigation:{version:A.navigationVersion,count:cells.length,flags:new Uint8Array(cells.length).fill(17)},starts:[{number:1,x:1,y:1}]};}
 function change(g,x,y,mask,props={}){const i=g.cells.findIndex(c=>c.x===x&&c.y===y);g.navigation.flags[i]=mask;Object.assign(g.cells[i],props);}
-const run=(g,settings={})=>A.partition({...g,settings},{yieldControl:async()=>{}}),owns=(r,region,x,y)=>r.regions[region]?.keys.includes(key(x,y));
+const run=(g,settings={})=>A.partition({...g,settings:{claimCorners:false,...settings}},{yieldControl:async()=>{}}),owns=(r,region,x,y)=>r.regions[region]?.keys.includes(key(x,y));
 function weigh(g,numerators,baseline=1n){g.display={baselineNumerator:baseline,get:c=>({numerator:numerators[g.cells.indexOf(c)]??0n})};return g;}
 (async()=>{
  let g=grid(8,8),r=await run(g,{exclusive:false,maxPath:Math.SQRT2});assert.ok(owns(r,0,2,2));assert.ok(!owns(r,0,3,1));
@@ -39,7 +39,16 @@ function weigh(g,numerators,baseline=1n){g.display={baselineNumerator:baseline,g
  g=grid(2,1);g.starts=[];change(g,2,1,5);weigh(g,[1n,50n]);r=await run(g);assert.equal(r.regions[0].keys.length,2,'The combined total includes shore just like the statistics table');
  g=grid(2,1);g.starts=[];for(const c of g.cells)change(g,c.x,c.y,25,{bridge:{kind:'high',deckLevel:0}});weigh(g,[20n,20n]);r=await run(g);assert.equal(r.regions.length,0,'Ground/deck at one coordinate count only once');
  weigh(g,[26n,25n]);r=await run(g);assert.equal(r.regions.length,1);assert.equal(r.regions[0].keys.length,2);
- g=grid(3,1);weigh(g,[0n,100n,100n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,1);assert.equal(r.regions[0].keys.length,1,'A player-containing landmass still cannot create leftover land regions');
+ g=grid(3,1);weigh(g,[0n,100n,100n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,2);assert.equal(r.regions[0].keys.length,1);assert.deepEqual(r.regions[1].keys,[key(2,1),key(3,1)],'Unclaimed land on a player-containing landmass can qualify independently');
+ g=grid(80,1);g.starts=[{number:1,x:40,y:1}];r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});
+ assert.deepEqual(r.regions.map(p=>[p.kind,p.keys.length]),[['player',1],['land',40],['land',39]],'A player claim splits one landmass into separately sized regions');
+ assert(r.regions[1].keys.every(k=>Math.floor(k/1024)>40));assert(r.regions[2].keys.every(k=>Math.floor(k/1024)<40));
+ g=grid(71,1);g.starts=[{number:1,x:36,y:1}];r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,1,'Two 35-cell remainders cannot combine across the player claim to pass the area threshold');
+ g=grid(5,1);g.starts=[{number:1,x:3,y:1}];weigh(g,[50n,0n,1000n,0n,50n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,1,'Each remainder must exceed 50x itself; player-owned probability never contributes');
+ weigh(g,[51n,0n,1000n,0n,50n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.deepEqual(r.regions.slice(1).map(p=>p.keys),[[key(1,1),key(2,1)]],'Only the qualifying side becomes independent land');
+ weigh(g,[51n,0n,1000n,0n,51n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,3,'Both qualifying sides become separate regions');
+ g=grid(2,2);g.starts=[{number:1,x:2,y:1},{number:2,x:1,y:2}];weigh(g,[30n,1000n,1000n,30n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.equal(r.regions.length,2,'A diagonal cannot connect vacant corners through player-owned cardinal cells');
+ weigh(g,[51n,1000n,1000n,51n]);r=await run(g,{exclusive:false,maxPath:0,maxStraight:0});assert.deepEqual(r.regions.slice(2).map(p=>p.keys),[[key(1,1)],[key(2,2)]],'Qualifying diagonal remainders remain distinct');
  // Standalone water ignores the player's sea-crossing cap, but keeps physical
  // connectivity, category boundaries and coordinate ownership restrictions.
  g=grid(6,6);g.starts=[];g.navigation.flags.fill(2);r=await run(g,{maxSea:0});assert.equal(r.regions[0].kind,'water');assert.equal(r.regions[0].keys.length,36);
@@ -56,7 +65,7 @@ function weigh(g,numerators,baseline=1n){g.display={baselineNumerator:baseline,g
  g.starts.length=1;r=await run(g);assert.ok(owns(r,0,7,2),'Without a competing owner the intact deck joins its banks');
  g=grid(7,3);g.starts=[{number:1,x:1,y:2}];change(g,1,2,17,{level:4});change(g,7,2,17,{level:4});for(let x=2;x<=6;x++)change(g,x,2,10,{bridge:{kind:'high',deckLevel:4}});r=await run(g,{maxSea:0});assert.ok(owns(r,0,7,2),'A bridge crosses water with sea limit zero');
  const abort=new AbortController();abort.abort();await assert.rejects(A.partition(grid(3,3),{signal:abort.signal}));
- assert.deepEqual(A.defaults,{maxSea:0,exclusive:true,maxStraight:40,maxPath:70});
+ assert.deepEqual(A.defaults,{maxSea:0,exclusive:true,claimCorners:true,maxStraight:40,maxPath:70});
  g=grid(2,2);change(g,2,1,2);change(g,1,2,2);r=await run(g,{maxSea:0});assert.ok(!owns(r,0,2,2),'Diagonal land cannot jump a sea corner at crossing limit zero');
  g=grid(12,1);change(g,1,1,0);r=await run(g);assert.deepEqual(r.unreachablePlayers,[1]);assert.equal(r.regions[0].keys.length,0,'Blocked starts cannot teleport to nearby land');
  g=grid(12,1);g.starts=[{number:2,x:6,y:1},{number:1,x:1,y:1}];r=await run(g,{exclusive:false,maxStraight:40,maxPath:70});assert.ok(!owns(r,0,7,1),'Player 1 cannot reach beyond player 2 territory');

@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict'),versions=require('./map-import-version.js');
+const listeners=[],select={value:'ra2',addEventListener(name,fn){if(name==='change')listeners.push(fn);},dispatchEvent(){listeners.forEach(fn=>fn());}};
+const imports=versions.create(select);
+assert.equal(imports.choice,'auto','A restored control value is not a new manual override');
+for(const[name,version]of [['SAVE7680_AB.yrm','yr'],['UPPER.YRM','yr'],['old.mpr','ra2'],['mission.map',null]])assert.equal(versions.suggest(name),version);
+imports.show('ra2');assert.equal(select.value,'ra2');assert.equal(imports.choice,'auto','An official RA2 map must not change the next import preference');
+assert.equal(imports.suggest('SAVE7680_AB.yrm'),'yr');
+select.value='ra2';select.dispatchEvent(new Event('change'));imports.show('yr');assert.equal(imports.choice,'ra2','A user-selected resource override remains authoritative');
+select.value='auto';select.dispatchEvent(new Event('change'));imports.show('yr');assert.equal(imports.choice,'auto');
+imports.use('directory');assert.equal(imports.choice,'directory');assert.equal(select.value,'directory');
+imports.use('yr');assert.equal(imports.choice,'yr','Re-analyzing with chosen resources is an explicit choice');
+console.log('PASS map import version hints, prior official maps, restored controls and explicit stock/directory overrides');

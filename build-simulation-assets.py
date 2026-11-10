@@ -7,10 +7,67 @@ from realmap_sprites import sprite_spec,shp_frame,palette
 from realmap_format import yes
 
 ROOT=Path(__file__).resolve().parent
+def build_magnet_icon(result,out):
+ """Original VXL: hull faces southwest; turret points due screen-left."""
+ import tempfile
+ from PIL import Image
+ from realmap_objects import ObjectPainter
+ from realmap_format import ini_integer
+ res=resources('yr');theater=res.theater('TEMPERATE');rules={**res.rules}
+ rules['CRATE_MAGNET_ICON']={'COLOR':'DarkBlue'};theater['effectiveRules']=rules
+ obj=dict(type='TELE',category='UNITS',x=0,y=0,facing=128,health=256,house='CRATE_MAGNET_ICON',mission='Guard',upgrades=[])
+ body_facing,turret_facing=128,160
+ with tempfile.TemporaryDirectory(prefix='crate-magnet-icon-') as folder:
+  painter=ObjectPainter(res,theater,Path(folder));painter.cells={(0,0):{'level':0}}
+  try:
+   cfg,image,art=painter.art_for('TELE');parts=painter.voxel_parts(obj,{**cfg,'TURRET':'no'},image,art)
+   colors,palname=painter.voxel_colors(art,obj);offset=[ini_integer(v) for v in art.get('TURRETOFFSET','0,0,0').split(',')];offset=(offset+[0,0,0])[:3]
+   audit=[dict(file=p['file'],frame=p['frame']) for p in parts]
+   for name,angle in [(image+'tur',0),(image+'barl',ini_integer(cfg.get('FIREANGLE','10')))]:
+    try:vxl,hva=painter.get(name+'.vxl'),painter.get(name+'.hva')
+    except ValueError:continue
+    im,shadow,x,y,sx,sy=painter.voxels.draw(vxl,hva,(turret_facing//8-8)%32,offset,angle,colors,shadow_section=None)
+    parts.append(dict(image=im,x=x,y=y));audit.append(dict(file=name.lower()+'.vxl',sha256=hashlib.sha256(vxl).hexdigest(),hvaSha256=hashlib.sha256(hva).hexdigest(),frame=(turret_facing//8-8)%32))
+   parts=[p for p in parts if p['image'].getbbox()];x=min(p['x'] for p in parts);y=min(p['y'] for p in parts)
+   im=Image.new('RGBA',(max(p['x']+p['image'].width for p in parts)-x,max(p['y']+p['image'].height for p in parts)-y))
+   for p in parts:im.alpha_composite(p['image'],(p['x']-x,p['y']-y))
+   filename='tool-magnet.png';im.save(out/filename,optimize=True)
+   record=dict(file=filename,width=im.width,height=im.height,sha256=hashlib.sha256((out/filename).read_bytes()).hexdigest(),source=dict(file='tele.vxl',sha256=hashlib.sha256(painter.get(image+'.vxl')).hexdigest(),frame=body_facing,bodyFacing=body_facing,turretFacing=turret_facing,palette=palname,parts=audit,kind='native-voxel-model'))
+   result.setdefault('toolIcons',{})['magnet']=record;result.setdefault('localizedToolIcons',{}).setdefault('en',{})['magnet']=record
+  finally:
+   if painter.voxels:painter.voxels.close()
+
+def build_oil_rubble(result,out):
+ """Crop UI thumbnails only; retain the native rubble's placement offsets."""
+ import tempfile
+ from PIL import Image
+ from realmap_objects import ObjectPainter
+ for version in ('ra2','yr'):
+  res=resources(version)
+  for climate in THEATERS:
+   scope=version+'/'+climate
+   if scope not in result['scopes']:continue
+   theater=res.theater(climate);theater['effectiveRules']=res.rules
+   with tempfile.TemporaryDirectory(prefix='crate-oil-rubble-') as folder:
+    painter=ObjectPainter(res,theater,Path(folder));painter.cells={(0,0):{'level':0}}
+    try:
+     parts=painter.parts(dict(type='CAOILD',category='STRUCTURES',x=0,y=0,facing=0,health=0,house='',mission='Guard',upgrades=[]))
+     parts=[p for p in parts if p['image'].getbbox()]
+     assert parts,(scope,'Oil Derrick rubble artwork missing')
+     x=min(p['x'] for p in parts);y=min(p['y'] for p in parts)
+     im=Image.new('RGBA',(max(p['x']+p['image'].width for p in parts)-x,max(p['y']+p['image'].height for p in parts)-y))
+     for p in parts:im.alpha_composite(p['image'],(p['x']-x,p['y']-y))
+     box=im.getbbox();crop=im.crop(box);token=hashlib.sha256(crop.tobytes()+str(crop.size).encode()).hexdigest()[:24]+'.png';crop.save(out/token,optimize=True)
+     record=dict(file=token,x=x+box[0],y=y+box[1],width=crop.width,height=crop.height,sha256=hashlib.sha256((out/token).read_bytes()).hexdigest(),source=dict(type='CAOILD',health=0,parts=painter.audit))
+     result['scopes'][scope]['sprites']['CAOILD']={'0':record}
+     if scope=='yr/URBAN':result.setdefault('menuIcons',{})['rubble']=record
+    finally:
+     if painter.voxels:painter.voxels.close()
+
 def build_tool_icons(result,out,color_map=None):
  """Only UI thumbnails are cropped; source SHP dimensions/frames stay audited."""
  import struct,colorsys
- res=resources('yr');result['toolIcons']={}
+ res=resources('yr');result['toolIcons']={k:v for k,v in result.get('toolIcons',{}).items() if k=='magnet'}
  remap_file=out/'tool-remap.json'
  if color_map:
   from realmap_format import ini
@@ -111,14 +168,20 @@ def build(game,tool_color_map=None):
    allow={file:yes(t['config'][section].get('ALLOWTIBERIUM','no')) for section,file,_ in t['definitions']}
    result['scopes'][version+'/'+climate]=dict(tree=tree,legacyTrees=[fallback[2]] if tree!=fallback[2] else [],sprites=sprites,allowOre=allow,selection=dict(policy='prefer-TREE16-otherwise-smallest',fallback=fallback[2],opaquePixels=area,height=height,candidates=[dict(type=v[2],pixels=v[0],height=v[1]) for v in sorted(candidates,key=lambda v:v[:3])]))
  build_tool_icons(result,out,tool_color_map)
+ build_magnet_icon(result,out)
+ build_oil_rubble(result,out)
  (out/'catalog.json').write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')),'utf8')
  print('Simulation assets',len(list(out.iterdir())),'files',sum(p.stat().st_size for p in out.iterdir()),'bytes')
  print({k:v['tree'] for k,v in result['scopes'].items()})
 if __name__=='__main__':
  import argparse
- parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--game',type=Path);parser.add_argument('--tools-only',action='store_true');parser.add_argument('--tool-color-map',type=Path)
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--game',type=Path);parser.add_argument('--tools-only',action='store_true');parser.add_argument('--magnet-icon-only',action='store_true');parser.add_argument('--oil-rubble-only',action='store_true');parser.add_argument('--tool-color-map',type=Path)
  args=parser.parse_args()
- if args.tools_only:
+ if args.oil_rubble_only:
+  out=ROOT/'simulation-assets';catalog=out/'catalog.json';result=json.loads(catalog.read_text('utf8'));build_oil_rubble(result,out);catalog.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')),'utf8')
+ elif args.magnet_icon_only:
+  out=ROOT/'simulation-assets';catalog=out/'catalog.json';result=json.loads(catalog.read_text('utf8'));build_magnet_icon(result,out);catalog.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')),'utf8')
+ elif args.tools_only:
   out=ROOT/'simulation-assets';catalog=out/'catalog.json';result=json.loads(catalog.read_text('utf8'));build_tool_icons(result,out,args.tool_color_map);catalog.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')),'utf8')
  else:
   if args.game is None:parser.error('--game is required unless --tools-only is set')

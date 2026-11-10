@@ -2,11 +2,11 @@
 (function(root){
  'use strict';
  const GROUND=1,WATER=2,SHORE=4,DECK=8,CORE=16,SQRT2=Math.SQRT2,EPS=1e-8;
- const defaults={maxSea:0,exclusive:true,maxStraight:40,maxPath:70};
+ const defaults={maxSea:0,exclusive:true,claimCorners:true,maxStraight:40,maxPath:70};
  const ramps=[[0,0,0,0],[0,1,1,0],[0,0,1,1],[1,0,0,1],[1,1,0,0],[0,0,1,0],[0,0,0,1],[1,0,0,0],[0,1,0,0],[0,1,1,1],[1,0,1,1],[1,1,0,1],[1,1,1,0],[0,1,2,1],[1,0,1,2],[2,1,0,1],[1,2,1,0],[0,1,0,1],[1,0,1,0],[0,1,0,1],[1,0,1,0]];
  const key=c=>c.x*1024+c.y;
  function teams(value={}){const out={};for(let n=1;n<=8;n++)if(['A','B','C','D','empty'].includes(value?.[n]))out[n]=value[n];return out;}
- function options(value={}){value=value&&typeof value==='object'?value:{};const out={exclusive:value.exclusive!==false,teams:teams(value.teams)};for(const field of ['maxSea','maxStraight','maxPath'])out[field]=Number.isFinite(Number(value[field]))?Math.max(0,Math.min(10000,Number(value[field]))):defaults[field];return out;}
+ function options(value={}){value=value&&typeof value==='object'?value:{};const out={exclusive:value.exclusive!==false,claimCorners:value.claimCorners!==false,teams:teams(value.teams)};for(const field of ['maxSea','maxStraight','maxPath'])out[field]=Number.isFinite(Number(value[field]))?Math.max(0,Math.min(10000,Number(value[field]))):defaults[field];return out;}
  const before=(a,b)=>Math.abs(a.distance-b.distance)>EPS?a.distance<b.distance:(a.player??0)<(b.player??0);
  class Heap{
   constructor(){this.items=[];}
@@ -15,9 +15,16 @@
   get length(){return this.items.length;}
  }
  function flags(navigation,count){
-  if(navigation?.version!==3||navigation.count!==count)throw Error('REGION_NAVIGATION_INVALID');
+  if(navigation?.version!==4||navigation.count!==count)throw Error('REGION_NAVIGATION_INVALID');
   const raw=typeof navigation.flags==='string'?Uint8Array.from(atob(navigation.flags),c=>c.charCodeAt(0)):navigation.flags;
   if(raw.length!==count)throw Error('REGION_NAVIGATION_LENGTH');return raw;
+ }
+ const sides=[[[1,0],[1,2],[0,3]],[[0,1],[2,3],[1,0]],[[-1,0],[0,3],[1,2]],[[0,-1],[1,0],[2,3]]];
+ function joins(a,b,side){return side[1].every((corner,i)=>Math.abs(a.z+a.corners[corner]-b.z-b.corners[side[2][i]])<EPS);}
+ function surfaces(c,mask){
+  const list=[];
+  for(const deck of [false,true])if(deck?mask&DECK&&c.bridge?.kind==='high':mask&(GROUND|WATER))list.push({c,deck,water:!deck&&!!(mask&WATER),shore:!deck&&!!(mask&SHORE),core:!!(mask&CORE),z:deck?c.bridge.deckLevel:c.level,corners:deck?ramps[0]:ramps[c.slope]||ramps[0]});
+  return list;
  }
  async function partition({cells,navigation,starts,eligible,settings,display}, {signal,onProgress=()=>{},yieldControl=()=>new Promise(resolve=>setTimeout(resolve,0))}={}){
   const config=options(settings),bits=flags(navigation,cells.length),nodes=[],at=new Map();let work=0,tick=Date.now();
@@ -25,18 +32,16 @@
   for(let i=0;i<cells.length;i++){
    const c=cells[i],mask=bits[i];if(eligible&&!eligible.has(key(c)))continue;
    const list=[];
-   for(const deck of [false,true])if(deck?mask&DECK:mask&(GROUND|WATER)){
-    const node={id:nodes.length,index:i,c,deck,water:!deck&&!!(mask&WATER),shore:!deck&&!!(mask&SHORE),core:!!(mask&CORE),z:deck?c.bridge.deckLevel:c.level,corners:deck?ramps[0]:ramps[c.slope]||ramps[0],edges:[]};
+   for(const surface of surfaces(c,mask)){
+    const node={...surface,id:nodes.length,index:i,edges:[]};
     nodes.push(node);list.push(node);
    }
    if(list.length)at.set(key(c),list);if((++work&2047)===0)await pause();
   }
   // Equal heights along the shared edge connect ground/ramp/deck surfaces.
   // Separate nodes prevent going vertically through the deck at one X/Y.
-  const edges=[[[1,0],[1,2],[0,3]],[[0,1],[2,3],[1,0]],[[-1,0],[0,3],[1,2]],[[0,-1],[1,0],[2,3]]];
-  function joins(a,b,side){return side[1].every((corner,i)=>Math.abs(a.z+a.corners[corner]-b.z-b.corners[side[2][i]])<EPS);}
   for(const a of nodes){
-   for(const side of edges){const [dx,dy]=side[0];for(const b of at.get((a.c.x+dx)*1024+a.c.y+dy)||[])if(joins(a,b,side))a.edges.push([b.id,1]);}
+   for(const side of sides){const [dx,dy]=side[0];for(const b of at.get((a.c.x+dx)*1024+a.c.y+dy)||[])if(joins(a,b,side))a.edges.push([b.id,1]);}
    if((++work&2047)===0)await pause();
   }
   for(const a of nodes){
@@ -113,6 +118,35 @@
    }
    if((++work&1023)===0){onProgress(20+65*visited/Math.max(1,nodes.length));await pause();}
   }
+  // Fill only unowned, walk-connected land touching a single player/team.
+  // Cardinal edges suffice: legal diagonals already require both cardinal
+  // routes. Never borrow water, coast or a rival's bridge/ground coordinate.
+  let cornerCells=0;
+  if(config.claimCorners){
+   const land=n=>!n.water&&(!n.shore||n.deck),seen=new Set(),candidates=[],layers=new Map();
+   for(const seed of nodes){
+    if(!land(seed)||owner[seed.index]>=0||seen.has(seed.id))continue;
+    const members=[seed.id],neighbors=new Set();seen.add(seed.id);
+    for(let head=0;head<members.length;head++){
+     const a=nodes[members[head]];
+     for(const[next,w]of a.edges){const b=nodes[next];if(w!==1||!land(b))continue;const group=owner[b.index];
+      if(group>=0){if(group<groups.length&&reached[b.id]===group)neighbors.add(group);}
+      else if(!seen.has(next)){seen.add(next);members.push(next);}
+     }
+     if((++work&2047)===0)await pause();
+    }
+    const candidate={members,neighbors,conflict:false};candidates.push(candidate);
+    for(const id of members){const n=nodes[id];if((at.get(key(n.c))||[]).filter(land).length>1){let list=layers.get(n.index);if(!list)layers.set(n.index,list=[]);list.push(candidate);}if((++work&2047)===0)await pause();}
+   }
+   // Different surfaces can project onto one cell. Refuse conflicting claims
+   // rather than making the result depend on traversal/bridge-layer order.
+   for(const list of layers.values())if(list.length>1){const contacts=new Set(list.flatMap(c=>[...c.neighbors]));if(contacts.size>1)for(const c of list)c.conflict=true;}
+   for(const c of candidates)if(c.neighbors.size===1&&!c.conflict){const group=c.neighbors.values().next().value;
+    for(const id of c.members){const n=nodes[id];if(owner[n.index]<0)cornerCells++;owner[n.index]=group;reached[id]=group;if((++work&2047)===0)await pause();}
+    if((++work&1023)===0)await pause();
+   }
+  }
+  onProgress(87);
   const regions=groups.map(g=>({...g,keys:[]}));
   function qualifies(members,area){
    if(area>35)return true;
@@ -123,11 +157,12 @@
    for(const id of members){const node=nodes[id],k=key(node.c);if(seen.has(k))continue;seen.add(k);total+=display.get(node.c).numerator;}
    return total>50n*baseline;
   }
-  // Split remaining unowned land again: a player's territory can divide an
-  // otherwise connected island. Never aggregate disconnected scraps to qualify.
+  // Recheck every landmass after player/corner claims, even one with a start.
+  // Split only through vacant coordinates; claimed cells also block diagonal
+  // corner clearance. Never aggregate disconnected scraps to qualify.
   const extra=[],seen=new Set();
   const vacant=id=>!nodes[id].water&&owner[nodes[id].index]<0;
-  for(const c of components)if(!c.players.length)for(const id of c.members){
+  for(const c of components)for(const id of c.members){
    if(seen.has(id)||!vacant(id))continue;
    const members=[id],core=new Set();seen.add(id);
    for(let head=0;head<members.length;head++){
@@ -166,7 +201,7 @@
   }
   for(let i=0;i<cells.length;i++)if(owner[i]>=0)regions[owner[i]].keys.push(key(cells[i]));
   onProgress(100);signal?.throwIfAborted();
-  return {regions,players:groups.length,activePlayers:players.length,unreachablePlayers:players.filter(p=>p.seed<0).map(p=>p.number),unassigned:cells.filter((c,i)=>(!eligible||eligible.has(key(c)))&&owner[i]<0).length,settings:config};
+  return {regions,players:groups.length,activePlayers:players.length,cornerCells,unreachablePlayers:players.filter(p=>p.seed<0).map(p=>p.number),unassigned:cells.filter((c,i)=>(!eligible||eligible.has(key(c)))&&owner[i]<0).length,settings:config};
  }
- const api={navigationVersion:3,defaults,options,teams,partition,ramps};root.CrateRegionAuto=api;if(typeof module!=='undefined')module.exports=api;
+ const api={navigationVersion:4,defaults,options,teams,partition,ramps,flags,surfaces,sides,joins};root.CrateRegionAuto=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

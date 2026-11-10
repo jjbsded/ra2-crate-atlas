@@ -11,7 +11,7 @@ import re
 SECTIONS = ('STRUCTURES', 'UNITS', 'INFANTRY', 'AIRCRAFT')
 HOUSE = 'CRATE_ATLAS_SIMULATION'
 CELL_FIELDS = ('x', 'y', 'level', 'slope', 'tileIndex', 'subTile', 'file', 'rawLand',
-               'overlay', 'overlayName', 'overlayData', 'usable', 'bridge', 'bridgeProjection', 'terrainError', 'overlayError')
+               'overlay', 'overlayName', 'overlayData', 'usable', 'bridge', 'bridgeProjection', 'terrainError', 'overlayError', 'overlayUnknown')
 
 
 def recipe(content, rules):
@@ -40,7 +40,7 @@ def apply(plan, content, cells, rules, art, *, dirty=None):
     overlays = [v.upper() for k, v in sorted(rules['OVERLAYTYPES'].items(), key=lambda pair: int(pair[0]))]
     rubble = []
     for identifier, mode in plan['objects'].items():
-        if not isinstance(identifier, str) or '/' not in identifier or mode not in ('remove', 'rubble', 'delete'):
+        if not isinstance(identifier, str) or '/' not in identifier or mode not in ('remove', 'rubble', 'delete', 'magnet'):
             raise ValueError('模拟对象变更无效')
         section, entry = identifier.split('/', 1)
         if section not in (*SECTIONS, 'TERRAIN') or entry not in content.get(section, {}):
@@ -51,7 +51,7 @@ def apply(plan, content, cells, rules, art, *, dirty=None):
         cfg = rules.get(kind, {})
         if mode == 'delete' and section not in ('UNITS', 'INFANTRY', 'AIRCRAFT'):
             raise ValueError('仅单位允许直接删除')
-        if mode != 'delete' and (yes(cfg.get('IMMUNE', 'no')) or ini_integer(cfg.get('STRENGTH', '1')) <= 0):
+        if mode not in ('delete', 'magnet') and (yes(cfg.get('IMMUNE', 'no')) or ini_integer(cfg.get('STRENGTH', '1')) <= 0):
             raise ValueError('不可摧毁无敌对象：'+kind)
         if mode == 'rubble':
             if section != 'STRUCTURES' or not yes(cfg.get('LEAVERUBBLE', 'no')):
@@ -82,7 +82,7 @@ def apply(plan, content, cells, rules, art, *, dirty=None):
         if not isinstance(item, dict):
             raise ValueError('放置对象格式无效')
         identifier, section, kind = item.get('id'), item.get('category'), item.get('type')
-        if not isinstance(identifier, str) or not re.fullmatch(r'sim-[a-z0-9-]{1,64}', identifier) or identifier in seen or section not in ('STRUCTURES', 'UNITS', 'INFANTRY', 'TERRAIN', 'OVERLAY') or kind not in rules:
+        if not isinstance(identifier, str) or not re.fullmatch(r'sim-[a-z0-9-]{1,64}', identifier) or identifier in seen or section not in ('STRUCTURES', 'UNITS', 'INFANTRY', 'TERRAIN', 'OVERLAY', 'RUBBLE') or kind not in rules:
             raise ValueError('放置对象类型或编号无效')
         if section == 'UNITS' and kind not in ('MTNK','HYD','YHVR') or section == 'INFANTRY' and kind != 'E2':
             raise ValueError('不支持的模拟单位')
@@ -93,6 +93,19 @@ def apply(plan, content, cells, rules, art, *, dirty=None):
         if (x, y) not in cells or not 0 <= facing <= 255 or not 0 <= subcell <= 2 or type(item.get('onBridge')) is not bool:
             raise ValueError('放置坐标、方向或层级无效')
         seen.add(identifier)
+        if section == 'RUBBLE':
+            if kind != 'CAOILD' or not yes(rules[kind].get('LEAVERUBBLE', 'no')) or item['onBridge']:
+                raise ValueError('不支持的模拟废墟')
+            cfg = rules[kind]
+            footprint = foundation(art.get(cfg.get('IMAGE', kind).upper(), {}))
+            if any((x+dx, y+dy) not in cells for dx, dy in footprint):
+                raise ValueError('废墟基础超出地图')
+            for dx, dy in footprint:
+                if dirty is None or (x+dx, y+dy) in dirty:
+                    cells[x+dx, y+dy].update(overlay=overlays.index('RUBBLE_OVERLAY'), overlayName='RUBBLE_OVERLAY', overlayData=0)
+            line = ','.join(map(str, [HOUSE, kind, 0, x, y, 0, 'None', 1, 0, 1, 0, 0, 'None', 'None', 'None', 0, 0]))
+            rubble.append((identifier, line))
+            continue
         house = HOUSE
         color = item.get('regionColor')
         if color is not None:
@@ -166,7 +179,7 @@ def changed_points(prepared, plan, previous):
         cfg = rules.get(kind, {})
         a = art.get(cfg.get('IMAGE', kind).upper(), {})
         shape = [(0, 0)]
-        if section == 'STRUCTURES':
+        if section in ('STRUCTURES', 'RUBBLE'):
             match = re.fullmatch(r'(\d+)x(\d+)', a.get('FOUNDATION', '1x1'), re.I)
             if not match:
                 match = re.fullmatch(r'(\d+)x(\d+)', a.get('FOUNDATION.X','1')+'x'+a.get('FOUNDATION.Y','1'))

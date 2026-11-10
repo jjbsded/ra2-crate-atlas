@@ -38,14 +38,15 @@
     const value=number,key='overview'+axis,other=axis==='Width'?'overviewHeight':'overviewWidth';
     if(config.overviewLocked){const factor=Math.max(Math.max(25/config[key],25/config[other]),Math.min(Math.min(300/config[key],300/config[other]),value/config[key]));config[key]=Math.round(config[key]*factor*10)/10;config[other]=Math.round(config[other]*factor*10)/10;}
     else config[key]=value;
-    syncSizes();save();onOverviewChanged?.();
+    syncSizes(input);save();onOverviewChanged?.();
    };
-   input.onchange=input.onblur=syncSizes;
+   input.onchange=input.onblur=()=>syncSizes();
   }
   const lock=document.createElement('button');lock.type='button';lock.id='regionOverviewLock';sizes.append(lock);
   lock.onclick=()=>{config.overviewLocked=!config.overviewLocked;syncSizes();save();};
-  function syncSizes(){
-   sizeInputs.Width.value=config.overviewWidth;sizeInputs.Height.value=config.overviewHeight;
+  root.CrateDisplayModes?.reverseToggle(lock);
+  function syncSizes(editing=null){
+   if(editing!==sizeInputs.Width)sizeInputs.Width.value=config.overviewWidth;if(editing!==sizeInputs.Height)sizeInputs.Height.value=config.overviewHeight;
    lock.textContent=config.overviewLocked?'🔗':'🔓';lock.title=t(config.overviewLocked?'宽高连锁':'宽高独立');lock.setAttribute('aria-label',lock.title);lock.setAttribute('aria-pressed',String(config.overviewLocked));
    table.style.setProperty('--region-overview-width',216*config.overviewWidth/100+'px');table.style.setProperty('--region-overview-height',121.5*config.overviewHeight/100+'px');
   }

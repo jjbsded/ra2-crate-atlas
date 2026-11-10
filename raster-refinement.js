@@ -1,10 +1,10 @@
 /* Shared, bounded background raster work. Old complete images stay visible. */
 (function(root){
  'use strict';
- const jobs=new Set();let frame=null;
+ const jobs=new Set();let frame=null,holding=false;
  const request=fn=>root.requestAnimationFrame(fn),cancel=id=>root.cancelAnimationFrame(id);
  function pump(){
-  frame=null;let pixels=0,steps=0;const start=performance.now();
+  frame=null;if(root.CrateMapPriority?.blocked){holding=true;root.CrateMapPriority.wait().then(()=>{holding=false;wake();});return;}let pixels=0,steps=0;const start=performance.now();
   while(jobs.size&&steps<8&&performance.now()-start<5){
    const job=jobs.values().next().value;
    if(!job.valid()){jobs.delete(job);job.abort();continue;}
@@ -16,7 +16,7 @@
   }
   if(jobs.size)frame=request(pump);
  }
- function wake(){if(frame===null)frame=request(pump);}
+ function wake(){if(jobs.size&&frame===null&&!holding)frame=request(pump);}
  // Tile previews share the same frame/pixel budget as exact refinements.
  function enqueue(job){jobs.add(job);wake();return ()=>{jobs.delete(job);if(!jobs.size&&frame!==null){cancel(frame);frame=null;}};}
  function create({makeCanvas=()=>document.createElement('canvas'),schedule=null}={}){
@@ -32,7 +32,8 @@
    abort();
    const images=Array.from({length:spec.layers||1},()=>makeCanvas());
    const parts=[];
-   for(let y=0;y<spec.height;y+=512)for(let x=0;x<spec.width;x+=512)parts.push({x:x/spec.ratio,y:y/spec.ratio,w:Math.min(512,spec.width-x)/spec.ratio,h:Math.min(512,spec.height-y)/spec.ratio});
+   const side=spec.tileSize||512;
+   for(let y=0;y<spec.height;y+=side)for(let x=0;x<spec.width;x+=side)parts.push({x:x/spec.ratio,y:y/spec.ratio,w:Math.min(side,spec.width-x)/spec.ratio,h:Math.min(side,spec.height-y)/spec.ratio});
    const p=active={key:spec.key,images,allocated:0,index:0,job:null};
    p.job={
     valid:()=>active===p&&spec.valid(),abort,
@@ -77,5 +78,5 @@
   for(const part of uncovered(area,coverage))paint(part,background);
   paint(coverage,detail);return true;
  }
- const api={create,enqueue,uncovered,composite};root.CrateRasterRefinement=api;if(typeof module!=='undefined')module.exports=api;
+ const api={create,enqueue,uncovered,composite,get status(){return {queued:jobs.size,holding,framePending:frame!==null};}};root.CrateRasterRefinement=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

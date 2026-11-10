@@ -177,9 +177,16 @@ def evaluate_aggregates(terms, ghost_terms, candidate_counts, origin_count, no_c
     weight_key=(origin_count,limit,terminal_signature(terminal))
     reused=cache is not None and cache.get('weightKey')==weight_key
     if not reused:
-        kernel=retry_kernel(terminal,origin_count,limit)
+        from probability_kernel_cache import exact_kernel
+        history_key=(origin_count,limit,tuple((p,h) for p,h in sorted(terminal.items()) if h))
+        def build_kernel():
+            from probability_kernel_worker import calculate as accelerated
+            reduced=math.lcm(*(fundamental([terminal.get((n,r),0) for r in range(n)]) for n in range(1,25)))
+            value=accelerated(terminal,origin_count,limit) if reduced>144 else None
+            return value if value is not None else retry_kernel(terminal,origin_count,limit)
+        kernel,kernel_hit=exact_kernel(history_key,build_kernel)
         if cache is not None:
-            cache.clear();cache.update(weightKey=weight_key,kernel=kernel,distributions={})
+            cache.clear();cache.update(weightKey=weight_key,kernel=kernel,distributions={},kernelCacheHit=kernel_hit)
     else: kernel=cache['kernel']
     denominator=kernel['denominator']; values=kernel['values']
     distributions=cache.setdefault('distributions',{}) if cache is not None else {}

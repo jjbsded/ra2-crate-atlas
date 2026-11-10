@@ -4,7 +4,7 @@ const qa=path.resolve(process.argv[2]||'output/simulation-20261104'),source=JSON
 const FIELDS=['land','overlay','overlayName','overlayData','terrain','occupiedGround','occupiedDeck','occupied','candidate','status','primary','track','foot','float','bridge','bridgeProjection'];
 const S=require('./toy-live/solver.js'),A=require('./toy-live/analyze.js');
 const cases=[];function save(name){const plan=m.plan,p=P.parse(new Uint8Array(),stock,'yr',true,'simulation.map',()=>{},{source,plan});const max=p.metadata.size[2]+p.metadata.size[3]-1,binary=S.search(A.grid(p.cells),max),calculated=S.calculate(binary,p.cells,max**2);fs.writeFileSync(path.join(qa,name+'-search.bin'),Buffer.from(binary.buffer));cases.push({name,plan,cells:p.cells.map(c=>FIELDS.map(k=>c[k]??null)),probability:calculated.probability,terms:p.cells.map(c=>calculated.results.get(P.key(c.x,c.y))?.terms||[])});return p;}
-assert.equal(m.choices.filter(o=>o.category==='UNITS').length,1);assert.equal(m.choices.filter(o=>o.category==='INFANTRY').length,1);
+assert.deepEqual(m.choices.filter(o=>o.category==='UNITS').map(o=>o.type),['MTNK','HYD','YHVR']);assert.equal(m.choices.filter(o=>o.category==='INFANTRY').length,0);assert(!m.placement('E2',30,31).allowed,'Infantry placement is disabled; legacy imports remain readable');
 const dirtyModel=M.create(source),emptyPlan=dirtyModel.plan;
 assert(dirtyModel.place('MTNK',30,30));assert.deepEqual([...dirtyModel.changesSince(emptyPlan)],['30,30']);
 const tankPlan=dirtyModel.plan;assert.equal(dirtyModel.changesSince(tankPlan).size,0);
@@ -16,7 +16,9 @@ save('default');
 assert.equal(m.choices.find(o=>o.type==='NACNST').label,'4x4[Land] · 苏军基地');assert.equal(m.choices.find(o=>o.type==='GAYARD').label.startsWith('4x4[Water]'),true);
 const yardCell=source.cells.find(c=>m.placement('NACNST',c.x,c.y).allowed);assert(yardCell);assert(m.place('NACNST',yardCell.x,yardCell.y));assert.equal(m.count,16);save('soviet-yard');assert(M.create(source).import(m.plan));m.undo();assert.equal(m.count,0);
 
-assert(m.place('MTNK',30,30));assert(!m.place('MTNK',30,30));assert(m.place('E2',30,31));assert(m.place('E2',30,31));assert(m.place('E2',30,31));assert(!m.place('E2',30,31));
+assert(m.place('MTNK',30,30));assert(!m.place('MTNK',30,30));
+const legacy=[0,1,2].map(subcell=>({id:'sim-legacy-'+subcell,type:'E2',category:'INFANTRY',x:30,y:31,facing:64,subcell,onBridge:false}));assert(m.import({...m.plan,placements:[...m.plan.placements,...legacy]}));
+assert.throws(()=>M.create(source).import({...m.plan,placements:[...m.plan.placements,{...legacy[0],id:'sim-duplicate-slot'}]}),'Legacy infantry still enforces its three subcells');
 assert(!m.placement('GAPOWR',30,30).allowed);assert(m.place('GAPOWR',38,32));const placed=save('placed');assert(placed.visualObjects.some(o=>o.key.includes('stripe-3-yellow-black-fixed')));
 const before=JSON.stringify(m.plan);assert(m.undo());assert(m.redo());assert.equal(JSON.stringify(m.plan),before);
 const second=M.create(source);second.import(m.plan);assert.deepEqual(second.plan,m.plan);assert.throws(()=>second.import({...m.plan,map:{sha256:'0'.repeat(64),version:'yr'}}));
@@ -31,7 +33,7 @@ m.paint(['31,39'],'restore');assert.equal(m.count,0);save('bridge-restored');
 for(const [x,base]of [[22,74],[38,205]]){m.reset();m.paint([`${x},43`],'normal');parsed=save('low-bridge-'+base);for(const y of [43,44,45])assert.equal(parsed.lookup.get(x+y*512).overlay,base+26);assert.equal(parsed.lookup.get(x-1+44*512).overlay,base+8);assert.equal(parsed.lookup.get(x+1+44*512).overlay,base+7);assert.equal(parsed.lookup.get(x-2+44*512).overlay,base);m.paint([`${x},45`],'restore');assert.equal(m.count,0);save('low-bridge-restored-'+base);}
 const immune=structuredClone(source);immune.rules.MTNK.IMMUNE='yes';const im=M.create(immune);im.paint(['32,32'],'chrono');assert(!im.count);im.quick('units');assert.equal(im.plan.objects['UNITS/0'],'delete');assert(M.create(immune).import(im.plan));
 m.reset();m.paint(['31,20'],'normal');assert.equal(m.current().cells.get('30,20').overlayData,0);assert.equal(m.current().cells.get('32,20').overlayData,0);m.paint(['31,20'],'restore');assert.equal(m.count,0);assert.equal(m.brush(30,30,5,'circle').length,21);assert.equal(m.brush(30,30,5).length,25);
-const water=structuredClone(source);for(const c of water.cells){c.rawLand=2;c.overlay=255;c.bridge=null;}water.map={...water.map,STRUCTURES:{},UNITS:{},INFANTRY:{},AIRCRAFT:{},TERRAIN:{}};const wm=M.create(water);assert(wm.placement('MTNK',30,30).allowed);assert(!wm.placement('GAPOWR',30,30).allowed);assert(wm.placement('GAPOWR',30,30,{ignoreLand:true}).allowed);assert(wm.placement('GAYARD',30,30).allowed);assert(!wm.placement('NACNST',30,30).allowed);assert(wm.placement('NACNST',30,30,{ignoreLand:true}).allowed);
+const water=structuredClone(source);for(const c of water.cells){c.rawLand=2;c.overlay=255;c.bridge=null;}water.map={...water.map,STRUCTURES:{},UNITS:{},INFANTRY:{},AIRCRAFT:{},TERRAIN:{}};const wm=M.create(water);assert(!wm.placement('MTNK',30,30).allowed);assert(!wm.placement('MTNK',30,30,{ignoreLand:true}).allowed,'Ignoring building land/water does not change unit movement');assert(wm.placement('HYD',30,30).allowed);assert(wm.placement('YHVR',30,30).allowed);assert(!wm.placement('GAPOWR',30,30).allowed);assert(wm.placement('GAPOWR',30,30,{ignoreLand:true}).allowed);assert(wm.placement('GAYARD',30,30).allowed);assert(!wm.placement('NACNST',30,30).allowed);assert(wm.placement('NACNST',30,30,{ignoreLand:true}).allowed);
 fs.writeFileSync(path.join(qa,'cases.json'),JSON.stringify(cases));console.log('PASS simulation transitions, history, import identity, placement, shortcuts and bridge groups');
 
 const invalid=structuredClone(second.plan);invalid.placements.push({...invalid.placements[0],id:'sim-collision'});assert.throws(()=>M.create(source).import(invalid));
@@ -56,9 +58,9 @@ console.log('PASS stone/wood bridges: both orientations, collapse and partial re
 // Large strokes reuse their occupancy index and are atomic in history. The
 // copied source is immutable across cancellations, undo, redo and imports.
 const row=M.create(water),initial=JSON.stringify(water),index=row.current().cells;
-row.beginPlacement();for(let x=25;x<=35;x++)assert(row.appendPlacement('MTNK',x,30));
-assert.equal(row.current().cells,index);assert(!row.appendPlacement('MTNK',30,30));assert(row.endPlacement());assert.equal(row.plan.placements.length,11);
-assert(row.undo());assert.equal(row.count,0);assert(row.placement('MTNK',30,30).allowed);assert(row.redo());assert.equal(row.plan.placements.length,11);assert(!row.placement('MTNK',30,30).allowed);
-row.beginPlacement();assert(row.appendPlacement('E2',30,31));row.endPlacement(true);assert.equal(row.plan.placements.length,11);assert(row.placement('E2',30,31).allowed);
+row.beginPlacement();for(let x=25;x<=35;x++)assert(row.appendPlacement('YHVR',x,30));
+assert.equal(row.current().cells,index);assert(!row.appendPlacement('YHVR',30,30));assert(row.endPlacement());assert.equal(row.plan.placements.length,11);
+assert(row.undo());assert.equal(row.count,0);assert(row.placement('YHVR',30,30).allowed);assert(row.redo());assert.equal(row.plan.placements.length,11);assert(!row.placement('YHVR',30,30).allowed);
+row.beginPlacement();assert(row.appendPlacement('YHVR',30,31));row.endPlacement(true);assert.equal(row.plan.placements.length,11);assert(row.placement('YHVR',30,31).allowed);
 assert(M.create(water).import(row.plan));assert.equal(JSON.stringify(water),initial);
 console.log('PASS incremental stroke index, atomic undo/redo and cancelled stroke');

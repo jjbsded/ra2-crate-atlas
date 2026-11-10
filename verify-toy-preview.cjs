@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict'),P=require('./toy-live/preview.js');
+let parses=0,presentations=0;
+const cache=P.create((_bytes,_stock,_version,_minerals,_filename,_progress,{source,plan})=>{
+ parses++;return{metadata:{name:source.name},cells:source.cells,objects:plan.objects,visualObjects:plan.visual};
+},parsed=>{presentations++;return{origin:[0,0],simplified:{objects:parsed.objects},visualObjects:parsed.visualObjects};});
+const source={name:'original',cells:[{x:0,y:0,level:0},{x:90,y:1,level:0}]};
+const plan={objects:[[0,0,'A'],[90,1,'B']],visual:['first','second']};
+const data={version:'yr',minerals:true,filename:'test.map',previewSourceKey:1,previewPlanKey:1};
+const first=cache.get({...data,source,plan,box:[0,0,100,100]},{});
+assert.deepEqual(first.rendering.simplified.objects,[[0,0,'A']]);
+for(let i=0;i<50;i++)assert.deepEqual(cache.get({...data,box:[2600,1300,100,100]},{}).rendering.visualObjects,['second']);
+assert.equal(parses,1);assert.equal(presentations,1);
+assert.equal(source.cells.length,2);assert.equal(plan.objects.length,2);
+assert.equal(cache.get(data,{}).cells.length,2);
+assert.throws(()=>cache.get({...data,previewPlanKey:2},{}),/cache miss/);
+assert.equal(cache.get({...data,previewPlanKey:2,plan:{...plan,visual:['new','second']}},{}).rendering.visualObjects[0],'new');
+assert.equal(parses,2);
+assert.equal(cache.get({...data,previewPlanKey:2,version:'ra2'},{}).metadata.name,'original');assert.equal(parses,3);
+cache.get({version:'yr',source,plan},{});cache.get({version:'yr',source,plan},{});assert.equal(parses,5,'Legacy callers do not depend on cache keys');
+console.log('PASS Toy preview: one parse for 51 tile requests, immutable tile selection, revision/version invalidation and legacy requests');

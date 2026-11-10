@@ -25,7 +25,10 @@ async function modelChecks(){
  assert.equal(JSON.stringify(d),before);
  const cleared=structuredClone(d);delete cleared.cells[0].terrain;delete cleared.cells[1].overlayName;
  const clearPatch=patch(cleared,low,{canvas});assert.ok(!clearPatch.textures['icon:tree']&&!clearPatch.textures.ore&&clearPatch.textures['icon:drill']);
- const disabled=patch({...d,metadata:{...d.metadata,cliffBackImpassability:0}},low,{canvas});assert.ok(disabled.cells.every(c=>!c.higher.length&&!c.affected.length&&!c.canPlace));
+ const ordinary=patch({...d,metadata:{...d.metadata,cliffBackImpassability:0}},low,{canvas});assert.equal(ordinary.metadata.predictionEnabled,true);assert.equal(ordinary.metadata.relationsEnabled,true);assert(ordinary.cells.some(c=>c.canPlace));assert.deepEqual(ordinary.cells.find(c=>c.marked).higher,low.higher);
+ const partial=structuredClone(d);Object.assign(partial.metadata,{approximate:true,riskPredictionVersion:1});partial.cells[0].riskKnown=false;partial.cells[0].postLand=null;
+ const recovered=patch(partial,low,{canvas});assert.equal(recovered.metadata.predictionEnabled,true);assert.equal(recovered.cells.find(c=>c.x===0&&c.y===0).canPlace,false);assert.equal(recovered.cells.find(c=>c.marked).canPlace,true);
+ const preview=patch({...d,metadata:{...d.metadata,previewOnly:true}},low,{canvas});assert.equal(preview.metadata.predictionEnabled,false);assert.equal(preview.metadata.relationsEnabled,true);assert(preview.cells.every(c=>!c.canPlace));assert.deepEqual(preview.cells.find(c=>c.marked).higher,low.higher);
  const abort=new AbortController();abort.abort();assert.throws(()=>patch(d,low,{canvas,signal:abort.signal}),{name:'AbortError'});
  for(const id of ['b66dc28891b9c3d09b86-yr','f1d9bb89e2eb07cdb7af-yr','036e439c07cbb98efef9-yr'])for(const state of ['ore','clear']){
   const data=await load(path.join(folder,'data',id,state,'result.json.gz')),before=JSON.stringify(data),c=data.cells.find(c=>c.bridge?.kind==='high')||data.cells.find(c=>c.marked),p=patch(data,c,{radius:15,canvas});

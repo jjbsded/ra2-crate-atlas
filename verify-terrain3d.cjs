@@ -1,6 +1,19 @@
 const assert=require('node:assert/strict');
 const {height,decorationSurface,bridgeFold,viewHalfSize,relationships,riskCategory,description,probabilityCells}=require('./terrain3d.js');
 {
+ const P=require('./probability.js'),D=require('./probability-display.js'),B=require('./buff-reference.js'),cells=[{x:1,y:1,land:0,terms:[[0,1]]},{x:2,y:1,land:2,terms:[]},{x:3,y:1,land:3,terms:[]}],lookup=new Map(cells.map(c=>[`${c.x},${c.y}`,c])),display=D.map({cells,probability:{exact:{denominator:'100',coefficients:[{n:1,r:0,numerator:'1'}]}}});
+ const buff={maximum:4,get:(x,y)=>y===1?[0,1,2.5,3][x]||0:0},options={filter:'all',opacity:35,palette:'cool',colorText:true,baselineLayer:false,baselineValues:false,paletteColors:P.paletteSettings()},context={display,lookup,buff,options,mode:'buff'},patch=cells.map(c=>({...c}));
+ const before=JSON.stringify(patch),entries=probabilityCells(patch,context);assert.equal(entries.length,3,'Buff cells are not gated by crate probability or passability');
+ assert.equal(entries[0].alpha,0);assert.equal(entries[0].label,null);assert.equal(entries[1].label,'2.5×');assert.equal(entries[2].multiplier,3);
+ const opacity=P.opacityCurve(4,options.paletteColors);for(const e of entries.slice(1)){assert.equal(e.alpha,D.alpha(.65*opacity(e.multiplier),B.isBaseline(e.multiplier),options.paletteColors.baselineFactor));assert.equal(e.color,B.color(e.multiplier,'cool',4,options.paletteColors));assert.equal(e.textColor,B.textColor(e.multiplier,'cool',4,true,options.paletteColors));}
+ const [base]=probabilityCells(patch,{...context,options:{...options,baselineLayer:true,baselineValues:true,colorText:false}});assert.equal(base.label,'1×');assert.equal(base.textColor,options.paletteColors.labelBase);assert.equal(base.alpha,D.alpha(.65*opacity(1),true,options.paletteColors.baselineFactor));
+ const zero=probabilityCells(patch,{...context,buff:{...buff,get:()=>0},options:{...options,zeroValues:true}});assert.equal(zero.length,3);assert(zero.every(e=>e.alpha===0&&e.label==='0×'),'zero labels do not enable zero fill');
+ const zeroFill=probabilityCells(patch,{...context,buff:{...buff,get:()=>0},options:{...options,zeroLayer:true}});assert(zeroFill.every(e=>e.alpha>0&&e.label===null),'zero fill does not enable zero labels');
+ assert.deepEqual(probabilityCells(patch,{...context,options:{...options,filter:'water',threshold:2}}).map(e=>e.cell.x),[2]);assert.deepEqual(probabilityCells(patch,{...context,buff:null}),[]);assert.equal(JSON.stringify(patch),before);
+ console.log('PASS: 3D Buff values reuse the field, including occupied/blocked cells, filtering, 1x, palette, text and opacity settings.');
+ const units={maximum:2,values:()=>[{unit:{x:2,y:1},value:1.5}]},only=probabilityCells(patch,{...context,units,mode:'units'});assert.equal(only.length,1);assert.equal(only[0].cell.x,2);assert.equal(only[0].multiplier,1.5);assert.equal(only[0].color,B.color(1.5,'cool',2,options.paletteColors));assert.equal(only[0].textColor,B.textColor(1.5,'cool',2,true,options.paletteColors));assert.deepEqual(probabilityCells(patch,{...context,mode:'off'}),[]);
+}
+{
  const D=require('./probability-display.js'),cells=[{x:1,y:1,land:0,terms:[[0,1]]},{x:2,y:1,land:0,terms:[[0,2]]}],display=D.map({cells,probability:{exact:{denominator:'100',coefficients:[{n:1,r:0,numerator:'1'}]}}}),lookup=new Map(cells.map(c=>[`${c.x},${c.y}`,c]));
  for(const factor of [0,.5,1]){
   const entries=probabilityCells(cells.map(c=>({...c})),{display,lookup,options:{filter:'all',opacity:35,paletteColors:{baselineFactor:factor}}});

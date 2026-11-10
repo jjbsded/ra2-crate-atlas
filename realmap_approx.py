@@ -36,6 +36,7 @@ def prepare(cells, res, theater, meta, reason=None):
         cliff = 2
     meta['cliffBackImpassability'] = int(cliff)
     unknown_points = prepared.setdefault('approxUnknown', set()) if interactive else None
+    risk_unknown = prepared.setdefault('riskUnknown', set()) if interactive else None
     for p in dirty:
         c = cells[p]
         causes = []
@@ -80,7 +81,28 @@ def prepare(cells, res, theater, meta, reason=None):
         c['retryAssumptions'] = causes
         c['ghostReason'] = 'terrain' if c['terrain'] else 'slope' if c['slope'] > 4 else None
         c['status'] = 'retry' if causes or c['overlay'] != 255 else 'ghost' if c['ghostReason'] else 'crate'
-        c.update(postLand=None, rockTransition=False)
+        c.update(postLand=None, rockTransition=False, riskKnown=False)
+        # Artwork and unrelated rule errors do not erase readable terrain
+        # predictions. Unknown terrain/overlays remain explicitly unknown.
+        if c['rawLand'] is not None and not c.get('terrainError') and not c.get('overlayUnknown') and (c['overlay'] == 255 or cfg):
+            crate_rules = rules.get('CRATERULES', {})
+            name = crate_rules.get('WATERCRATEIMG' if c['land'] == 2 else 'CRATEIMG', 'WCRATE' if c['land'] == 2 else 'CRATE').upper()
+            crate_cfg = rules.get(name)
+            if crate_cfg and yes(crate_cfg.get('CRATE', 'no')) and not yes(crate_cfg.get('WALL', 'no')):
+                try:
+                    post = land_after(c['rawLand'], c['slope'], crate_cfg, c['higher'], int(cliff))
+                    cost = LANDS[post].upper()
+                    # A malformed cost can still use a probability fallback,
+                    # but must not be advertised as a known terrain prediction.
+                    for key in ('TRACK', 'FOOT', 'FLOAT'): number(rules.get(land, {}).get(key, '0'))
+                    blocked = number(rules.get(cost, {}).get('TRACK', '0')) == 0 and number(rules.get(cost, {}).get('FOOT', '0')) == 0
+                    c.update(postLand=post, riskKnown=True,
+                        rockTransition=bool(not elevated(c) and c['land'] != 3 and post == 3 and c['status'] == 'crate' and (c['track'] or c['foot']) and blocked))
+                except (ValueError, IndexError, TypeError):
+                    pass
+        if risk_unknown is not None:
+            if c['riskKnown']: risk_unknown.discard(p)
+            else: risk_unknown.add(p)
         if unknown_points is not None:
             if causes:
                 unknown_points.add(p)
@@ -95,9 +117,10 @@ def prepare(cells, res, theater, meta, reason=None):
         '不明物体所在格按可读地形参与附近搜索；选中该格时假定放箱失败，不生成实体箱。已知障碍、边界和地形通行条件仍生效。',
         '未知建筑有可读基础时使用该范围，否则仅计地图记录的原点一格；真实占地可能更大。',
         '未知地形按普通平地参与搜索，并在选中时判定放置失败；无法定位的损坏对象记录和无法读取的覆盖物图层仍按告警省略。',
-        '已知规则沿用原版搜索／放箱框架；未解析的 include、隧道行为及 Mod 扩展可能影响任意格子。未验证禁行风险。'
+        '已知规则沿用原版搜索／放箱框架；未解析的 include、隧道行为及 Mod 扩展可能影响结果。禁行预测使用可读规则，无法判断的格子单独保留。'
     ] + sorted(fallbacks)
-    meta.update(previewOnly=False, partialAnalysis=True, approximate=True, probabilityQuality='approximate',
+    meta.update(previewOnly=False, partialAnalysis=True, approximate=True, probabilityQuality='approximate', riskPredictionVersion=1,
+                riskUnknownCellCount=len(risk_unknown) if risk_unknown is not None else sum(not c.get('riskKnown') for c in cells.values()),
                 approximation=dict(policy=POLICY, baseVersion=base_version, retryCells=unknown_cells,
                     retryCellCount=len(unknown_cells), assumptions=assumptions))
     if reason:

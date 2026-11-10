@@ -77,9 +77,9 @@
  dialog.addEventListener('close',()=>++dialogRevision);
  dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault();});
  $('version').addEventListener('change',render);
- window.CrateResourceUI={onApplied:null,get loading(){return busy||refreshing>0;},setAnalyzing(value){analyzing=value;setBusy(busy);},async resolve(choice){
+ window.CrateResourceUI={onApplied:null,get loading(){return busy||refreshing>0;},setAnalyzing(value){analyzing=value;setBusy(busy);},async resolve(choice,preferredVersion='yr'){
   if(busy)throw Error(_t('目录正在保存，请稍候再分析。'));
-  await refresh(true);const version=choice==='auto'?(state.mod?.configured?'directory':'yr'):choice==='shikong'?'directory':choice;
+  await refresh(true);const version=choice==='auto'?(state.mod?.configured?'directory':preferredVersion==='ra2'?'ra2':'yr'):choice==='shikong'?'directory':choice;
   if(version==='directory'?state.mod?.ready:state.ready?.[version])return version;
   await open();$('resourceError').textContent=version==='directory'?_t('请设置地图对应的游戏根目录，然后保存。'):_t('内置资源不完整，请重新完整解压工具包。');return null;
  },async ensure(version){return !!await this.resolve(version);}};

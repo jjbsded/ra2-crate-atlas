@@ -1,8 +1,8 @@
 /* Duplicate keys recover before object parsing, with explicit provenance. */
 'use strict';
-const fs=require('node:fs'),zlib=require('node:zlib'),assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path'),zlib=require('node:zlib'),assert=require('node:assert/strict');
 const F=require('./toy-live/format.js'),{analyze}=require('./toy-live/analyze.js');
-const base=fs.readFileSync('output/toy-live-qa/fixtures/flat-ore/source.map','utf8'),stock=JSON.parse(zlib.gunzipSync(fs.readFileSync('output/toy/live/stock-yr.json.gz')));
+const base=fs.readFileSync('output/toy-live-qa/fixtures/flat-ore/source.map','utf8'),stock=JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(process.env.TOY_ROOT||'output/toy','live/stock-yr.json.gz'))));
 const run=async source=>(await analyze(typeof source==='string'?new TextEncoder().encode(source):source,stock)).report;
 (async()=>{
  const text='; comment\n[Rules]\nValue = one\nVALUE=one ; same\n[rules]\nvalue=two\nVALUE=three',conflicts=[];

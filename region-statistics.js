@@ -111,26 +111,63 @@
   }
   for(const r of changed)touch(r);return changed.size>0;
  }
- function fillKeys(doc,seed,eligible){
+ const fillRoutes=new WeakMap();
+ function* fillSteps(doc,seed,eligible,{cells,navigation,revision}={}){
   if(!seed||!eligible.has(key(seed)))return [];
-  const start=key(seed),members=doc.regions.filter(r=>r.cells.has(start)),source=members.find(r=>r.id===doc.active)||members[members.length-1];
-  const assigned=source?null:new Set(doc.regions.flatMap(r=>[...r.cells]));
-  const sea=seed.land===2,same=k=>{const c=eligible.get(k);return c&&(c.land===2)===sea&&(source?source.cells.has(k):!assigned.has(k));};
-  // Selection connectivity follows the four game-coordinate edges. It is not
-  // unit pathfinding: zero-probability and impassable selectable cells count.
-  const queue=[start],seen=new Set(queue);
-  for(let i=0;i<queue.length;i++)for(const delta of [1024,-1024,1,-1]){
-   const k=queue[i]+delta;if(!seen.has(k)&&same(k)){seen.add(k);queue.push(k);}
+  const routes=A;
+  let cached=fillRoutes.get(eligible),at=cached&&cached.navigation===navigation&&cached.revision===revision?cached.at:null,work=0;
+  if(!at){
+   const bits=routes.flags(navigation,cells.length);at=new Map();
+   for(let i=0;i<cells.length;i++){
+    const c=cells[i],k=key(c);if(eligible.has(k)){const list=routes.surfaces(c,bits[i]);for(const n of list)n.id=k*2+Number(n.deck);if(list.length)at.set(k,list);}
+    if((++work&1023)===0)yield;
+   }
+   fillRoutes.set(eligible,{navigation,revision,at});
   }
-  return queue;
+  // A click on a high bridge starts on its visible deck, never the water below.
+  const startNodes=at.get(key(seed)),first=startNodes?.find(n=>n.deck)||startNodes?.[0];if(!first)return [];
+  const start=key(seed),members=doc.regions.filter(r=>r.cells.has(start)),source=members.find(r=>r.id===doc.active)||members[members.length-1];
+  const assigned=new Set();if(!source)for(const r of doc.regions)for(const k of r.cells){assigned.add(k);if((++work&1023)===0)yield;}
+  const same=n=>source?source.cells.has(key(n.c)):!assigned.has(key(n.c))&&(first.water?n.water:!n.water&&(first.shore||!n.shore));
+  const queue=[first],seen=new Set([first.id]),keys=new Set([start]);
+  // Four shared edges, with the exact ramp/deck height test used by automatic
+  // partition. Fixed blockers have no surface, so even a blocked seed is refused.
+  for(let i=0;i<queue.length;i++){
+   const a=queue[i];for(const side of routes.sides){const [dx,dy]=side[0];for(const b of at.get((a.c.x+dx)*1024+a.c.y+dy)||[]){
+    if(!seen.has(b.id)&&same(b)&&routes.joins(a,b,side)){seen.add(b.id);queue.push(b);keys.add(key(b.c));}
+   }}
+   if((++work&1023)===0)yield;
+  }
+  return [...keys];
  }
+ function fillKeys(...args){const steps=fillSteps(...args);let next;do{next=steps.next();}while(!next.done);return next.value;}
  const ratio=(n,d)=>d?Number(n*1000000000000n/d)/1e12:0;
- function statistics(region,lookup,display){
-  const land={count:0,n:0n},sea={count:0,n:0n};
-  for(const k of region.cells){const c=lookup.get(k);if(!c)continue;const g=c.land===2?sea:land;g.count++;g.n+=display.get(c).numerator;}
-  const all={count:land.count+sea.count,n:land.n+sea.n},base=display.baselineNumerator;
+ function summarize(land,sea,base){
+  const all={count:land.count+sea.count,n:land.n+sea.n};
   for(const g of [land,sea,all]){g.total=ratio(g.n,base);g.average=g.count?ratio(g.n,base*BigInt(g.count)):null;}
   return {land,sea,all};
+ }
+ function* statisticsSteps(region,lookup,display){
+  const land={count:0,n:0n},sea={count:0,n:0n};let steps=0;
+  for(const k of region.cells){
+   const c=lookup.get(k);if(c){const g=c.land===2?sea:land;g.count++;g.n+=display.get(c).numerator;}
+   if(++steps%128===0)yield;
+  }
+  return summarize(land,sea,display.baselineNumerator);
+ }
+ function* patchStatisticsSteps(region,previousCells,changes,value,lookup,display){
+  const land={count:value.land.count,n:value.land.n},sea={count:value.sea.count,n:value.sea.n};let steps=0;
+  for(const k of changes.keys()){
+   const before=previousCells.has(k),after=region.cells.has(k),c=lookup.get(k);
+   if(c&&before!==after){const g=c.land===2?sea:land,sign=after?1:-1;g.count+=sign;g.n+=BigInt(sign)*display.get(c).numerator;}
+   if(++steps%128===0)yield;
+  }
+  return summarize(land,sea,display.baselineNumerator);
+ }
+ function statistics(region,lookup,display){
+  const work=statisticsSteps(region,lookup,display);let next;
+  do{next=work.next();}while(!next.done);
+  return next.value;
  }
  const emptyGroup={count:0,n:0n};
  function compareValues(a,b,field){
@@ -166,7 +203,7 @@
  const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
  // Zero-probability / occupied cells remain selectable; this is a boundary rule.
  function canSelect(c,rendering){
-  if(!c.usable||c.visibleBand)return false;
+  if(!c||!c.usable||c.visibleBand)return false;
   if(Number.isFinite(c.cameraCoverage))return c.cameraCoverage>0;
   const r=rendering?.cameraRect;
   return !r||(c.px>=r[0]&&c.px<=r[0]+r[2]&&c.py>=r[1]&&c.py<=r[1]+r[3]);
@@ -226,6 +263,6 @@
   }
   return Number.isFinite(left)?{x:left,y:top,w:Math.max(1,right-left),h:Math.max(1,bottom-top)}:null;
  }
- const api={EMPTY,colors,nextColor,lab,key,displayName,playerStyles,playersForRegion,nearestPlayer,playerAt,labelStrokes,defaults,encode,decode,exclusive,apply,fillKeys,revision,touch,statistics,sorted,ranks,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
+ const api={EMPTY,colors,nextColor,lab,key,displayName,playerStyles,playersForRegion,nearestPlayer,playerAt,labelStrokes,defaults,encode,decode,exclusive,apply,fillKeys,fillSteps,revision,touch,statistics,statisticsSteps,patchStatisticsSteps,sorted,ranks,selected,createSelectionIndex,canSelect,hit,bounds,segmentBox};
  root.CrateRegionStatistics=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

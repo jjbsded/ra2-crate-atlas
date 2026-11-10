@@ -6,8 +6,8 @@
   const now=()=>root.performance?.now()??Date.now(),stats={requests:0,merged:0,published:0,cancelled:0,slices:0,maxSliceMs:0,maxCaptureMs:0,maxPublishMs:0,lastJobMs:0,lastComputeMs:0,maxTaskGapMs:0};
   function busy(value){if(pending!==value){pending=value;onPending(value);}}
   function defer(fn,wait=0){
-   if(wait){timer=root.setTimeout(()=>{timer=null;fn();},wait);return;}
-   const token=task={};const run=()=>{if(task!==token)return;task=null;fn();};
+   if(wait){timer=root.setTimeout(()=>{timer=null;if(root.CrateMapPriority?.blocked)defer(fn);else fn();},wait);return;}
+   const token=task={};const run=()=>{if(task!==token)return;if(root.CrateMapPriority?.blocked){root.CrateMapPriority.wait().then(run);return;}task=null;fn();};
    if(root.scheduler?.postTask)root.scheduler.postTask(run,{priority:'user-visible'}).catch(()=>{if(task===token)timer=root.setTimeout(run,0);});
    else timer=root.setTimeout(run,0);
   }

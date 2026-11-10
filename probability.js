@@ -156,9 +156,10 @@
  const paletteDefaults=Object.freeze({warmStart:'#fff080',warmMax:'#ff2e1f',coolStart:'#ebf9ff',coolMax:'#1499ff',opacityZero:.6,opacityStart:.3,opacity50:.5,opacity75:.6,opacityMax:.9,baselineFactor:1,labelMinRatio:.3,labelBase:'#fef371',labelMix:.5,labelStrokeRatio:.35});
  let paletteConfig={...paletteDefaults};
  const rgbCache=new Map(),validHex=value=>typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);
+ const paletteNumber=(configuration,key)=>{const value=configuration?.[key];return typeof value==='number'&&Number.isFinite(value)&&(key==='labelMix'||value>=0)?value:paletteDefaults[key];};
  function rgb(value){if(!rgbCache.has(value)){rgbCache.set(value,value.slice(1).match(/../g).map(v=>parseInt(v,16)));if(rgbCache.size>256)rgbCache.delete(rgbCache.keys().next().value);}return rgbCache.get(value);}
  function configurePalette(value){let changed=false;for(const key of Object.keys(paletteDefaults)){
-  const raw=value?.[key],next=typeof paletteDefaults[key]==='number'?typeof raw==='number'&&Number.isFinite(raw)?Math.max(0,Math.min(1,raw)):undefined:validHex(raw)?raw.toLowerCase():undefined;
+  const raw=value?.[key],next=typeof paletteDefaults[key]==='number'?typeof raw==='number'&&Number.isFinite(raw)&&(key==='labelMix'||raw>=0)?raw:undefined:validHex(raw)?raw.toLowerCase():undefined;
   if(next!==undefined&&paletteConfig[key]!==next){paletteConfig[key]=next;changed=true;}
  }return changed;}
  const paletteSettings=()=>({...paletteConfig});
@@ -166,18 +167,18 @@
  const opacityCurves=new Map();
  function opacityCurve(maximum,configuration=paletteConfig){
   maximum=Number.isFinite(maximum)?Math.max(0,maximum):0;
-  const values=['opacityZero','opacityStart','opacity50','opacity75','opacityMax'].map(key=>typeof configuration?.[key]==='number'&&Number.isFinite(configuration[key])?Math.max(0,Math.min(1,configuration[key])):paletteDefaults[key]);
+  const values=['opacityZero','opacityStart','opacity50','opacity75','opacityMax'].map(key=>paletteNumber(configuration,key));
   const key=maximum+'|'+values.join(',');if(opacityCurves.has(key))return opacityCurves.get(key);
   const points=[[0,values[0]],[1,values[1]]];
   for(const [x,y]of [[maximum*.5,values[2]],[maximum*.75,values[3]],[maximum,values[4]]])if(!points.some(p=>Math.abs(p[0]-x)<=1e-10*Math.max(1,x)))points.push([x,y]);
   points.sort((a,b)=>a[0]-b[0]);for(const point of points)Object.freeze(point);Object.freeze(points);
   const slopes=points.slice(1).map((p,i)=>(p[1]-points[i][1])/(p[0]-points[i][0]));
-  const curve=value=>{if(!(value>0))return points[0][1];for(let i=1;i<points.length;i++)if(value<=points[i][0])return Math.max(0,Math.min(1,points[i-1][1]+(value-points[i-1][0])*slopes[i-1]));return points.at(-1)[1];};curve.points=points;
+  const curve=value=>{if(!(value>0))return points[0][1];for(let i=1;i<points.length;i++)if(value<=points[i][0])return Math.max(0,points[i-1][1]+(value-points[i-1][0])*slopes[i-1]);return points.at(-1)[1];};curve.points=points;
   if(opacityCurves.size>=32)opacityCurves.delete(opacityCurves.keys().next().value);opacityCurves.set(key,curve);return curve;
  }
  const paletteOpacity=(value,maximum,configuration=paletteConfig)=>opacityCurve(maximum,configuration)(value);
- function labelSize(scale,base=12,configuration=paletteConfig){const ratio=typeof configuration?.labelMinRatio==='number'?Math.max(0,Math.min(1,configuration.labelMinRatio)):paletteDefaults.labelMinRatio;return Math.max(base,30*scale*ratio);}
- function labelStrokeWidth(size,configuration=paletteConfig){const ratio=typeof configuration?.labelStrokeRatio==='number'&&Number.isFinite(configuration.labelStrokeRatio)?Math.max(0,Math.min(1,configuration.labelStrokeRatio)):paletteDefaults.labelStrokeRatio;return Math.max(3,size*ratio);}
+ function labelSize(scale,base=12,configuration=paletteConfig){return Math.max(base,30*scale*paletteNumber(configuration,'labelMinRatio'));}
+ function labelStrokeWidth(size,configuration=paletteConfig){return Math.max(3,size*paletteNumber(configuration,'labelStrokeRatio'));}
  function heatStyle(configuration=paletteConfig){const {labelMinRatio,labelBase,labelMix,labelStrokeRatio,...heat}=configuration;return heat;}
  function color(value,palette='multi',maximum=MAX_MULTIPLIER,configuration=paletteConfig){
   if(palette==='warm'||palette==='cool'){
@@ -195,9 +196,9 @@
  function labelColor(value,palette,maximum,enabled=true,configuration=paletteConfig){
   const base=validHex(configuration?.labelBase)?configuration.labelBase.toLowerCase():paletteDefaults.labelBase;
   if(!enabled)return base;
-  const mix=typeof configuration?.labelMix==='number'&&Number.isFinite(configuration.labelMix)?Math.max(0,Math.min(1,configuration.labelMix)):paletteDefaults.labelMix;
+  const mix=paletteNumber(configuration,'labelMix');
   if(!mix)return base;const target=color(value,palette,maximum,configuration);if(mix===1)return target;
-  const a=rgb(base),b=rgb(target);return '#'+a.map((v,k)=>Math.round(v+(b[k]-v)*mix).toString(16).padStart(2,'0')).join('');
+  const a=rgb(base),b=rgb(target);return '#'+a.map((v,k)=>Math.round(Math.max(0,Math.min(255,v+(b[k]-v)*mix))).toString(16).padStart(2,'0')).join('');
  }
  function legend(palette,maximum){return palette==='multi'?stops.map(s=>s[0]):Array.from({length:8},(_,i)=>Math.expm1(Math.log1p(Math.max(0,maximum))*i/7));}
  const format=value=>value===0?'0':value>=10?value.toFixed(1):value.toFixed(2).replace(/\.?0+$/,'');

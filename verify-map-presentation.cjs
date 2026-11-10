@@ -6,13 +6,18 @@ const nodes=new Map();
 function element(tag='div'){
  const classes=new Set();let text='';
  return {tag,children:[],dataset:{},hidden:false,disabled:false,title:'',
-  classList:{toggle(name,enabled){enabled?classes.add(name):classes.delete(name);},remove(name){classes.delete(name);},contains:name=>classes.has(name)},
+  classList:{add(name){classes.add(name);},toggle(name,enabled){enabled?classes.add(name):classes.delete(name);},remove(name){classes.delete(name);},contains:name=>classes.has(name)},
+  style:{setProperty(){}},setAttribute(){},removeAttribute(){},after(){},cloneNode(){return element(tag);},
   append(...items){this.children.push(...items);},replaceChildren(){text='';this.children=[];},
   get textContent(){return text+this.children.map(c=>c.textContent).join('');},
   set textContent(value){text=String(value);this.children=[];}};
 }
 const $=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
-const view=Details.create({document:{getElementById:$,createElement:element}});
+// This presentation fixture exercises the real list renderer. Height-dependent
+// pagination and observers run in verify-risk-pagination-ui.cjs in Chromium.
+global.ResizeObserver=global.MutationObserver=class {observe(){}disconnect(){}};
+global.requestAnimationFrame=()=>1;global.window={addEventListener(){},removeEventListener(){}};
+const view=Details.create({document:{getElementById:$,createElement:element,body:element('body')}});
 const cells=[4,0,1].map((hits,i)=>({x:10+i,y:10,level:2,slope:0,rawLand:7,land:7,postLand:3,overlay:255,
  objects:[],occupied:false,usable:true,primary:true,terms:hits?[[0,hits]]:[],probability:hits/10,multiplier:hits,
  marked:i===0,potentialMarked:i===1,higher:[[9,10,6]],removable:[],status:'crate',file:'fixture.sno',subTile:0,
@@ -41,7 +46,14 @@ assert.equal($('markerList').children[0].classList.contains('selected'),true);
 $('potentialList').children[0].onclick();assert.equal(focused,cells[1]);
 assert.equal($('heatmap').disabled,false);assert.equal($('riskLists').hidden,false);
 assert.match($('objectWarnings').textContent,/MISSING：无贴图/);
-assert.match($('stats').textContent,/极小（非零）/);
+assert.match($('stats').textContent,/1(?:\.0)?%/);
+const tiny={finalFailure:0,exact:{failureNumerator:'23',denominator:'1'+'0'.repeat(402)}};
+assert.equal(Details.failurePercent(tiny),'2.3×10⁻³⁹⁹%','Show a positive exact probability beyond floating-point range');
+assert.equal(Details.failurePercent(tiny),'2.3×10⁻³⁹⁹%','Reuse the revision label');
+tiny.exact.failureNumerator='41';assert.equal(Details.failurePercent(tiny),'4.1×10⁻³⁹⁹%','Mutable inputs also invalidate the label cache');
+assert.equal(Details.failurePercent({finalFailure:1e-10,exact:{failureNumerator:'1',denominator:'10000000000'}}),'1×10⁻⁸%');
+assert.equal(Details.failurePercent({finalFailure:0,exact:{failureNumerator:'0',denominator:'1'}}),'0%');
+assert.equal(Details.failurePercent({finalFailure:.25,exact:{failureNumerator:'1',denominator:'4'}}),'25%');
 view.transfer({sources:[{reason:'投影优先规则',cell:null},{reason:'障碍',cell:cells[1]}]});
 assert.equal($('transferInfo').textContent,'青蓝：2 个来源格 · 再次点击取消');
 view.transfer(null,'读取失败');assert.equal($('transferInfo').textContent,'读取失败');
@@ -58,6 +70,9 @@ assert.doesNotMatch($('cellInfo').textContent,/重抽|重新抽取/);
 assert.equal($('markers').disabled,false);assert.equal($('heatmap').disabled,false);
 assert.equal($('retryMod').hidden,true);assert.match($('analysisIssues').textContent,/未验证扩展行为/);
 assert.equal(Details.completion(approx),'地图已加载');
+const recovered={...approx,metadata:{...approx.metadata,riskPredictionVersion:1,riskUnknownCellCount:1},clearance:{model:'readable-objects-cleared',unknownCellCount:1}};
+show(recovered);view.cell(cells[0],recovered,display);assert.equal($('riskLists').hidden,false);assert.equal($('rockDownload').hidden,false);assert.equal($('potentialDownload').hidden,false);assert.match($('cellInfo').textContent,/放箱后无法通行/);
+view.cell({...cells[0],riskKnown:false,postLand:null},recovered,{get:()=>display.get(cells[0])});assert.match($('cellInfo').textContent,/暂无法判断/);
 
 const preview={...data,probability:null,metadata:{...data.metadata,previewOnly:true,partialAnalysis:true,analysisError:'不可计算',warnings:['未计算概率']}};
 show(preview);view.cell({...cells[0],terrainError:'未知 TMP'},preview,D.map(preview));
@@ -76,6 +91,9 @@ const live={...data,probability:{...data.probability,finalSuccess:.75,finalFailu
 view.update({data:live,base:'/output/test/',url:'/output/test/result.json'},D.map(live),{lookup,onFocus:c=>focused=c});
 assert.equal($('objectWarnings').children[0],unchangedWarnings);assert.equal($('markerList').children[0],unchangedMarker);assert.equal($('stats').children[1],statNode);assert.match(statNode.textContent,/75%/);
 const riskChange={...live,markers:[[11,10]]};view.update({data:riskChange,base:'/output/test/',url:'/output/test/result.json'},D.map(riskChange),{lookup,onFocus:c=>focused=c});assert.equal($('markerList').children[0].dataset.key,'11,10');
+riskChange.markers[0][0]=12;view.update({data:riskChange},display,{lookup,onFocus:c=>focused=c});assert.equal($('markerList').children[0].dataset.key,'12,10','Numeric risk snapshots detect in-place coordinate edits');
+riskChange.potentialMarkers=undefined;view.update({data:riskChange},display,{lookup,onFocus:c=>focused=c});assert.equal($('potentialCount').textContent,'未计算');
+riskChange.potentialMarkers=[];view.update({data:riskChange},display,{lookup,onFocus:c=>focused=c});assert.equal($('potentialCount').textContent,'0 格','Uncomputed and an empty computed list remain distinct');
 
 const before=structuredClone(data),download=Export.report(data,display),report=JSON.parse(download.text);
 assert.equal(download.name,'crate-map-probability.json');assert.equal(report.cells[0].relativeMultiplier,4);
@@ -119,7 +137,7 @@ async function controls(){
  }};
  const ctx=vm.createContext({Blob,Map,setTimeout:fn=>fn(),requestAnimationFrame:fn=>frames.push(fn),
   URL:{createObjectURL:value=>{blob=value;return 'blob:fixture';},revokeObjectURL(){}},
-  CrateMapDetails:Details,CrateMapImageExport:{layout:()=>({width:600,height:400}),render:(target,source)=>{rendered=source;return{labels:3};}}});
+  CrateMapDetails:Details,CrateMapImageExport:{layout:()=>({width:600,height:400}),renderAsync:async(target,source)=>{await Promise.resolve();rendered=source;return{labels:3};}}});
  vm.runInContext(fs.readFileSync(__dirname+'/map-exports.js','utf8'),ctx);
  const state={data,cells,lookup:new Map(lookup),selected:cells[0]};
  ctx.CrateMapExports.bind({document:doc,getContext:()=>({state,display}),canvas:{toBlob:fn=>shotCallback=fn},

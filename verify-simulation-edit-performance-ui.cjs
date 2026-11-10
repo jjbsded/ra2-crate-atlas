@@ -1,0 +1,31 @@
+/* Real pointer strokes over a dense imported plan, Full and Toy. */
+'use strict';
+const{chromium}=require('playwright'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const toy=process.env.SIM_EDITION==='toy',base=process.env.SIM_BASE||'http://127.0.0.1:8767/';
+const map=process.env.SIM_MAP,planFile=process.env.SIM_PLAN;assert(map&&planFile,'Set SIM_MAP and SIM_PLAN');
+(async()=>{const b=await chromium.launch({channel:'msedge',headless:true});try{
+ const p=await b.newPage({viewport:{width:1900,height:1300}}),errors=[];p.on('pageerror',e=>{errors.push(e.stack);console.error(e.stack);});
+ await p.addInitScript(()=>{window.editPerf={stage:null,paints:[],begins:[],counts:[],long:[],beat:0,maxBeat:0};new PerformanceObserver(list=>{if(editPerf.stage)editPerf.long.push(...list.getEntries().map(e=>e.duration));}).observe({type:'longtask'});setInterval(()=>{const at=performance.now();if(editPerf.stage&&editPerf.beat)editPerf.maxBeat=Math.max(editPerf.maxBeat,at-editPerf.beat);editPerf.beat=at;},16);});
+ await p.route('**/simulation-model.js*',async route=>{const response=await route.fetch();const body=process.env.MODEL_BEFORE?fs.readFileSync('output/other-operation-performance/before-simulation-model.js','utf8'):await response.text();await route.fulfill({response,body:body+`\n{const create=CrateSimulationModel.create;CrateSimulationModel.create=(...args)=>{const m=create(...args);for(const[name,list]of [['paint','paints'],['beginPaint','begins']]){const fn=m[name];m[name]=(...a)=>{const at=performance.now();try{return fn(...a);}finally{if(editPerf.stage)editPerf[list].push(performance.now()-at);}};}const d=Object.getOwnPropertyDescriptor(m,'count');Object.defineProperty(m,'count',{...d,get(){const at=performance.now();try{return d.get.call(m);}finally{if(editPerf.stage)editPerf.counts.push(performance.now()-at);}}});return m;};}`});});
+ await p.goto(base+(toy?'index.html':'maps.html'));if(toy)await p.waitForFunction(()=>window.CrateMapViewer?.simulation.model&&!CrateMapViewer.state.busy,null,{timeout:180000});
+ await p.locator('#mapFile').setInputFiles(map);await p.waitForFunction(name=>window.CrateMapViewer?.state.data.metadata.filename===name&&!CrateMapViewer.state.busy&&CrateMapViewer.simulation.model,path.basename(map),{timeout:180000});
+ const ready=()=>p.waitForFunction(()=>{const v=CrateMapViewer,s=v.state;return !s.busy&&!v.simulation.waiting&&!v.simulation.computing&&!s.regionPending&&!s.unitBuffPending&&!s.buffExpectationPending&&!s.regionRecolorPending;},null,{timeout:180000});await ready();
+ const plan=JSON.parse(fs.readFileSync(planFile,'utf8').replace(/^\uFEFF/,''));plan.map.version=await p.evaluate(()=>CrateMapViewer.simulation.model.source.version);
+ await p.locator('#simulationImportFile').setInputFiles({name:'qa-layout.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(plan))});await p.waitForFunction(n=>CrateMapViewer.state.data.metadata.simulationPlan?.placements.length===n,plan.placements.length,{timeout:180000});await ready();
+ await p.locator('#simulationPlaceTab').click();await p.locator('#minimap').uncheck();await p.locator('#simulationPaintMethod').selectOption('brush',{force:true});await p.locator('#simulationPlaceSize').fill('1');
+ const line=await p.evaluate(()=>{const v=CrateMapViewer,m=v.simulation.model,lines=new Map();m.eachPlacement(o=>{if(o.category==='STRUCTURES'&&o.type!=='GAYARD'){if(!lines.has(o.x))lines.set(o.x,[]);lines.get(o.x).push({x:o.x,y:o.y,id:o.id});}});return [...lines.values()].sort((a,b)=>b.length-a.length)[0].sort((a,b)=>a.y-b.y).slice(0,20);});assert.equal(line.length,20);
+ const initial=await p.evaluate(()=>CrateMapViewer.simulation.model.plan),rows=[];
+ async function stroke(tool){
+  await p.locator('#simulationTool').selectOption(tool,{force:true});await ready();await p.evaluate(line=>{const v=CrateMapViewer,s=v.state,cs=line.map(o=>s.lookup.get(o.x+','+o.y)),x=cs.reduce((n,c)=>n+c.px,0)/cs.length,y=cs.reduce((n,c)=>n+c.py,0)/cs.length;const width=Math.max(...cs.map(c=>c.px))-Math.min(...cs.map(c=>c.px))+180,height=Math.max(...cs.map(c=>c.py))-Math.min(...cs.map(c=>c.py))+180;s.scale=Math.min(.8,v.area.w/width*.8,v.area.h/height*.8);s.x=v.area.x+v.area.w/2-x*s.scale;s.y=v.area.y+v.area.h/2-y*s.scale;v.draw();},line);await p.locator('#map').scrollIntoViewIfNeeded();await p.waitForTimeout(250);
+  const points=await p.evaluate(line=>{const v=CrateMapViewer,s=v.state,b=document.getElementById('map').getBoundingClientRect(),k=b.width/v.viewport.width;return line.map(o=>{const c=s.lookup.get(o.x+','+o.y);return[b.x+(s.x+c.px*s.scale)*k,b.y+(s.y+c.py*s.scale)*k];});},line);
+  await p.mouse.move(...points[0]);await p.evaluate(tool=>Object.assign(editPerf,{stage:tool,paints:[],begins:[],counts:[],long:[],beat:performance.now(),maxBeat:0,start:performance.now()}),tool);
+  await p.mouse.down();for(const point of points.slice(1))await p.mouse.move(...point,{steps:2});await p.mouse.up();
+  const timing=await p.evaluate(()=>{editPerf.stage=null;return{...editPerf,strokeMs:performance.now()-editPerf.start,placements:CrateMapViewer.simulation.model.plan.placements.length};});
+  assert(timing.placements<initial.placements.length-10,'Native stroke must remove the sampled buildings');const start=Date.now();await ready();timing.backgroundMs=Date.now()-start;rows.push({tool,...timing});
+  await p.locator('#simulationUndo').click();await ready();assert.deepEqual(await p.evaluate(()=>CrateMapViewer.simulation.model.plan),initial,'One undo restores the entire stroke');
+ }
+ await stroke('chrono');await stroke('restore');assert.deepEqual(errors,[]);
+ fs.mkdirSync('output/other-operation-performance',{recursive:true});fs.writeFileSync('output/other-operation-performance/'+(toy?'toy':'full')+'-'+(process.env.EDIT_STAGE||'current')+'.json',JSON.stringify(rows,null,2));
+ const summarize=a=>({n:a.length,mean:a.reduce((s,n)=>s+n,0)/a.length,max:Math.max(...a)});
+ console.log('PASS',toy?'Toy':'Full',rows.map(r=>({tool:r.tool,strokeMs:r.strokeMs,backgroundMs:r.backgroundMs,paint:summarize(r.paints),begin:summarize(r.begins),count:summarize(r.counts),maxBeat:r.maxBeat,long:r.long})));
+}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict'),L=require('./region-label-layout.js'),clip={l:0,r:1000,t:0,b:700},config={fadeIn:200,fadeOut:100,simultaneous:true};
+const initial=()=>({x:100,y:100,targetX:100,targetY:100,visible:true,viewX:0,viewY:0,scale:1});
+let m=initial();L.fadeTo(m,700,450,0,config,clip,50,20);assert.equal(m.x,700);assert.equal(m.y,450);let f=L.fadeFrames(m,50);assert.deepEqual(f.frames.map(p=>[p.x,p.y,p.alpha]),[[100,100,.5],[700,450,.25]]);assert(f.active);assert(!L.fadeFrames(m,200).active);
+m=initial();L.fadeTo(m,700,450,0,{...config,simultaneous:false},clip,50,20);assert.deepEqual(L.fadeFrames(m,50).frames.map(p=>p.x),[100]);assert.equal(L.fadeFrames(m,150).frames[0].alpha,.25);assert(!L.fadeFrames(m,300).active);
+m=initial();L.fadeTo(m,700,450,0,{fadeIn:0,fadeOut:0,simultaneous:false},clip,50,20);assert.deepEqual(L.fadeFrames(m,0).frames,[{x:700,y:450,alpha:1}]);
+m=initial();L.fadeTo(m,700,450,0,config,clip,50,20);L.transport(m,{x:20,y:30,scale:2});f=L.fadeFrames(m,50);assert.deepEqual(f.frames.map(p=>[p.x,p.y]),[[220,230],[1420,930]],'Old and new anchors remain fixed in map space');
+for(let i=0;i<40;i++)L.fadeTo(m,200+i*5,300,i+51,config,clip,50,20);assert(m.fade.out.length<=4);assert(L.fadeFrames(m,100).frames.length<=5,'Retargeting keeps bounded layers instead of an obsolete queue');
+assert(L.fullyVisible(500,300,100,30,clip));assert(!L.fullyVisible(50,300,100,30,clip));const ratio=L.fitRatio({halfWidth:250,pad:10,height:40},clip,{l:10,r:90,t:100,b:140});assert(ratio<.15);assert((250+10)*2*ratio<80);
+const position=L.avoid([{id:'fixed',x:300,y:300,preferredX:600,preferredY:300,halfWidth:80,halfHeight:30,locked:true,contains:()=>true},{id:'other',x:300,y:300,preferredX:300,preferredY:300,halfWidth:80,halfHeight:30,contains:()=>true}]).positions;assert.equal(position.get('fixed').x,300);
+console.log('PASS crossfade/sequential/zero timings, map anchoring, latest bounded transitions, region-size caps and Lazy collision locks');

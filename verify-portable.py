@@ -99,6 +99,17 @@ class PackageChecks(unittest.TestCase):
             self.assertIsNone(tool)
             self.assertEqual(archives, [target.with_name(target.name+'.zip')])
 
+    def test_relative_runtime_paths_are_resolved_before_probing_node(self):
+        with tempfile.TemporaryDirectory(dir=OUT) as temporary:
+            target = Path(temporary)/'CrateAtlas'
+            inputs = tuple(Path('runtime')/name for name in ('node/node.exe', 'ffmpeg/ffmpeg.exe', 'node/LICENSE'))
+            with patch.object(builder, 'validate_sources'), \
+                 patch.object(builder, 'validate_runtimes', side_effect=RuntimeError('probe reached')) as probe:
+                with self.assertRaisesRegex(RuntimeError, 'probe reached'):
+                    builder.build(target, *inputs, archive_format='none')
+            self.assertEqual(probe.call_args.args, tuple(path.resolve() for path in inputs))
+            self.assertFalse(target.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

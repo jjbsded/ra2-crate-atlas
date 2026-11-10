@@ -18,12 +18,12 @@ const toy=process.env.SIM_EDITION==='toy',base=process.env.SIM_BASE||'http://127
  `;
   assert(body.includes('  return {load,beforeLoad:'));await route.fulfill({response,body:body.replace('  return {load,beforeLoad:',hook+'  return {load,beforeLoad:')});
  });
- await p.goto(base+(toy?'index.html':'maps.html?result=/output/map-22309489b5d3/result.json'));
+ await p.goto(base+(toy?'index.html':'maps.html?result='+(process.env.SIM_RESULT||'/output/map-22309489b5d3/result.json')));
  const ready=()=>p.waitForFunction(()=>window.CrateMapViewer?.simulation.model&&!CrateMapViewer.state.busy,null,{timeout:120000});await ready();
  if(toy){await p.locator('#mapFile').setInputFiles('D:/SteamLibrary/steamapps/common/Command & Conquer Red Alert II/SAVE537E-20261104-155756-719000.map');await p.waitForFunction(()=>CrateMapViewer.state.data.metadata.filename==='SAVE537E-20261104-155756-719000.map'&&!CrateMapViewer.state.busy,null,{timeout:120000});}
  await p.locator('#minimap').uncheck();await p.locator('#map').scrollIntoViewIfNeeded();
- assert.equal(await p.locator('#regionTitleTuning').count(),0);assert.equal(await p.evaluate(()=>typeof CrateRegionTitleControls),'undefined');
- assert.deepEqual(await p.evaluate(()=>({...CrateRegionLabelLayout.defaults})),{maxSpeed:8000,acceleration:20000});
+ assert.equal(await p.locator('#regionTitleTuning').count(),0);assert.equal(await p.evaluate(()=>typeof CrateRegionTitleControls),'object');
+ assert.deepEqual(await p.evaluate(()=>{const{maxSpeed,acceleration}=CrateRegionLabelLayout.defaults;return{maxSpeed,acceleration};}),{maxSpeed:8000,acceleration:20000});
  const fixtures=await p.evaluate(()=>pickerRegions.setup()),assigned=fixtures.find(f=>f.name==='assigned'),empty=fixtures.find(f=>f.name==='empty'),placed=fixtures.find(f=>f.name==='placed');
  const state=()=>p.evaluate(()=>({mode:CrateMapViewer.state.editMode,active:pickerRegions.active(),type:document.getElementById('simulationObject').value,count:CrateMapViewer.simulation.model.count,plan:CrateMapViewer.simulation.model.plan}));
  const neutral=async()=>p.evaluate(()=>document.activeElement?.blur());
@@ -48,7 +48,7 @@ const toy=process.env.SIM_EDITION==='toy',base=process.env.SIM_BASE||'http://127
  await p.locator('#simulationConsider').click();await p.waitForFunction(()=>!CrateMapViewer.state.busy&&!CrateMapViewer.simulation.considered);await mode('2');await move(placed);await p.keyboard.down('Control');assert.equal(await p.locator('#simulationCursorMode').getAttribute('data-sample'),'region');await p.keyboard.up('Control');
  await mode('3');await p.locator('#regionEyedropper').click();await p.keyboard.press('Escape');assert.equal((await state()).mode,null);assert.notEqual(await p.locator('#regionTool').inputValue(),'picker');
  // English pointer feedback includes the clear-region label.
- await p.evaluate(()=>CrateI18n.setLanguage('en'));await move(empty);await p.keyboard.down('Control');assert((await p.locator('#simulationCursorMode').innerText()).includes('Clear region'));await p.keyboard.up('Control');
+ await p.evaluate(()=>CrateI18n.setLanguage('en'));await move(empty);await p.keyboard.down('Control');assert((await p.locator('#simulationCursorMode').innerText()).includes(await p.evaluate(()=>CrateI18n.t('消除区域'))));await p.keyboard.up('Control');
  const out=path.resolve('output/unified-eyedropper-qa');fs.mkdirSync(out,{recursive:true});await p.locator('#editTools').screenshot({path:path.join(out,toy?'toy.png':'full.png')});
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,toy?'toy.json':'full.json'),JSON.stringify({status:'PASS',objects:objects.map(f=>f.type),shortcuts:[1,2,3],samplesCreateJobs:false,defaultTitleMotion:{maxSpeed:8000,acceleration:20000}},null,2));console.log('PASS',toy?'Toy':'Full','unified object/region eyedropper, no edit jobs, view Ctrl, Esc, keyboard modes and defaults',objects.map(f=>f.type));
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

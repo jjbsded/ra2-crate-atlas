@@ -3,6 +3,7 @@
  'use strict';
  const _i18n=globalThis.CrateI18n||(typeof require==='function'?require('./i18n.js'):null);
  const _t=_i18n?.t||((s,...v)=>Array.isArray(s)?s.reduce((a,p,i)=>a+(i?v[i-1]:'')+p,''):s);
+ const modes=root.CrateDisplayModes||(typeof require==='function'?require('./display-modes.js'):null);
  const H=1/Math.sqrt(6),key=c=>`${c.x},${c.y}`;
  function viewHalfSize(radius,zoom,width,heightPx){const size=radius*1.15+2,horizontal=(2*radius+1)*Math.SQRT2/2+1;return Math.max(size*.68,horizontal/(Math.max(1,width)/Math.max(1,heightPx)))/zoom;}
  function height(c,u,v){const[a,b,d,e]=c.corners||[0,0,0,0];return c.level+a*(1-u)*(1-v)+b*u*(1-v)+d*u*v+e*(1-u)*v;}
@@ -13,14 +14,21 @@
   return Math.max(s.minimum,Math.min(s.maximum,p))-p;
  }
  function relationships(c,lookup){return {higher:(c.higher||[]).map(([x,y])=>lookup.get(`${x},${y}`)).filter(Boolean),affected:(c.affected||[]).map(([x,y])=>lookup.get(`${x},${y}`)).filter(Boolean)};}
- function probabilityCells(cells,{display,lookup,options}){
+ function probabilityCells(cells,{display,lookup,options,buff,units,mode='crate'}){
+  const placed=mode==='units',expectation=mode==='buff'||placed,reference=root.CrateBuffReference||(typeof require==='function'?require('./buff-reference.js'):null),colors=root.CrateProbability||(typeof require==='function'?require('./probability.js'):null),alpha=root.CrateProbabilityDisplay||(typeof require==='function'?require('./probability-display.js'):null);
+  if(mode==='off'||mode==='buff'&&!buff||placed&&!units)return [];
+  if(placed&&options.unitOnly)options={...options,...options.unitOnly};
+  const unitValues=placed?new Map(units.values().map(e=>[key(e.unit),e.value])):null,maximum=placed?units.maximum:expectation?buff.maximum:display.maxMultiplier,opacityAt=expectation?colors.opacityCurve(maximum,options.paletteColors):null,format=expectation?(root.CrateUnitBuff||(typeof require==='function'?require('./unit-buff.js'):null)).amount:null;
   return cells.flatMap(c=>{
    const source=lookup.get(key(c));
-   if(!source||options.filter!=='all'&&(options.filter==='water'?source.land!==2:source.land===2)||!display.meetsThreshold(source,options.threshold||0))return [];
-   const value=display.get(source);
-   if(!(value.multiplier>0))return [];
-   return [{cell:c,multiplier:value.multiplier,alpha:options.baselineLayer===false&&value.isBaseline?0:display.cellAlpha(source,{opacity:1-options.opacity/100,baselineFactor:options.paletteColors?.baselineFactor}),
-    label:display.showLabel(source,options.baselineValues)?value.multiplier.toFixed(1)+'×':null}];
+   if(!source||options.filter!=='all'&&(options.filter==='water'?source.land!==2:source.land===2))return [];
+   const value=expectation?{multiplier:placed?unitValues.get(key(c))||0:buff.get(c.x,c.y)}:display.get(source);
+   if(expectation?value.multiplier<(options.threshold||0):!display.meetsThreshold(source,options.threshold||0))return [];
+   if(placed&&!unitValues.has(key(c))||!(value.multiplier>0)&&!options.zeroLayer&&!options.zeroValues)return [];
+   const baseline=expectation?reference.isBaseline(value.multiplier):value.isBaseline;
+   return [{cell:c,multiplier:value.multiplier,alpha:!value.multiplier&&!options.zeroLayer||placed&&options.heatmap===false||options.baselineLayer===false&&baseline?0:expectation?alpha.alpha((1-options.opacity/100)*opacityAt(value.multiplier),baseline,options.paletteColors?.baselineFactor):display.cellAlpha(source,{opacity:1-options.opacity/100,baselineFactor:options.paletteColors?.baselineFactor,includeZero:options.zeroLayer}),
+    color:colors.color(value.multiplier,options.palette,maximum,options.paletteColors),textColor:colors.labelColor(value.multiplier,options.palette,maximum,options.colorText!==false,options.paletteColors),
+    label:(!placed||options.values!==false)&&(value.multiplier>0||options.zeroValues)&&(expectation?options.baselineValues||!baseline:display.showLabel(source,options.baselineValues,options.zeroValues))?(expectation?format(value.multiplier):value.multiplier.toFixed(1)+'×'):null}];
   });
  }
  const land=[_t('平地'),_t('道路'),_t('水面'),_t('不可通行地面'),_t('围墙'),_t('矿石'),_t('海滩'),_t('粗糙地面'),_t('冰面'),_t('铁轨'),_t('隧道')];
@@ -33,6 +41,7 @@
   other:{color:0xb6bdc7,alpha:.13,pattern:'dots',label:_t('粗糙地面')}
  };
  function riskCategory(c){
+  if(c.riskKnown===false)return null;
   if(c.marked)return 'current';
   if(c.potentialMarked)return 'potential';
   if(c.land===7&&c.higher?.length)return c.probability===0?'zero':'other';
@@ -45,7 +54,7 @@
    return `${land[c.land]} · ${c.land===3?_t('当前地面已禁行'):_t('地面类型允许通行')}${c.higher.length?_t(' · 命中高差判定'):''}`;
   }
   if(meta.previewOnly)return _t('外观预览');
-  if(meta.approximate)return _t('近似概率');
+  if(c.riskKnown===false)return _t('该格放箱后的地面暂无法判断。');
   if(!meta.predictionEnabled)return land[c.land]||_t('未知');
   if(after)return c.postLand===3?_t('放箱后无法通行。'):_t('放箱后可通行');
   const category=riskCategory(c);
@@ -69,12 +78,12 @@
  }
  function create({getContext,onSelect,loadPatch=fetchPatch,embedded=false}){
   const $=id=>document.getElementById(id),dialog=$('terrain3dDialog'),stage=$('terrain3dStage'),canvas=$('terrain3dCanvas');
-  let revision=0,controller=null,view=null,busy=false,probabilityOn=false;
+  let revision=0,controller=null,view=null,busy=false,probabilityMode='off';
   const controls=['terrain3dRecenter','terrain3dReset','terrain3dLeft','terrain3dRight','terrain3dCrate','terrain3dProbability'];
   function loading(value){busy=value;stage.classList.toggle('is-loading',value);$('terrain3dLoading').hidden=!value;for(const id of controls)$(id).disabled=value;}
   async function show(){
    const context=getContext();if(!context?.cell)return;
-   if(!dialog.open){probabilityOn=false;if(embedded)dialog.setAttribute('open','');else dialog.showModal();}$('terrain3dProbability').textContent=_t('概率:')+(probabilityOn?_t('开'):_t('关'));$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityOn));if(!embedded)document.body.classList.add('terrain3d-open');
+   if(!dialog.open){probabilityMode=['buff','units'].includes(context.probability?.mode)?context.probability.mode:'off';if(embedded)dialog.setAttribute('open','');else dialog.showModal();}if(!embedded)document.body.classList.add('terrain3d-open');
    const ticket=++revision;controller?.abort();controller=new AbortController();view?.dispose();view=null;
    loading(true);$('terrain3dError').textContent='';$('terrain3dLabels').replaceChildren();$('terrain3dRelations').replaceChildren();$('terrain3dSource').textContent='';$('terrain3dWarnings').hidden=true;$('terrain3dLegend').hidden=$('terrain3dRiskScope').hidden=true;canvas.setAttribute('aria-label',_t('正在读取选中格附近地形'));$('terrain3dCrate').textContent=_t('预览放箱后');$('terrain3dCrate').setAttribute('aria-pressed','false');
    $('terrain3dProbabilityNote').hidden=true;$('terrain3dTitle').textContent=_t`3D 地形 · (${context.cell.x}, ${context.cell.y})`;
@@ -92,13 +101,14 @@
   $('terrain3dRadius').onchange=show;$('terrain3dRecenter').onclick=show;
   $('terrain3dReset').onclick=()=>view?.reset();$('terrain3dLeft').onclick=()=>view?.rotate(-Math.PI/6);$('terrain3dRight').onclick=()=>view?.rotate(Math.PI/6);
   $('terrain3dCrate').onclick=()=>view?.toggleCrate();
+  modes.reverseToggle($('terrain3dCrate'));
   $('terrain3dMarkers').onchange=()=>view?.update();$('terrain3dDecorations').onchange=()=>view?.update();
   $('terrain3dRelief').onchange=()=>view?.update();
-  $('terrain3dProbability').onclick=()=>{if(view&&!busy){probabilityOn=!probabilityOn;view.update();}};
+  modes.bind($('terrain3dProbability'),direction=>{if(view&&!busy){const p=getContext()?.probability,available=modes.order.filter(mode=>mode!=='buff'&&mode!=='units'||mode==='buff'&&p?.buff||mode==='units'&&p?.units);probabilityMode=modes.next(probabilityMode,direction,available);view.update();}});
   async function makeView(T,data,context,ticket){
-   const initial=context.cell,probability=context.probability,hasProbability=!!probability&&!data.metadata.previewOnly;
+   const initial=context.cell,hasProbability=!!context.probability&&!data.metadata.previewOnly;
    const renderer=new T.WebGLRenderer({canvas,alpha:true,antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));renderer.outputColorSpace=T.SRGBColorSpace;
-   const scene=new T.Scene(),terrain=new T.Group(),coarse=new T.Group(),relief=new T.Group(),marks=new T.Group(),decor=new T.Group(),links=new T.Group(),probabilityLayer=new T.Group(),probabilityLabels=new T.Group();scene.add(terrain,coarse,relief,marks,decor,links,probabilityLayer);probabilityLayer.add(probabilityLabels);probabilityLayer.visible=false;
+   const scene=new T.Scene(),terrain=new T.Group(),coarse=new T.Group(),relief=new T.Group(),marks=new T.Group(),decor=new T.Group(),links=new T.Group(),probabilityLayer=new T.Group(),probabilityLabels=new T.Group();scene.add(terrain,coarse,relief,marks,decor,links,probabilityLayer);probabilityLayer.add(probabilityLabels);probabilityLayer.visible=false;probabilityLayer.name='probability';
    scene.add(new T.AmbientLight(0xffffff,.85));const sun=new T.DirectionalLight(0xffffff,.65);sun.position.set(-5,15,10);scene.add(sun);
    const cells=data.cells,lookup=new Map(cells.map(c=>[key(c),c])),baseLevel=Math.min(...cells.map(c=>c.level)),textures={},materials=new Set(),geometries=new Set();
    let selected=lookup.get(key(initial)),after=false,disposed=false,frame=0,width=1,heightPx=1,yaw=Math.PI/4,pitch=Math.PI/6,zoom=1,labels=[];
@@ -218,22 +228,42 @@
      }
      for(let i=pickables.length-1;i>=0;i--)if(removed.has(pickables[i]))pickables.splice(i,1);
     }
-    let probabilityBuilt=false;
+    let probabilityBuilt='',probabilityDisplay=null,probabilityStamp='';
+    function probabilityContext(){return getContext()?.probability||context.probability;}
     function buildProbability(){
-     if(probabilityBuilt||!hasProbability)return;probabilityBuilt=true;
+     if(!hasProbability||probabilityMode==='off')return false;
+     const probability=probabilityContext();if(probabilityMode==='buff')probability.buff?.refresh();
+     const o=probability.options,stamp=JSON.stringify([probabilityMode,probabilityMode==='buff'?probability.buff?.status.revision:probabilityMode==='units'?probability.units?.status.completed:null,probabilityMode==='buff'?probability.buff?.maximum:probabilityMode==='units'?probability.units?.maximum:null,o.palette,o.paletteColors,o.opacity,o.filter,o.threshold,o.baselineLayer,o.baselineValues,o.zeroLayer,o.zeroValues,o.colorText,probabilityMode==='units'?o.unitOnly:null]);
+     if(probabilityDisplay===probability.display&&probabilityStamp===stamp)return false;probabilityDisplay=probability.display;probabilityStamp=stamp;
+     const entries=probabilityCells(cells,{...probability,mode:probabilityMode}),signature=JSON.stringify([probabilityMode,entries.map(e=>[e.cell.x,e.cell.y,e.multiplier,e.alpha,e.color,e.textColor,e.label])]);
+     if(probabilityBuilt===signature)return false;probabilityBuilt=signature;
+     cleanupGroup(probabilityLabels);cleanupGroup(probabilityLayer);probabilityLayer.add(probabilityLabels);
+     for(const id of Object.keys(textures))if(id.startsWith('probability:')){textures[id].dispose();delete textures[id];}
      const labelMaterials=new Map();
-     for(const entry of probabilityCells(cells,probability)){
+     for(const entry of entries){
       const c=entry.cell;
-      if(entry.alpha>0)probabilityLayer.add(surface(c,material({color:root.CrateProbability.color(entry.multiplier,probability.options.palette,probability.display.maxMultiplier),transparent:true,opacity:entry.alpha,depthWrite:false,side:T.DoubleSide}),.016,.025));
+      if(entry.alpha>0)probabilityLayer.add(surface(c,material({color:entry.color,transparent:true,opacity:entry.alpha,depthWrite:false,side:T.DoubleSide}),.016,.025));
       if(!entry.label)continue;
-      if(!labelMaterials.has(entry.label)){
+      const labelKey=entry.label+'|'+entry.textColor;
+      if(!labelMaterials.has(labelKey)){
        const image=document.createElement('canvas');image.width=192;image.height=64;const ctx=image.getContext('2d');
-       ctx.font='bold 52px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=7;ctx.strokeStyle='#10212cee';ctx.fillStyle='#fff';ctx.strokeText(entry.label,96,34,184);ctx.fillText(entry.label,96,34,184);
-       const tex=new T.CanvasTexture(image);tex.colorSpace=T.SRGBColorSpace;textures['probability:'+entry.label]=tex;
-       const m=new T.SpriteMaterial({map:tex,transparent:true,depthWrite:false});materials.add(m);labelMaterials.set(entry.label,m);
+       ctx.font='bold 52px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=7;ctx.strokeStyle='#10212cee';ctx.fillStyle=entry.textColor;ctx.strokeText(entry.label,96,34,184);ctx.fillText(entry.label,96,34,184);
+       const tex=new T.CanvasTexture(image);tex.colorSpace=T.SRGBColorSpace;textures['probability:'+labelKey]=tex;
+       const m=new T.SpriteMaterial({map:tex,transparent:true,depthWrite:false,depthTest:probabilityMode!=='units'});materials.add(m);labelMaterials.set(labelKey,m);
       }
-      const sprite=new T.Sprite(labelMaterials.get(entry.label));sprite.position.copy(point(c,.5,.5,.04));sprite.center.set(.5,0);sprite.scale.set(1.4,1.4/3,1);probabilityLabels.add(sprite);
+      const sprite=new T.Sprite(labelMaterials.get(labelKey));sprite.position.copy(point(c,.5,.5,.04));sprite.center.set(.5,0);sprite.scale.set(1.4,1.4/3,1);if(probabilityMode==='units')sprite.renderOrder=20;probabilityLabels.add(sprite);
      }
+     return true;
+    }
+    function probabilityControls(){
+     const active=probabilityMode!=='off'&&hasProbability;
+     probabilityLayer.visible=active;probabilityLayer.userData.mode=probabilityMode;
+     const button=$('terrain3dProbability');button.disabled=busy||!hasProbability;button.textContent=_t('视图:')+_t(modes.names[probabilityMode]);button.dataset.mode=probabilityMode;button.setAttribute('aria-pressed',String(active));button.title=hasProbability?_t('左键或空格顺序切换，右键或 Shift+空格反向切换'):_t('本图未计算概率');
+     const p=probabilityContext(),pending=probabilityMode==='buff'?p?.buff?.status.pending:probabilityMode==='units'?p?.units?.status.pending:false;$('terrain3dProbabilityNote').hidden=!pending;$('terrain3dProbabilityNote').textContent=pending?_t('正在计算 Buff期望…'):'';
+    }
+    function refreshProbability(){
+     if(disposed||probabilityMode==='off')return;
+     const changed=buildProbability();probabilityControls();if(changed)requestDraw();
     }
     function line(points,color,{group=marks,dashed=false,depthTest=true,opacity=1}={}){
      const g=geometry(new T.BufferGeometry().setFromPoints(points)),params={color,transparent:true,opacity,depthTest,depthWrite:false};
@@ -246,20 +276,16 @@
      if(pattern==='hatch')for(let t=-.6;t<=.61;t+=.25){const lo=Math.max(.05,t+.05),hi=Math.min(.95,t+.95),ps=[];for(let k=0;k<=8;k++){const u=lo+(hi-lo)*k/8;ps.push(point(c,u,u-t,.034));}line(ps,color,{opacity:.8});}
      if(pattern==='dots')for(const u of [.25,.5,.75])for(const v of [.25,.5,.75])line([point(c,u-.025,v,.034),point(c,u+.025,v,.034)],color,{opacity:.9});
     }
-    function label(c,text,selectedLabel=false){const node=document.createElement('span');node.className='terrain3d-label'+(selectedLabel?' selected':'');node.textContent=text;node.hidden=true;$('terrain3dLabels').append(node);labels.push({node,position:point(c,.5,.5,after&&selectedLabel?.62:.25)});}
+    function label(c,text,selectedLabel=false){const node=document.createElement('span');node.className='terrain3d-label'+(selectedLabel?' selected':'');node.textContent=text;node.hidden=true;$('terrain3dLabels').append(node);const offset=selectedLabel&&probabilityMode!=='off'?1:after&&selectedLabel?.62:.25;labels.push({node,position:point(c,.5,.5,offset)});}
     function update(){
      if(disposed)return;cleanupGroup(marks);cleanupGroup(links);labels=[];$('terrain3dLabels').replaceChildren();
      if(!selected.canPlace)after=false;decor.visible=$('terrain3dDecorations').checked;
      const fine=$('terrain3dRelief').checked&&reliefAssets.size>0;relief.visible=fine;coarse.visible=!fine;
-     if(probabilityOn&&hasProbability)buildProbability();probabilityLayer.visible=probabilityOn&&hasProbability;
-     $('terrain3dProbability').disabled=busy||!hasProbability;$('terrain3dProbability').textContent=_t('概率:')+(probabilityLayer.visible?_t('开'):_t('关'));$('terrain3dProbability').setAttribute('aria-pressed',String(probabilityLayer.visible));
-     $('terrain3dProbability').title=hasProbability?_t('显示概率和倍率'):_t('本图未计算概率');
-     $('terrain3dProbabilityNote').hidden=true;
-     $('terrain3dProbabilityNote').textContent='';
+     buildProbability();probabilityControls();
      const enabled=data.metadata.predictionEnabled,show=$('terrain3dMarkers').checked;
      const rel=relationships(selected,lookup);
-     if(show&&enabled){
-      for(const c of cells){const style=riskStyles[riskCategory(c)];if(style)mark(c,style.color,style.alpha,style.pattern);else if(c.higher.length)mark(c,0x60b7f0,.31);}
+     if(show&&(enabled||data.metadata.relationsEnabled)){
+      for(const c of cells){const style=enabled&&riskStyles[riskCategory(c)];if(style)mark(c,style.color,style.alpha,style.pattern);else if(c.higher.length)mark(c,0x60b7f0,.31);}
       for(const c of rel.higher)mark(c,0x79e0b7,.42);
       if(rel.affected.length)mark(selected,0x79e0b7,.38);
       for(const c of [...rel.higher,...rel.affected]){const a=point(selected,.5,.5,.08),b=point(c,.5,.5,.08),mid=a.clone().lerp(b,.5);mid.y=Math.max(a.y,b.y)+.65;line(new T.QuadraticBezierCurve3(a,mid,b).getPoints(28),0x92e8cd,{group:links,dashed:true,depthTest:false,opacity:.8});}
@@ -272,11 +298,11 @@
      $('terrain3dTitle').textContent=_t`3D 地形 · (${selected.x}, ${selected.y})`;
      $('terrain3dCrate').disabled=busy||!selected.canPlace;$('terrain3dCrate').setAttribute('aria-pressed',String(after));$('terrain3dCrate').textContent=after?_t('恢复放箱前'):_t('预览放箱后');
      $('terrain3dCrate').title=data.metadata.demonstration==='single'?(selected.canPlace?_t('只比较放箱前后的地面类型，不代表已计算随机落点概率'):_t('此格地面已禁行，请选择 Rough 例外或普通可通行格')):selected.canPlace?_t('预览放箱后'):_t('此格无法预览放箱');
-     $('terrain3dMarkers').disabled=!enabled;
+     $('terrain3dMarkers').disabled=!enabled&&!data.metadata.relationsEnabled;
      $('terrain3dDetail').textContent=_t`(${selected.x}, ${selected.y}) · 高度 ${selected.level} · ${description(selected,data.metadata,after)}${selected.occupied?_t(' · 当前有对象占用'):''}`;
      $('terrain3dRelations').replaceChildren();
      const refs=selected.higher.length?selected.higher:selected.affected;
-     const prefix=document.createElement('span');prefix.textContent=!enabled?'':selected.higher.length?_t('相关高格：'):selected.affected.length?_t('受此高格影响：'):'';$('terrain3dRelations').append(prefix);
+     const prefix=document.createElement('span');prefix.textContent=selected.higher.length?_t('相关高格：'):selected.affected.length?_t('受此高格影响：'):'';$('terrain3dRelations').append(prefix);
      for(const[x,y,l]of refs){const button=document.createElement('button');button.textContent=`(${x}, ${y}) L${l}`;button.disabled=!lookup.has(`${x},${y}`);button.title=button.disabled?_t('位于当前局部范围外，居中或扩大范围后查看'):_t('选中此格');button.onclick=()=>choose(lookup.get(`${x},${y}`));$('terrain3dRelations').append(button);}
      $('terrain3dSource').hidden=true;$('terrain3dSource').textContent='';
      const warnings=data.metadata.missing;
@@ -310,10 +336,10 @@
     listen('wheel',e=>{e.preventDefault();zoom=Math.max(.45,Math.min(4,zoom*Math.exp(-e.deltaY*.001)));requestDraw();},{passive:false});
     listen('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){yaw+=(e.key==='ArrowLeft'?-1:1)*Math.PI/12;e.preventDefault();requestDraw();}else if(['ArrowUp','ArrowDown'].includes(e.key)){pitch=Math.max(.16,Math.min(1.45,pitch+(e.key==='ArrowUp'?.1:-.1)));e.preventDefault();requestDraw();}});
     observer=new ResizeObserver(resize);observer.observe(stage);resize();
-    return {dispose,update,reset,rotate(delta){yaw+=delta;requestDraw();},toggleCrate(){if(selected.canPlace){after=!after;update();}},select(c){if(lookup.has(key(c))&&key(c)!==key(selected))choose(lookup.get(key(c)),false);}};
+    return {dispose,update,refreshProbability,reset,rotate(delta){yaw+=delta;requestDraw();},toggleCrate(){if(selected.canPlace){after=!after;update();}},select(c){if(lookup.has(key(c))&&key(c)!==key(selected))choose(lookup.get(key(c)),false);}};
    }catch(error){dispose();throw error;}
   }
-  return {open:show,select(c){if(dialog.open)view?.select(c);},close(){if(dialog.open)dialog.close();},dispose:close};
+  return {open:show,refresh(){if(dialog.open)view?.refreshProbability();},select(c){if(dialog.open)view?.select(c);},close(){if(dialog.open)dialog.close();},dispose:close};
  }
  const api={create,height,decorationSurface,bridgeFold,viewHalfSize,relationships,riskCategory,description,probabilityCells};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.CrateTerrain3D=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

@@ -7,7 +7,7 @@
  const frame=c=>c.overlayData+(high.has(c.overlayName)&&[0,9].includes(c.overlayData)?variation[(c.x&3)|((c.y&3)<<2)]:0),key=c=>`${c.x},${c.y}`;
  let library=null;
  const catalog=()=>library||(library=root.CrateMapPlatform.readJSON('live/materials.json.gz?v='+root.CrateWebConfig.liveVersion).then(v=>{if(v.version!==1)throw Error('Unsupported shared materials');return v;}).catch(e=>{library=null;throw e;}));
- async function create(report,{signal}={}){
+ async function create(report,{signal,preview=false}={}){
   const lib=await catalog();signal?.throwIfAborted();const manualSource={version:report.metadata.version,map:{MAP:{THEATER:report.metadata.theater}}};await root.CrateSimulationAssets.prepare(manualSource);
   const r=report.rendering,scope=lib.scopes[report.metadata.version+'/'+report.metadata.theater]||{tiles:{},sprites:{},objects:{}},origin=r.origin,lookup=new Map(report.cells.map(c=>[key(c),c])),palette=A().palettes[report.metadata.theater]||A().palettes.TEMPERATE;
   const data={size:[r.width,r.height],assets:lib.assets.slice(),atlases:lib.atlases,tiles:{},terrainVariants:scope.terrainVariants||{},sprites:{},objects:[]},images=new Array(lib.atlases.length),needed=new Set(),events=[],generated=new Map(),missingBridges=new Set();
@@ -57,16 +57,29 @@
    if((refs===undefined||voxel(meta))&&meta){const parts=stockObjects.get(meta);if(parts!==undefined)refs=parts.originalRefs||parts.map(p=>{const key='stock:'+p.id;if(!generated.has(key)){const page=images.length;images.push(p.image);const id=data.assets.length;data.assets.push([page,0,0,p.image.width,p.image.height]);generated.set(key,[id,0,0]);}return [generated.get(key)[0],p.x,p.y,p.shadow?1:0];});}
    if(refs!==undefined){stats.originalObjects++;if(meta.category==='INFANTRY'){[dx,dy]=({2:[15,0],3:[-15,0],4:[0,7]})[subcell]||[0,0];depth+=dy/15;}if(meta.category==='STRUCTURES')depth+=w+h-2;}
    else{stats.fallbackObjects++;missing.add('object:'+(meta?.type||kind));refs=[symbol(kind,Math.min(1.8,Math.max(1,(w+h)/3)))];dx=15*(w-h);dy=7.5*(w+h-2);depth+=w+h-2;}
+   if(meta?.category==='STRUCTURES'&&JSON.parse(meta.key)[3]===0)depth=x+y+.2;
    data.objects.push([x,y,level,dx,dy,(refs||[]).filter(ref=>!ref[3]).map(ref=>ref.slice(0,3))]);const cx=30*(x-y)+origin[0]+dx,cy=15*(x+y-level)+origin[1]+dy;for(const ref of refs||[])command(ref,cx,cy,ref[3]?Infinity:depth,x,true,ref[3]?{shadow:true,level}:{solid:true,stencil:Math.min(127,level+2)});
   }
   const pages=[...needed];let next=0;await Promise.all(Array.from({length:Math.min(4,pages.length)},async()=>{while(next<pages.length){signal?.throwIfAborted();const n=pages[next++];images[n]=await O().page(new URL('art/'+lib.atlases[n].file,document.baseURI).href,lib.atlases[n]);}}));signal?.throwIfAborted();stats.atlasPages=pages.length;
   stats.atlasPages+=stockObjects.pages;
   events.sort((a,b)=>a.depth-b.depth||a.tie-b.tie);const scene={data,images,commands:events,layers:[events.flatMap((c,i)=>c.objects?[]:[i]),events.map((_,i)=>i)],report,missingBridges,hybrid:stats};
-  scene.paint=root.CrateLivePainter.create(scene);O().register(report,scene);const im=O().makeSource(scene,0),objectImage=O().makeSource(scene,1);scene.im=im;scene.objectImage=objectImage;r.hybrid={...stats,missing:[...missing]};
-  return {im,objectImage};
+  scene.paint=root.CrateLivePainter.create(scene);scene.thumbnail=(layer,crop,size)=>root.CrateLiveRaster?.thumbnail(scene,layer,crop,size);scene.export=(...args)=>root.CrateLiveRaster?.export(scene,...args);O().register(report,scene);const im=O().makeSource(scene,0),objectImage=O().makeSource(scene,1);scene.im=im;scene.objectImage=objectImage;r.hybrid={...stats,missing:[...missing]};
+  // The first overview used to perform a complete pixel replay inside draw().
+  // Warm it off-thread before committing the report, using the same resolution.
+  if(!preview&&root.CrateLiveRaster){
+   const scale=Math.min(1,(root.matchMedia?.('(pointer:coarse)').matches?1280:2048)/Math.max(r.width,r.height));
+   try{
+    const overview=await root.CrateLiveRaster.overview(scene,Math.ceil(r.width*scale),Math.ceil(r.height*scale),scale);
+    if(signal?.aborted){overview?.ground.close();overview?.objects.close();signal.throwIfAborted();}
+    if(overview){im.setOverview(overview.ground);objectImage.setOverview(overview.objects);}
+   }finally{root.CrateLiveRaster.release(scene);}
+  }
+  return {im,objectImage,renderTile:box=>root.CrateLiveRaster?.tile(scene,box),release:()=>root.CrateLiveRaster?.release(scene)};
  }
  async function patch(report,selected,options){
-  const scene=O().get(report),result=await root.CrateToyOriginal3D.patch(report,selected,options);
+  const scene=O().get(report,{optional:true});
+  if(!scene)return root.CrateToyTerrain3D.patch(report,selected,options);
+  const result=await root.CrateToyOriginal3D.patch(report,selected,options);
   if(scene.missingBridges.size){const simple=root.CrateToyTerrain3D.patch(report,selected,options),lookup=new Map(simple.cells.map(c=>[key(c),c]));Object.assign(result.textures,simple.textures);
    for(const c of result.cells){if(!c.bridge)continue;const owner=c.bridge.kind==='high'?c.bridge.owner:[c.x,c.y];if(scene.missingBridges.has(owner.join(',')))c.decorations.push(...(lookup.get(key(c))?.decorations||[]).filter(d=>d.bridge));}
   }
